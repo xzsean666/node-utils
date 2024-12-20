@@ -1,4 +1,4 @@
-import fs from 'fs';
+const fs = require('fs');
 
 function bumpVersion() {
   // 使用不同的变量名，避免使用 package 这个保留字

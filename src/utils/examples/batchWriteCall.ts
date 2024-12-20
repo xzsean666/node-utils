@@ -1,5 +1,7 @@
 import { EthersUtils } from "../ethersUtils";
-import { ethers } from "ethers";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 // ERC20代币的基础ABI
 const ERC20_ABI = [
@@ -83,8 +85,7 @@ async function batchERC20Transfer() {
     const ethersUtils = new EthersUtils(
       "https://bsc-testnet-rpc.publicnode.com", // 替换为你的RPC URL
       {
-        privateKey:
-          "0xa010561d0ee36587adb4c9d81f4d19d84dc8b2246a9b7b8fd0665d1f8b15d844",
+        privateKey: process.env.TEST_PRIVATE_KEY,
         batchCallAddress: "0x6d8B018833495b79805171e716030b807e08090E", // 替换为你的BatchCall合约地址
       }
     );

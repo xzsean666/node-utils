@@ -1,9 +1,18 @@
 #!/bin/bash
 
-# 使用 which 命令动态获取可执行文件路径
-export PATH="$(dirname $(which node)):$PATH"
+# 检查 node 命令是否存在
+if ! command -v node &> /dev/null; then
+    echo "Error: node is not installed or not in PATH"
+    exit 1
+fi
 
-# 使用环境变量中的命令
+# 设置 PATH
+NODE_PATH=$(command -v node)
+if [ -n "$NODE_PATH" ]; then
+    export PATH="$(dirname "$NODE_PATH"):$PATH"
+fi
+
+# 执行命令
 node scripts/version-bump.js && \
 yarn build && \
 npm publish || exit 1

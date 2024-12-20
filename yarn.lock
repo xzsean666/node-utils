@@ -2460,6 +2460,26 @@ node-utils-sean@^1.0.8:
     typeorm "^0.3.20"
     typescript "^5.7.2"
 
+node-utils-sean@^1.0.9:
+  version "1.0.9"
+  resolved "https://registry.yarnpkg.com/node-utils-sean/-/node-utils-sean-1.0.9.tgz#be013e54ece67e14a00fc6a19ac2cf8d0148c397"
+  integrity sha512-o5l+JeH5QrlBewbqa+EMXFAimJu8GbzMuCpTDgX8CZ8BuOS861KkWa01h1VfRffl1/DbVNdI1hcTdwMZqUdcmg==
+  dependencies:
+    "@metamask/detect-provider" "^2.0.0"
+    "@types/jest" "^29.5.14"
+    "@uniswap/sdk-core" "^6.1.1"
+    "@uniswap/v3-sdk" "^3.19.0"
+    axios "^1.7.8"
+    dotenv "^16.4.7"
+    ethers "^6.13.4"
+    husky "^9.1.7"
+    jest "^29.7.0"
+    node-utils-sean "^1.0.8"
+    pg "^8.13.1"
+    ts-jest "^29.2.5"
+    typeorm "^0.3.20"
+    typescript "^5.7.2"
+
 normalize-path@^3.0.0, normalize-path@~3.0.0:
   version "3.0.0"
   resolved "https://registry.npmjs.org/normalize-path/-/normalize-path-3.0.0.tgz#0dcd69ff23a1c9b11fd0978316644a0388216a65"

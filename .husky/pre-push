@@ -10,10 +10,10 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # 加载 nvm bash_completion
 
 # 使用指定的 node 版本
-nvm use v20.12.1
+nvm use v20.12.2
 
 # 直接设置 NODE 路径
-export PATH="$NVM_DIR/versions/node/v20.12.1/bin:$PATH"
+export PATH="$NVM_DIR/versions/node/v20.12.2/bin:$PATH"
 
 # 执行命令
 node scripts/version-bump.js && \

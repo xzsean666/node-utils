@@ -9,22 +9,11 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # 加载 nvm
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # 加载 nvm bash_completion
 
-# 使用 nvm 确保使用正确的 node 版本
-nvm use node || nvm use default || nvm use --lts
+# 使用指定的 node 版本
+nvm use v20.12.2
 
-# 检查 node 命令是否存在
-if ! command -v node &> /dev/null; then
-    echo "Error: node is not installed or not in PATH"
-    # 恢复 PREFIX
-    export PREFIX=$OLD_PREFIX
-    exit 1
-fi
-
-# 设置 PATH
-NODE_PATH=$(command -v node)
-if [ -n "$NODE_PATH" ]; then
-    export PATH="$(dirname "$NODE_PATH"):$PATH"
-fi
+# 直接设置 NODE 路径
+export PATH="$NVM_DIR/versions/node/v20.12.2/bin:$PATH"
 
 # 执行命令
 node scripts/version-bump.js && \

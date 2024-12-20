@@ -1,15 +1,7 @@
 #!/usr/bin/env sh
 . "$(dirname -- "$0")/_/husky.sh"
 
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # 加载 nvm
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
-
-# 运行版本更新脚本
-/usr/bin/node scripts/version-bump.js
-
-# 构建项目
+PATH="./node_modules/.bin:$PATH"
+node scripts/version-bump.js
 yarn build
-
-# 发布到 npm（使用普通的 npm publish 即可）
 npm publish || exit 1

@@ -2433,6 +2433,13 @@ node-utils-sean@^1.0.5:
   dependencies:
     node-utils-sean "^1.0.4"
 
+node-utils-sean@^1.0.6:
+  version "1.0.6"
+  resolved "https://registry.npmjs.org/node-utils-sean/-/node-utils-sean-1.0.6.tgz#382433ba7231fa9011a77b944383cbfe1ae0aaa6"
+  integrity sha512-N36J4WnawkkGeeetmS92++1Ab4Bwyq+MJpP7U51eOenwStt0BOYPqbJmQFMDddJ7CAiT6u1zZmqsGrUYGw6X2A==
+  dependencies:
+    node-utils-sean "^1.0.5"
+
 normalize-path@^3.0.0, normalize-path@~3.0.0:
   version "3.0.0"
   resolved "https://registry.npmjs.org/normalize-path/-/normalize-path-3.0.0.tgz#0dcd69ff23a1c9b11fd0978316644a0388216a65"

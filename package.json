@@ -1,11 +1,24 @@
 {
   "name": "node-utils-sean",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "main": "index.js",
   "repository": "https://github.com/xzsean666/node-utils.git",
   "author": "sean-astrid <xz_sean@qq.com>",
   "license": "MIT",
-  "devDependencies": {
+  "devDependencies": {},
+  "scripts": {
+    "clean": "rm -rf dist",
+    "clean-win": "if exist dist rmdir /s /q dist",
+    "build": "yarn clean && tsc",
+    "start": "yarn clean && tsc && node dist/index.js",
+    "dev": "tsc --watch",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "prepare": "husky install",
+    "publish-version": "node scripts/version-bump.js && yarn build && npm publish"
+  },
+  "dependencies": {
+    "node-utils-sean": "^1.0.6",
     "@metamask/detect-provider": "^2.0.0",
     "@types/jest": "^29.5.14",
     "@uniswap/sdk-core": "^6.1.1",
@@ -20,21 +33,6 @@
     "typeorm": "^0.3.20",
     "typescript": "^5.7.2"
   },
-  "scripts": {
-    "clean": "rm -rf dist",
-    "clean-win": "if exist dist rmdir /s /q dist",
-    "build": "yarn clean && tsc",
-    "start": "yarn clean && tsc && node dist/index.js",
-    "dev": "tsc --watch",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "prepare": "husky install",
-    "publish-version": "node scripts/version-bump.js && yarn build && npm publish"
-  },
-  "dependencies": {
-    "node-utils-sean": "^1.0.5"
-  },
-  "type": "module",
   "ts-node": {
     "esm": true,
     "experimentalSpecifierResolution": "node"

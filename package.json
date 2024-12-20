@@ -20,6 +20,7 @@
     "dev": "tsc --watch",
     "test": "jest",
     "test:watch": "jest --watch",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "publish-version": "node scripts/version-bump.js && yarn build && npm publish"
   }
 }

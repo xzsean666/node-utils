@@ -1,6 +1,4 @@
-#!/usr/bin/env sh
+#!/bin/bash
 
-export PATH="/usr/local/bin:$PATH"
-export NVM_DIR="$HOME/.nvm"
-
-/usr/local/bin/yarn publish-version || exit 1
+# 使用 nvm 中的 yarn 路径
+/home/sean/.nvm/versions/node/v20.12.1/bin/yarn publish-version || exit 1

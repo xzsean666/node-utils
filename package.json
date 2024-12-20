@@ -1,6 +1,6 @@
 {
   "name": "node-utils-sean",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "main": "index.js",
   "repository": "https://github.com/xzsean666/node-utils.git",
   "author": "sean-astrid <xz_sean@qq.com>",
@@ -32,7 +32,11 @@
     "publish-version": "node scripts/version-bump.js && yarn build && npm publish"
   },
   "dependencies": {
-    "node-utils-sean": "^1.0.4"
+    "node-utils-sean": "^1.0.5"
   },
-  "type": "module"
+  "type": "module",
+  "ts-node": {
+    "esm": true,
+    "experimentalSpecifierResolution": "node"
+  }
 }

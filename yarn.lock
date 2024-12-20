@@ -2426,6 +2426,13 @@ node-utils-sean@^1.0.4:
   resolved "https://registry.npmjs.org/node-utils-sean/-/node-utils-sean-1.0.4.tgz#c03b3f809a6d02f59edc81447a0dc2bdce806f6a"
   integrity sha512-T+/ZJihyCeslAheQuCsPxWl1YX5J661Jo49mhFV86o7WaaLcUE6Siqa91idzUTltQ8vfQy11vNsS3UULXaeP0Q==
 
+node-utils-sean@^1.0.5:
+  version "1.0.5"
+  resolved "https://registry.npmjs.org/node-utils-sean/-/node-utils-sean-1.0.5.tgz#ffc5ed36315677a02ca038c3f64f7ce5d3bbe87a"
+  integrity sha512-KY+xvRR5mW0l9MFwdYAiBozK+jM/5Yol1jWuBLJVWn6gX/pU6v33L9CRHcuQVGwmoFRTPYSQvJGA8iKNqGvPug==
+  dependencies:
+    node-utils-sean "^1.0.4"
+
 normalize-path@^3.0.0, normalize-path@~3.0.0:
   version "3.0.0"
   resolved "https://registry.npmjs.org/normalize-path/-/normalize-path-3.0.0.tgz#0dcd69ff23a1c9b11fd0978316644a0388216a65"

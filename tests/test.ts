@@ -1,5 +1,5 @@
-import { GateioService } from "node-utils-sean/dist/src/utils/gateioService.js";
-
+import { GateioService } from "node-utils-sean/dist/src/utils/gateioService";
+// import { GateioService } from "node-utils-sean";
 const gateioService = new GateioService();
 
 async function main() {

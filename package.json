@@ -1,6 +1,6 @@
 {
   "name": "node-utils-sean",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "main": "src/index.js",
   "repository": "https://github.com/xzsean666/node-utils.git",
   "author": "sean-astrid <xz_sean@qq.com>",
@@ -18,7 +18,7 @@
     "publish-version": "node scripts/version-bump.js && yarn build && npm publish"
   },
   "dependencies": {
-    "node-utils-sean": "^1.0.12",
+    "node-utils-sean": "^1.0.17",
     "@metamask/detect-provider": "^2.0.0",
     "@types/jest": "^29.5.14",
     "@uniswap/sdk-core": "^6.1.1",

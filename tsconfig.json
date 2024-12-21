@@ -13,7 +13,8 @@
     "emitDecoratorMetadata": true,
     "strictNullChecks": true,
     "strictPropertyInitialization": false,
-    "noImplicitAny": false
+    "noImplicitAny": false,
+    "declaration": true
   },
   "include": ["src/**/*", "tests/**/*"],
   "exclude": ["node_modules"]

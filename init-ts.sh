@@ -14,8 +14,9 @@ yarn add typescript jest @types/jest ts-jest -D
 cat > tsconfig.json << EOL
 {
   "compilerOptions": {
-    "target": "es6",
-    "module": "commonjs",
+    "target": "ESNext",
+    "module": "CommonJS",
+    "moduleResolution": "node",
     "outDir": "./dist",
     "rootDir": "./",
     "strict": true,
@@ -26,11 +27,13 @@ cat > tsconfig.json << EOL
     "emitDecoratorMetadata": true,
     "strictNullChecks": true,
     "strictPropertyInitialization": false,
-    "noImplicitAny": false
+    "noImplicitAny": false,
+    "declaration": true
   },
   "include": ["src/**/*", "tests/**/*"],
   "exclude": ["node_modules"]
 }
+
 EOL
 
 # 创建 jest.config.js
@@ -60,15 +63,23 @@ describe('sum function', () => {
 });
 EOL
 
-# 更新 package.json 中的脚本
-jq '.scripts = {
-  "clean": "rm -rf dist",
-  "clean-win": "if exist dist rmdir /s /q dist",
-  "build": "yarn clean && tsc",
-  "start": "yarn clean && tsc && node dist/index.js",
-  "dev": "tsc --watch",
-  "test": "jest",
-  "test:watch": "jest --watch"
+# 更新 package.json 中的脚本和配置
+jq '. + {
+  "scripts": {
+    "clean": "rm -rf dist",
+    "clean-win": "if exist dist rmdir /s /q dist",
+    "build": "yarn clean && tsc",
+    "start": "yarn clean && tsc && node dist/index.js",
+    "dev": "tsc --watch",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "type": "commonjs",
+  "types": "dist/src/index.d.ts",
+  "files": ["dist"],
+  "publishConfig": {
+    "directory": "dist"
+  }
 }' package.json > temp.json && mv temp.json package.json
 
 # 创建 .gitignore
@@ -106,6 +117,8 @@ cat > README.md << EOL
 └── package.json    # 项目配置文件
 \`\`\`
 EOL
+
+
 
 # 使脚本可执行
 chmod +x init-ts-with-jest.sh

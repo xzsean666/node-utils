@@ -9,7 +9,7 @@ interface MinioConfig {
 }
 
 export class MinioHelper {
-  private client: Client;
+  public client: Client;
 
   constructor(config: MinioConfig) {
     this.client = new Client({

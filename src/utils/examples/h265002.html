@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>播放H.265视频</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+    <video id="video" controls></video>
+    <button id="playButton">播放视频</button> <!-- 添加一个播放按钮 -->
+    <script>
+        var m3u8Content = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:11\n#EXT-X-MEDIA-SEQUENCE:1\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:6,\nhttps://d3t8htuusop63e.cloudfront.net/videos%2Fssssss%2FHLS%2Fsss_36020241101T072232_00001.ts?Expires=1730544992&Key-Pair-Id=K1PQUIPLGSMEYF&Signature=Glb6whEIzrboc0CzAkc00FG1~7VzhQam1bqmm0563mVMfzsE3lWCGqeFmSgsoWbNm4hIphEPs7I8UexAIsLRFejsiP3h3nrsxj4otD3pteR~utu~CpX2tV9mKbCp-TG2YZod9T4V3dPbnCr82HlcUI8xKUfSj-Qlr5FuTm5t9bod75zuDgHimtshzzzgJk3ujhTtvtCzLMLDEv4XgJMBet1shkWmYUdKPkOHjdhLRD~eOQWX-Kq2nxks4TKt5zjOfnKMIEVe-oHNCre1SFAoljhTn7JMR7nKKodndNN7dVNjyPO25wpLc4F8eZp58Tbw14oPdjkRaRZE40llV61Zgw__\n#EXT-X-ENDLIST\n"
+        var blob = new Blob([m3u8Content], { type: 'application/x-mpegURL' });
+        var url = URL.createObjectURL(blob);
+
+        if (Hls.isSupported()) {
+            var video = document.getElementById('video');
+            var hls = new Hls();
+            hls.loadSource(url);
+            hls.attachMedia(video);
+
+            document.getElementById('playButton').addEventListener('click', function() {
+                hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                    video.play();
+                });
+            });
+        }
+        else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = url;
+            document.getElementById('playButton').addEventListener('click', function() {
+                video.addEventListener('loadedmetadata', function() {
+                    video.play();
+                });
+            });
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>M3U8 视频播放器</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #video {
+            width: 100%;
+            margin-bottom: 20px;
+        }
+        #urlInput {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        #playButton {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        #playButton:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>M3U8 视频播放器</h1>
+        <input type="text" id="urlInput" placeholder="请输入 M3U8 链接">
+        <button id="playButton">播放</button>
+        <video id="video" controls></video>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const urlInput = document.getElementById('urlInput');
+        const playButton = document.getElementById('playButton');
+        let hls = null;
+
+        playButton.addEventListener('click', function() {
+            const url = urlInput.value.trim();
+            if (!url) {
+                alert('请输入有效的 M3U8 链接');
+                return;
+            }
+
+            if (hls) {
+                hls.destroy();
+            }
+
+            if (Hls.isSupported()) {
+                hls = new Hls();
+                hls.loadSource(url);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                    video.play();
+                });
+                hls.on(Hls.Events.ERROR, function(event, data) {
+                    console.error('HLS 错误:', data);
+                    if (data.fatal) {
+                        alert('加载视频失败，请检查链接是否正确');
+                    }
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // iOS Safari 支持原生 HLS
+                video.src = url;
+                video.addEventListener('loadedmetadata', function() {
+                    video.play();
+                });
+            } else {
+                alert('您的浏览器不支持 HLS 播放');
+            }
+        });
+    </script>
+</body>
+</html>

@@ -9,7 +9,7 @@ declare global {
 
 export class EthersUtils {
   web3: ethers.JsonRpcProvider | ethers.BrowserProvider;
-  private readonly NODE_PROVIDER?: string;
+  NODE_PROVIDER?: string;
   private privateKey?: string;
   account?: string;
   config?: any;
@@ -135,6 +135,9 @@ export class EthersUtils {
   // 设置私钥
   setPrivateKey(privateKey: string) {
     this.privateKey = privateKey;
+  }
+  setNODE_PROVIDER(NODE_PROVIDER: string) {
+    this.NODE_PROVIDER = NODE_PROVIDER;
   }
 
   async sendTransaction(

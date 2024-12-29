@@ -1,4 +1,4 @@
-import { ethers } from "ethers";
+import { ethers, HDNodeWallet } from "ethers";
 import detectEthereumProvider from "@metamask/detect-provider";
 
 declare global {
@@ -10,7 +10,7 @@ declare global {
 export class EthersUtils {
   web3: ethers.JsonRpcProvider | ethers.BrowserProvider;
   private readonly NODE_PROVIDER?: string;
-  private readonly privateKey?: string;
+  private privateKey?: string;
   account?: string;
   config?: any;
   batchCallAddress?: string;
@@ -99,6 +99,44 @@ export class EthersUtils {
   toBytes32String(text: string) {
     return ethers.zeroPadValue(ethers.toUtf8Bytes(text), 32);
   }
+  async deriveWallets(privateKey: string, index: number = 0) {
+    if (!privateKey) {
+      throw new Error("私钥不能为空");
+    }
+
+    try {
+      // 创建钱包实例
+      const wallet = new ethers.Wallet(privateKey);
+
+      // 从钱包创建 HD 节点
+      const hdNode = ethers.HDNodeWallet.fromSeed(wallet.privateKey);
+
+      const path = `m/44'/60'/0'/0/${index}`;
+      const derivedWallet = hdNode.derivePath(path);
+
+      if (!(derivedWallet instanceof HDNodeWallet)) {
+        throw new Error("钱包派生失败");
+      }
+
+      return {
+        address: derivedWallet.address,
+        privateKey: derivedWallet.privateKey,
+        path,
+      };
+    } catch (error: any) {
+      throw new Error(`派生钱包失败: ${error.message}`);
+    }
+  }
+  async setDeriveWallets(index: number = 0) {
+    const wallet = await this.deriveWallets(this.privateKey!, index);
+    this.privateKey = wallet.privateKey;
+    this.account = wallet.address;
+  }
+  // 设置私钥
+  setPrivateKey(privateKey: string) {
+    this.privateKey = privateKey;
+  }
+
   async sendTransaction(
     to: string,
     data?: string,

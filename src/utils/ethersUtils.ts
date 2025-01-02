@@ -68,6 +68,60 @@ export class EthersUtils {
       throw new Error(`获取存储槽数据失败: ${error.message}`);
     }
   }
+  async cancelPendingTransaction(
+    nonce: number,
+    gasPriceMultiplierMAX: number = 10,
+    step: number = 0.5
+  ) {
+    if (!this.web3) {
+      throw new Error("未找到有效的Provider");
+    }
+
+    let multiplier = 1;
+    let lastError;
+
+    while (multiplier <= gasPriceMultiplierMAX) {
+      try {
+        // 获取当前gas价格
+        const currentGasPrice = await this.web3.getFeeData();
+        const newGasPrice = BigInt(
+          Math.floor(Number(currentGasPrice.gasPrice) * multiplier)
+        );
+
+        console.log(`尝试取消交易，当前gas倍数: ${multiplier}x`);
+
+        // 构建空交易
+        const tx = {
+          to: await this.getAccounts(), // 发送给自己
+          value: 0,
+          nonce: nonce,
+          gasLimit: 21000, // 基本转账的gas限制
+          gasPrice: newGasPrice,
+        };
+
+        // 发送交易
+        let signer;
+        if (this.privateKey) {
+          signer = new ethers.Wallet(this.privateKey, this.web3);
+        } else {
+          signer = await this.web3.getSigner();
+        }
+
+        const transaction = await signer.sendTransaction(tx);
+        console.log("取消交易已发送,Hash:", transaction.hash);
+
+        return transaction;
+      } catch (error: any) {
+        lastError = error;
+        console.log(`使用 ${multiplier}x 倍数取消失败，尝试更高的gas价格`);
+        multiplier += step;
+      }
+    }
+
+    throw new Error(
+      `取消Pending交易失败 (尝试至 ${gasPriceMultiplierMAX}x): ${lastError?.message}`
+    );
+  }
 
   async getAccounts() {
     if (this.privateKey && this.web3 instanceof ethers.JsonRpcProvider) {

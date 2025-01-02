@@ -110,10 +110,25 @@ export class KVDatabase {
     });
   }
 
-  async get<T = any>(key: string): Promise<T | null> {
+  async get<T = any>(key: string, expire?: number): Promise<T | null> {
     await this.ensureInitialized();
     const record = await this.db.findOne({ where: { key } });
-    return record ? record.value : null;
+
+    if (!record) return null;
+
+    // 如果设置了过期时间，检查是否过期
+    if (expire !== undefined) {
+      const currentTime = Math.floor(Date.now() / 1000);
+      const createdTime = Math.floor(record.created_at.getTime() / 1000);
+
+      if (currentTime - createdTime > expire) {
+        // 可选：删除过期数据
+        await this.delete(key);
+        return null;
+      }
+    }
+
+    return record.value;
   }
 
   async delete(key: string): Promise<boolean> {

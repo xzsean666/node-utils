@@ -1,6 +1,6 @@
 import { EthersUtils } from "../ethersUtils";
 
-import { ERC20_ABI } from "../abis/ERC20";
+import { IERC20 } from "../abis";
 
 const minatourl =
   "https://soneium-minato.rpc.scs.startale.com?apikey=iFYLiG7ROGg2KSst6bS7gRBIPV7rNtei";
@@ -27,7 +27,7 @@ async function main() {
     const calls = await Promise.all(
       tokens.map(async (tokenAddress) => {
         return await ethersUtils.encodeDataByABI(
-          ERC20_ABI,
+          IERC20,
           "balanceOf",
           [userAddress],
           tokenAddress
@@ -37,7 +37,7 @@ async function main() {
     const calls1 = await Promise.all(
       tokens.map(async (tokenAddress) => {
         return await ethersUtils.encodeDataByABI(
-          ERC20_ABI,
+          IERC20,
           "totalSupply",
           [],
           tokenAddress

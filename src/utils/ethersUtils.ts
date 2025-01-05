@@ -14,12 +14,13 @@ export class EthersUtils {
   account?: string;
   config?: any;
   batchCallAddress?: string;
+  ethers: typeof ethers;
   constructor(NODE_PROVIDER?: string, config?: any) {
     this.NODE_PROVIDER = NODE_PROVIDER;
     this.privateKey = config?.privateKey;
     this.config = config;
     this.batchCallAddress = config?.batchCallAddress;
-
+    this.ethers = ethers;
     if (NODE_PROVIDER) {
       this.web3 = new ethers.JsonRpcProvider(NODE_PROVIDER);
     } else {
@@ -44,6 +45,9 @@ export class EthersUtils {
     }
 
     return new ethers.BrowserProvider(window.ethereum);
+  }
+  async getBalance(address: string): Promise<string> {
+    return (await this.web3.getBalance(address)).toString();
   }
 
   async getLatestBlockNumber(): Promise<number> {
@@ -219,10 +223,10 @@ export class EthersUtils {
     data?: string,
     value: string = "0"
   ): Promise<string> {
-    const signer = new ethers.Wallet(
-      this.privateKey!,
-      this.web3 as ethers.JsonRpcProvider
-    );
+    if (!this.privateKey) {
+      throw new Error("Private key is required");
+    }
+    const signer = new ethers.Wallet(this.privateKey, this.web3);
     const tx = await signer.sendTransaction({
       to,
       data,
@@ -403,6 +407,14 @@ export class EthersUtils {
     // 直接使用 getAddress 规范化地址，避免 ENS 解析
     const normalizedAddress = ethers.getAddress(address);
     const contract = new ethers.Contract(normalizedAddress, abi, this.web3);
+    return contract;
+  }
+  async getContractWithSigner(address: string, abi: any) {
+    if (!this.privateKey) {
+      throw new Error("私钥不能为空");
+    }
+    const signer = new ethers.Wallet(this.privateKey, this.web3);
+    const contract = new ethers.Contract(address, abi, signer);
     return contract;
   }
 

@@ -198,23 +198,88 @@ export class EthersUtils {
     this.NODE_PROVIDER = NODE_PROVIDER;
   }
 
-  async sendTransaction(
-    to: string,
-    data?: string,
-    value: string = "0"
-  ): Promise<string> {
+  async sendTransaction(call: {
+    target: string;
+    data?: string;
+    value?: string;
+    abi?: any[];
+    functionName?: string;
+    executeArgs?: any[];
+  }): Promise<{
+    target: string;
+    success: boolean;
+    transactionHash: string;
+    function: string;
+    args: any[];
+    decodedData?: (ethers.LogDescription | null)[] | null;
+  }> {
     if (!this.web3) {
       throw new Error("未找到有效的Provider");
     }
 
     try {
+      let txHash: string;
+      let decodedLogs: (ethers.LogDescription | null)[] | null = null;
+
+      // 保留原有的 Provider 判断逻辑
       if (this.privateKey && this.web3 instanceof ethers.JsonRpcProvider) {
-        return await this.sendWithPrivateKey(to, data, value);
+        txHash = await this.sendWithPrivateKey(
+          call.target,
+          call.data,
+          call.value || "0"
+        );
       } else {
-        return await this.sendWithMetaMask(to, data, value);
+        txHash = await this.sendWithMetaMask(
+          call.target,
+          call.data,
+          call.value || "0"
+        );
       }
+
+      // 获取交易收据并解码日志
+      const receipt = await this.web3.getTransactionReceipt(txHash);
+
+      try {
+        if (call.abi) {
+          const iface = new ethers.Interface(call.abi);
+          decodedLogs =
+            receipt?.logs
+              .map((log) => {
+                try {
+                  return iface.parseLog({
+                    topics: [...log.topics],
+                    data: log.data,
+                  });
+                } catch (e) {
+                  console.warn("解析单个日志失败:", e);
+                  return null;
+                }
+              })
+              .filter(Boolean) || null;
+        }
+      } catch (e) {
+        console.warn("解析交易日志失败:", e);
+        decodedLogs = null;
+      }
+
+      return {
+        target: call.target,
+        success: true,
+        transactionHash: txHash,
+        function: call.functionName || "",
+        args: call.executeArgs || [],
+        decodedData: decodedLogs,
+      };
     } catch (error: any) {
-      throw new Error(`交易发送失败: ${error.message}`);
+      console.error("交易发送失败:", error);
+      return {
+        target: call.target,
+        success: false,
+        transactionHash: "",
+        function: call.functionName || "",
+        args: call.executeArgs || [],
+        decodedData: null,
+      };
     }
   }
 
@@ -230,7 +295,7 @@ export class EthersUtils {
     const tx = await signer.sendTransaction({
       to,
       data,
-      value: ethers.parseEther(value),
+      value: value,
     });
 
     await tx.wait();
@@ -250,7 +315,7 @@ export class EthersUtils {
           to,
           from: fromAddress,
           data: data?.startsWith("0x") ? data : data ? "0x" + data : undefined,
-          value: ethers.parseEther(value).toString(),
+          value: value,
         },
       ],
     });
@@ -260,30 +325,41 @@ export class EthersUtils {
     return txHash;
   }
 
-  async encodeDataByABI(
-    abi: any[],
-    functionName: string,
-    excuteArgs: any[],
-    target: string = "0x0000000000000000000000000000000000000000"
-  ) {
-    const iface = new ethers.Interface(abi);
+  async encodeDataByABI(params: {
+    abi: any[];
+    functionName: string;
+    executeArgs: any[];
+    target: string;
+    value?: string;
+  }) {
+    const iface = new ethers.Interface(params.abi);
     // Encode the function call
-    const data = iface.encodeFunctionData(functionName, excuteArgs);
-    return { target, data, abi, functionName, excuteArgs };
+    const data = iface.encodeFunctionData(
+      params.functionName,
+      params.executeArgs
+    );
+    return {
+      target: params.target,
+      data,
+      abi: params.abi,
+      functionName: params.functionName,
+      executeArgs: params.executeArgs,
+      value: params.value,
+    };
   }
 
   async excuteReadContract(
     contractAddress: string,
     abi: any,
     functionName: any,
-    excuteArgs: any[] | undefined = [],
+    executeArgs: any[] | undefined = [],
     blockNumber?: number
   ) {
     const contract = new ethers.Contract(contractAddress, abi, this.web3);
 
     try {
       const overrides = blockNumber ? { blockTag: blockNumber } : {};
-      const result = await contract[functionName](...excuteArgs, overrides);
+      const result = await contract[functionName](...executeArgs, overrides);
       return result;
     } catch (error: any) {
       console.error(`Error reading contract data from ${functionName}:`, error);
@@ -294,11 +370,11 @@ export class EthersUtils {
     contractAddress: string,
     abi: any,
     functionName: string,
-    excuteArgs: any[] = []
+    executeArgs: any[] = []
   ) {
     try {
       const contract = new ethers.Contract(contractAddress, abi, this.web3);
-      return await contract[functionName].staticCall(...excuteArgs);
+      return await contract[functionName].staticCall(...executeArgs);
     } catch (error: any) {
       throw new Error(`静态调用合约失败 (${functionName}): ${error.message}`);
     }
@@ -308,11 +384,16 @@ export class EthersUtils {
     contractAddress: string,
     abi: any,
     functionName: string,
-    excuteArgs: any[]
+    executeArgs: any[]
   ) {
-    const data = await this.encodeDataByABI(abi, functionName, excuteArgs);
-    const txhash = await this.sendTransaction(contractAddress, data.data);
-    return txhash;
+    const data = await this.encodeDataByABI({
+      abi: abi,
+      functionName: functionName,
+      executeArgs: executeArgs,
+      target: contractAddress,
+    });
+    const txResult = await this.sendTransaction(data);
+    return txResult;
   }
   async getRawContractLogs(
     contractAddresses: string | string[],
@@ -424,7 +505,7 @@ export class EthersUtils {
       data: string;
       abi: any[];
       functionName: string;
-      excuteArgs: any[];
+      executeArgs: any[];
     }>,
     blockNumber?: number,
     batchLimit: number = 1000
@@ -472,7 +553,7 @@ export class EthersUtils {
               success: false,
               decodedData: null,
               function: call.functionName,
-              args: call.excuteArgs,
+              args: call.executeArgs,
             };
           }
 
@@ -487,7 +568,7 @@ export class EthersUtils {
               success: true,
               decodedData,
               function: call.functionName,
-              args: call.excuteArgs,
+              args: call.executeArgs,
             };
           } catch (error) {
             console.warn(`解码数据失败 (${call.functionName}):`, error);
@@ -496,7 +577,7 @@ export class EthersUtils {
               success: true,
               decodedData: data,
               function: call.functionName,
-              args: call.excuteArgs,
+              args: call.executeArgs,
             };
           }
         })
@@ -666,7 +747,7 @@ export class EthersUtils {
       data: string;
       abi: any[];
       functionName: string;
-      excuteArgs: any[];
+      executeArgs: any[];
     }>,
     batchLimit: number = 1000
   ) {
@@ -691,7 +772,7 @@ export class EthersUtils {
 
       try {
         // 执行批量调用
-        const txHash = await this.excuteWriteContract(
+        const txResult = await this.excuteWriteContract(
           this.batchCallAddress,
           IBatchCallABI,
           "batchCall",
@@ -703,13 +784,12 @@ export class EthersUtils {
           ]
         );
 
-        // 为每个调用添加结果
         const batchResults = batchCalls.map((call) => ({
           target: call.target,
           success: true,
-          transactionHash: txHash,
+          transactionHash: txResult.transactionHash,
           function: call.functionName,
-          args: call.excuteArgs,
+          args: call.executeArgs,
         }));
 
         results.push(...batchResults);
@@ -722,7 +802,7 @@ export class EthersUtils {
           success: false,
           transactionHash: "",
           function: call.functionName,
-          args: call.excuteArgs,
+          args: call.executeArgs,
         }));
 
         results.push(...failedResults);
@@ -737,13 +817,13 @@ export class EthersUtils {
 export async function encodeDataByABI(
   abi: any[],
   functionName: string,
-  excuteArgs: any[],
+  executeArgs: any[],
   target: string = "0x0000000000000000000000000000000000000000"
 ) {
   const iface = new ethers.Interface(abi);
   // Encode the function call
-  const data = iface.encodeFunctionData(functionName, excuteArgs);
-  return { target, data, abi, functionName, excuteArgs };
+  const data = iface.encodeFunctionData(functionName, executeArgs);
+  return { target, data, abi, functionName, executeArgs };
 }
 
 export async function functionsWithParamTypesFromABI(abi: any[]) {

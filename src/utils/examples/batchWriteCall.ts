@@ -79,6 +79,15 @@ const ERC20_ABI = [
   },
 ];
 
+// 修改接口定义
+interface BatchCall {
+  target: string;
+  data: string;
+  abi: any[];
+  functionName: string;
+  executeArgs: any[]; // 将 excuteArgs 改为 executeArgs
+}
+
 async function batchERC20Transfer() {
   try {
     // 初始化EthersUtils
@@ -131,23 +140,23 @@ async function batchERC20Transfer() {
     const calls = await Promise.all(
       transfers.map(async (transfer) => {
         // 编码 transferFrom 函数调用
-        const { data } = await ethersUtils.encodeDataByABI(
-          ERC20_ABI,
-          "transferFrom",
-          [
+        const { data } = await ethersUtils.encodeDataByABI({
+          abi: ERC20_ABI,
+          functionName: "transferFrom",
+          executeArgs: [
             ethersUtils.getSignerAddress(), // from 参数，当前用户地址
             transfer.to, // to 参数
             transfer.amount, // amount 参数
           ],
-          transfer.tokenAddress
-        );
+          target: transfer.tokenAddress,
+        });
 
         return {
           target: transfer.tokenAddress,
           data,
           abi: ERC20_ABI,
           functionName: "transferFrom",
-          excuteArgs: [
+          executeArgs: [
             ethersUtils.getSignerAddress(),
             transfer.to,
             transfer.amount,

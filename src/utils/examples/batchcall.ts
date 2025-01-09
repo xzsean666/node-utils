@@ -26,22 +26,22 @@ async function main() {
     // 为所有代币编码调用数据并准备批量调用参数
     const calls = await Promise.all(
       tokens.map(async (tokenAddress) => {
-        return await ethersUtils.encodeDataByABI(
-          IERC20,
-          "balanceOf",
-          [userAddress],
-          tokenAddress
-        );
+        return await ethersUtils.encodeDataByABI({
+          abi: IERC20,
+          functionName: "balanceOf",
+          executeArgs: [userAddress],
+          target: tokenAddress,
+        });
       })
     );
     const calls1 = await Promise.all(
       tokens.map(async (tokenAddress) => {
-        return await ethersUtils.encodeDataByABI(
-          IERC20,
-          "totalSupply",
-          [],
-          tokenAddress
-        );
+        return await ethersUtils.encodeDataByABI({
+          abi: IERC20,
+          functionName: "totalSupply",
+          executeArgs: [],
+          target: tokenAddress,
+        });
       })
     );
 

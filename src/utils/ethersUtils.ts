@@ -1,10 +1,23 @@
-import { ethers, HDNodeWallet } from "ethers";
+import {
+  ethers,
+  HDNodeWallet,
+  Log,
+  Interface,
+  EventFragment,
+  InterfaceAbi,
+} from "ethers";
 import detectEthereumProvider from "@metamask/detect-provider";
 
 declare global {
   interface Window {
     ethereum: any;
   }
+}
+
+interface LogFilter {
+  fromBlock?: number | string;
+  toBlock?: number | string;
+  topics?: string[];
 }
 
 export class EthersUtils {
@@ -247,8 +260,8 @@ export class EthersUtils {
               .map((log) => {
                 try {
                   return iface.parseLog({
-                    topics: [...log.topics],
-                    data: log.data,
+                    topics: [...(log as ethers.Log).topics],
+                    data: (log as ethers.Log).data,
                   });
                 } catch (e) {
                   console.warn("解析单个日志失败:", e);
@@ -430,52 +443,125 @@ export class EthersUtils {
   async getContractLogs(
     contractAddresses: string | string[],
     eventNames: string | string[],
-    abi: any[],
-    filter: {
-      fromBlock?: number | string;
-      toBlock?: number | string;
-      topics?: string[];
-    } = {}
+    abi: InterfaceAbi,
+    filter: LogFilter = {},
+    initialBatchSize: number = 50000
   ) {
     try {
-      // 确保地址和事件名都是数组格式
+      // 1. 基础验证
+      if (!contractAddresses || !abi) {
+        throw new Error("合约地址和ABI是必需的");
+      }
+
       const addresses = Array.isArray(contractAddresses)
         ? contractAddresses
         : [contractAddresses];
+      const events = Array.isArray(eventNames) ? eventNames : [eventNames];
 
-      // 过滤出事件 ABI
-      const eventAbis = abi.filter((item) => item.type === "event");
+      // 2. 事件ABI过滤
+      const abiArray = Array.isArray(abi) ? abi : [abi];
+      const eventAbis = abiArray
+        .filter((item: any) => item.type === "event")
+        .filter((item: any) => events.includes(item.name));
 
-      // 使用 getEventTopics 获取事件主题
-      const topics = [this.getEventTopics(eventAbis)];
+      if (eventAbis.length === 0) {
+        throw new Error("未找到指定的事件定义");
+      }
 
-      const logs = await this.web3.getLogs({
-        address: addresses,
-        topics: [...topics, ...(filter.topics || [])],
-        fromBlock: filter.fromBlock || 0,
-        toBlock: filter.toBlock || "latest",
-      });
+      // 3. 生成事件topics
+      const eventTopics = this.getEventTopics(eventAbis);
 
-      // 创建合约接口用于解析日志
-      const iface = new ethers.Interface(abi);
+      // 4. 获取区块范围
+      const fromBlock = BigInt(filter.fromBlock || 0);
+      const toBlock =
+        filter.toBlock === "latest"
+          ? await this.web3.getBlockNumber()
+          : BigInt(filter.toBlock || (await this.web3.getBlockNumber()));
 
-      return logs.map((log) => {
+      // 5. 批量处理设置
+      let batchSize = initialBatchSize;
+      const MIN_BATCH_SIZE = 1000;
+      let currentBlock = fromBlock;
+      const allLogs: Log[] = [];
+
+      // 6. 批量获取日志
+      while (currentBlock <= toBlock) {
         try {
-          const parsedLog = iface.parseLog({
-            topics: log.topics,
-            data: log.data,
+          const endBlock = BigInt(
+            Math.min(Number(currentBlock) + batchSize - 1, Number(toBlock))
+          );
+
+          console.log(`获取日志: ${currentBlock} 至 ${endBlock}`);
+
+          const logs = await this.web3.getLogs({
+            address: addresses,
+            topics: [eventTopics, ...(filter.topics || [])],
+            fromBlock: currentBlock,
+            toBlock: endBlock,
           });
-          return {
-            ...log,
-            args: parsedLog?.args,
-            name: parsedLog?.name,
-            signature: parsedLog?.signature,
-          };
+
+          allLogs.push(...logs);
+          currentBlock = endBlock + BigInt(1);
+
+          // 如果成功了，可以尝试增加批次大小
+          if (batchSize < initialBatchSize) {
+            batchSize = Math.min(batchSize * 2, initialBatchSize);
+          }
         } catch (error) {
-          console.warn(`解析日志失败:`, error);
-          return log;
+          console.warn(
+            `获取区块 ${currentBlock} 至 ${
+              currentBlock + BigInt(batchSize)
+            } 的日志失败`
+          );
+
+          // 减小批次大小并重试
+          batchSize = Math.floor(batchSize / 2);
+
+          if (batchSize < MIN_BATCH_SIZE) {
+            throw new Error(
+              `批次大小 ${batchSize} 小于最小值 ${MIN_BATCH_SIZE}`
+            );
+          }
+
+          console.log(`减小批次大小至 ${batchSize} 并重试`);
+          continue;
         }
-      });
+      }
+
+      // 7. 解析日志
+      const contract = new ethers.Contract(addresses[0], abi, this.web3);
+      return allLogs
+        .map((log: Log) => {
+          try {
+            const parsedLog = contract.interface.parseLog({
+              topics: [...log.topics],
+              data: log.data,
+            });
+
+            if (!parsedLog || !events.includes(parsedLog.name)) {
+              return null;
+            }
+
+            return {
+              ...log,
+              args: parsedLog.args,
+              name: parsedLog.name,
+              signature: parsedLog.signature,
+              eventFragment: parsedLog.fragment,
+              decoded: true,
+            };
+          } catch (error) {
+            console.warn(
+              `解析日志失败 (blockNumber: ${log.blockNumber}):`,
+              error
+            );
+            return {
+              ...log,
+              decoded: false,
+            };
+          }
+        })
+        .filter(Boolean);
     } catch (error: any) {
       throw new Error(`获取合约日志失败: ${error.message}`);
     }

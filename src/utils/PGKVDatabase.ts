@@ -130,6 +130,7 @@ export class KVDatabase {
 
     return record.value;
   }
+  
 
   async delete(key: string): Promise<boolean> {
     await this.ensureInitialized();

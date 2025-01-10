@@ -161,15 +161,13 @@ export class KVDatabase {
   }
 
   // 获取所有键值对
-  async getAll(): Promise<Map<string, any>> {
+  async getAll(): Promise<Record<string, any>> {
     await this.ensureInitialized();
     const records = await this.db.find();
-    return new Map(
-      records.map((record: { key: any; value: any }) => [
-        record.key,
-        JSON.parse(record.value),
-      ])
-    );
+    return records.reduce((acc, record: { key: any; value: any }) => {
+      acc[record.key] = JSON.parse(record.value);
+      return acc;
+    }, {} as Record<string, any>);
   }
 
   // 获取所有键
@@ -264,11 +262,9 @@ export class KVDatabase {
     const matchedRecords = allRecords.filter((record: { value: any }) =>
       condition(JSON.parse(record.value))
     );
-    return new Map(
-      matchedRecords.map((record: { key: any; value: any }) => [
-        record.key,
-        JSON.parse(record.value),
-      ])
-    );
+    return matchedRecords.reduce((acc, record: { key: any; value: any }) => {
+      acc.set(record.key, JSON.parse(record.value));
+      return acc;
+    }, new Map<string, any>());
   }
 }

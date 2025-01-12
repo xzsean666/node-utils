@@ -898,6 +898,48 @@ export class EthersUtils {
 
     return results;
   }
+  async estimateGasCost(params: {
+    target: string;
+    abi: any[];
+    functionName: string;
+    executeArgs?: any[];
+    value?: string;
+  }): Promise<{
+    gasLimit: bigint;
+    gasPrice: bigint;
+    estimatedCost: bigint;
+  }> {
+    try {
+      const contract = new ethers.Contract(
+        params.target,
+        params.abi,
+        this.web3
+      );
+
+      // 获取当前 gas 价格
+      const feeData = await this.web3.getFeeData();
+      const gasPrice = feeData.gasPrice || BigInt(0);
+
+      // 估算 gas 限制
+      const gasLimit = await contract[params.functionName].estimateGas(
+        ...(params.executeArgs || []),
+        {
+          value: params.value ? BigInt(params.value) : undefined,
+        }
+      );
+
+      // 计算预估成本 (gasLimit * gasPrice)
+      const estimatedCost = gasLimit * gasPrice;
+
+      return {
+        gasLimit,
+        gasPrice,
+        estimatedCost,
+      };
+    } catch (error: any) {
+      throw new Error(`估算gas成本失败: ${error.message}`);
+    }
+  }
 }
 
 export async function encodeDataByABI(

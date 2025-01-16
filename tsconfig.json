@@ -14,7 +14,8 @@
     "strictNullChecks": true,
     "strictPropertyInitialization": false,
     "noImplicitAny": false,
-    "declaration": true
+    "declaration": true,
+    "resolveJsonModule": true
   },
   "include": ["src/**/*", "tests/**/*"],
   "exclude": ["node_modules"]

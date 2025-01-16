@@ -149,7 +149,7 @@ export class KVDatabase {
     }
     await this.db.save({
       key,
-      value,
+      value: JSON.stringify(value, bigintHandler),
     });
   }
 

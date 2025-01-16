@@ -1,11 +1,4 @@
-import {
-  ethers,
-  HDNodeWallet,
-  Log,
-  Interface,
-  EventFragment,
-  InterfaceAbi,
-} from "ethers";
+import { ethers, HDNodeWallet, Log } from "ethers";
 import detectEthereumProvider from "@metamask/detect-provider";
 
 declare global {
@@ -443,7 +436,7 @@ export class EthersUtils {
   async getContractLogs(
     contractAddresses: string | string[],
     eventNames: string | string[],
-    abi: InterfaceAbi,
+    abi: any,
     filter: LogFilter = {},
     initialBatchSize: number = 50000
   ) {

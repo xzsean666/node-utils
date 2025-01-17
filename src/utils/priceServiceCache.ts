@@ -1,4 +1,9 @@
-import axios from "axios";
+import axios, { AxiosRequestConfig } from "axios";
+import { KVDatabase } from "./PGKVDatabase";
+import dotenv from "dotenv";
+
+dotenv.config();
+
 // 基础类型定义
 interface ExchangeConfig {
   baseUrl: string;
@@ -18,6 +23,11 @@ interface PriceResult {
 
 interface PriceOptions {
   timestamp?: number;
+}
+
+interface CacheRecord {
+  value: string;
+  created_at: number; // 数据库中的 created_at 字段
 }
 
 // 交易所配置
@@ -76,7 +86,21 @@ const EXCHANGES: Record<string, ExchangeConfig> = {
 };
 
 export class PriceService {
+  private readonly db?: KVDatabase;
   private readonly TIMEOUT = 2000;
+  private readonly CURRENT_PRICE_CACHE_DURATION = 60; // 60秒缓存
+
+  constructor(db?: KVDatabase) {
+    const dbUrl = process.env.PRICE_CACHE_DB_URL;
+    const tableName =
+      process.env.PRICE_CACHE_TABLE_NAME || "price_service_cache";
+
+    if (db) {
+      this.db = db;
+    } else if (dbUrl && tableName) {
+      this.db = new KVDatabase(dbUrl, tableName);
+    }
+  }
 
   private normalizeToken(token: string): string {
     const tokenMap: Record<string, string> = {
@@ -85,6 +109,52 @@ export class PriceService {
       USDT: "USDT",
     };
     return tokenMap[token.toUpperCase()] || token.toUpperCase();
+  }
+
+  private async getFromCache(
+    exchange: string,
+    token: string,
+    timestamp?: number
+  ): Promise<PriceResult | null> {
+    if (!this.db) return null;
+
+    const cacheKey = `price:${exchange}:${token}:${timestamp || "current"}`;
+    const expire = timestamp ? undefined : this.CURRENT_PRICE_CACHE_DURATION;
+    const cachedValue = await this.db.get(cacheKey, expire);
+
+    // console.log("Cache Record:", {
+    //   key: cacheKey,
+    //   record: cachedValue,
+    // });
+
+    if (!cachedValue) return null;
+
+    const price = parseFloat(cachedValue);
+    if (isNaN(price)) return null;
+
+    // console.log("Parsed price:", {
+    //   originalValue: cachedValue,
+    //   parsedPrice: price,
+    // });
+
+    return {
+      exchange,
+      price,
+      timestamp: timestamp || Math.floor(Date.now() / 1000),
+      fromCache: true,
+    };
+  }
+
+  private async saveToCache(
+    exchange: string,
+    token: string,
+    price: number,
+    timestamp?: number
+  ): Promise<void> {
+    if (!this.db) return;
+
+    const cacheKey = `price:${exchange}:${token}:${timestamp || "current"}`;
+    await this.db.put(cacheKey, price.toString());
   }
 
   private async fetchPrice(
@@ -96,8 +166,14 @@ export class PriceService {
     try {
       const { timestamp } = options;
       const currentTimestamp = Math.floor(Date.now() / 1000);
-      const isHistorical = Boolean(timestamp);
 
+      // 检查缓存
+      const cachedResult = await this.getFromCache(exchange, token, timestamp);
+      if (cachedResult) {
+        return cachedResult;
+      }
+
+      const isHistorical = Boolean(timestamp);
       const url = `${config.baseUrl}${
         isHistorical
           ? config.getHistoricalPriceUrl(token, timestamp!)
@@ -112,6 +188,10 @@ export class PriceService {
       const price = isHistorical
         ? config.parseHistoricalResponse(response.data)
         : config.parseCurrentResponse(response.data);
+
+      if (price) {
+        await this.saveToCache(exchange, token, price, timestamp);
+      }
 
       return {
         exchange,

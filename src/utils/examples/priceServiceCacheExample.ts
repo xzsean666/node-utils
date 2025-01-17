@@ -1,4 +1,4 @@
-import { PriceService } from "../priceService";
+import { PriceService } from "../priceServiceCache";
 import { KVDatabase } from "../PGKVDatabase";
 
 import dotenv from "dotenv";

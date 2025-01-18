@@ -314,6 +314,7 @@ export class EthersUtils {
     value: string = "0"
   ): Promise<string> {
     const fromAddress = await this.getAccounts();
+    const hexValue = value === "0" ? "0x0" : this.ethers.toQuantity(value);
     const txHash = await window.ethereum.request({
       method: "eth_sendTransaction",
       params: [
@@ -321,11 +322,10 @@ export class EthersUtils {
           to,
           from: fromAddress,
           data: data?.startsWith("0x") ? data : data ? "0x" + data : undefined,
-          value: value,
+          value: hexValue, // 使用转换后的十六进制值
         },
       ],
     });
-
     const txResponse = await this.web3.getTransaction(txHash);
     await txResponse?.wait();
     return txHash;

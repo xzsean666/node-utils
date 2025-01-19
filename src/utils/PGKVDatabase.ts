@@ -55,47 +55,52 @@ export class KVDatabase {
       await this.dataSource.initialize();
       this.db = this.dataSource.getRepository(this.CustomKVStore);
 
-      // 使用 synchronize 选项或手动同步表结构
-      if (this.dataSource.options.synchronize) {
-        await this.dataSource.synchronize();
-      } else {
-        // 确保表存在
-        const queryRunner = this.dataSource.createQueryRunner();
-        try {
-          const tableExists = await queryRunner.hasTable(this.tableName);
-          if (!tableExists) {
-            await queryRunner.createTable(
-              new Table({
-                name: this.tableName,
-                columns: [
-                  {
-                    name: "key",
-                    type: "varchar",
-                    length: "255",
-                    isPrimary: true,
-                  },
-                  {
-                    name: "value",
-                    type: "jsonb",
-                  },
-                  {
-                    name: "created_at",
-                    type: "timestamptz",
-                    default: "CURRENT_TIMESTAMP",
-                  },
-                  {
-                    name: "updated_at",
-                    type: "timestamptz",
-                    default: "CURRENT_TIMESTAMP",
-                    onUpdate: "CURRENT_TIMESTAMP",
-                  },
-                ],
-              })
+      // 手动创建表和索引
+      const queryRunner = this.dataSource.createQueryRunner();
+      try {
+        const tableExists = await queryRunner.hasTable(this.tableName);
+        if (!tableExists) {
+          await queryRunner.createTable(
+            new Table({
+              name: this.tableName,
+              columns: [
+                {
+                  name: "key",
+                  type: "varchar",
+                  length: "255",
+                  isPrimary: true,
+                },
+                {
+                  name: "value",
+                  type: "jsonb",
+                  isNullable: true,
+                },
+                {
+                  name: "created_at",
+                  type: "timestamptz",
+                  default: "CURRENT_TIMESTAMP",
+                },
+                {
+                  name: "updated_at",
+                  type: "timestamptz",
+                  default: "CURRENT_TIMESTAMP",
+                },
+              ],
+            }),
+            true // ifNotExists: true
+          );
+
+          // 创建 GIN 索引
+          try {
+            await queryRunner.query(
+              `CREATE INDEX IF NOT EXISTS "IDX_${this.tableName}_value_gin" ON "${this.tableName}" USING gin (value);`
             );
+          } catch (err) {
+            console.warn(`创建索引失败，可能已存在: ${err}`);
           }
-        } finally {
-          await queryRunner.release();
         }
+      } finally {
+        await queryRunner.release();
       }
 
       this.initialized = true;
@@ -120,7 +125,6 @@ export class KVDatabase {
     if (expire !== undefined) {
       const currentTime = Math.floor(Date.now() / 1000);
       const createdTime = Math.floor(record.created_at.getTime() / 1000);
-
       if (currentTime - createdTime > expire) {
         // 可选：删除过期数据
         await this.delete(key);
@@ -130,7 +134,6 @@ export class KVDatabase {
 
     return record.value;
   }
-  
 
   async delete(key: string): Promise<boolean> {
     await this.ensureInitialized();
@@ -220,35 +223,6 @@ export class KVDatabase {
   }
 
   /**
-   * 根据值查找键
-   * @param value 要搜索的值
-   * @param exact 是否精确匹配（默认为true）
-   * @returns 包含匹配值的键数组
-   */
-  async findByValue(value: any, exact: boolean = true): Promise<string[]> {
-    await this.ensureInitialized();
-
-    let queryBuilder = this.db.createQueryBuilder(this.tableName);
-
-    if (exact) {
-      // 精确匹配
-      queryBuilder = queryBuilder.where(`value = :value::jsonb`, {
-        value: JSON.stringify(value),
-      });
-    } else {
-      // 模糊匹配 - 将搜索值转换为字符串并在JSONB中搜索
-      const searchValue =
-        typeof value === "string" ? value : JSON.stringify(value);
-      queryBuilder = queryBuilder.where(`value::text LIKE :value`, {
-        value: `%${searchValue}%`,
-      });
-    }
-
-    const results = await queryBuilder.getMany();
-    return results.map((record: { key: any }) => record.key);
-  }
-
-  /**
    * 根据条件查找值
    * @param condition 查询条件函数
    * @returns 匹配条件的键值对Map
@@ -267,5 +241,106 @@ export class KVDatabase {
         record.value,
       ])
     );
+  }
+  /**
+   * 查找布尔值记录
+   * @param boolValue true 或 false
+   * @param first 是否只返回第一条记录
+   * @param orderBy 排序方式 'ASC' 或 'DESC'
+   * @returns 如果 first 为 true 返回单个键或 null，否则返回键数组
+   */
+  async findBoolValues(
+    boolValue: boolean,
+    first: boolean = true,
+    orderBy: "ASC" | "DESC" = "ASC"
+  ): Promise<string[] | string | null> {
+    await this.ensureInitialized();
+
+    const queryBuilder = this.db
+      .createQueryBuilder(this.tableName)
+      .select("key")
+      .where("value = :value::jsonb", {
+        value: JSON.stringify(boolValue),
+      })
+      .orderBy("created_at", orderBy);
+
+    if (first) {
+      const result = await queryBuilder.getRawOne();
+      return result ? result.key : null;
+    }
+
+    const results = await queryBuilder.getRawMany();
+    return results.map((result) => result.key);
+  }
+
+  /**
+   * 高级 JSON 搜索
+   * @param searchOptions 搜索选项
+   */
+  async searchJson(searchOptions: {
+    contains?: object; // 包含的 JSON
+    equals?: object; // 完全匹配的 JSON
+    path?: string; // JSON 路径
+    value?: any; // 路径对应的值
+  }): Promise<string[]> {
+    await this.ensureInitialized();
+
+    let queryBuilder = this.db.createQueryBuilder(this.tableName).select("key");
+
+    if (searchOptions.contains) {
+      queryBuilder = queryBuilder.andWhere(`value @> :contains::jsonb`, {
+        contains: JSON.stringify(searchOptions.contains),
+      });
+    }
+
+    if (searchOptions.equals) {
+      queryBuilder = queryBuilder.andWhere(`value = :equals::jsonb`, {
+        equals: JSON.stringify(searchOptions.equals),
+      });
+    }
+
+    if (searchOptions.path && searchOptions.value !== undefined) {
+      queryBuilder = queryBuilder.andWhere(`value #>> :path = :value`, {
+        path: `{${searchOptions.path}}`,
+        value: String(searchOptions.value),
+      });
+    }
+
+    const results = await queryBuilder.getRawMany();
+    return results.map((record) => record.key);
+  }
+
+  /**
+   * 查找更新时间在指定时间前后的记录
+   * @param timestamp 时间戳（毫秒）
+   * @param type 'before' 或 'after'
+   * @param first 是否只返回第一条记录
+   * @param orderBy 排序方式
+   */
+  async findByUpdateTime(
+    timestamp: number,
+    first: boolean = true,
+    type: "before" | "after" = "after",
+    orderBy: "ASC" | "DESC" = "ASC"
+  ): Promise<string[] | string | null> {
+    await this.ensureInitialized();
+
+    const operator = type === "before" ? "<" : ">";
+
+    const query = this.db
+      .createQueryBuilder(this.tableName)
+      .select("key")
+      .where(`updated_at ${operator} :timestamp`, {
+        timestamp: new Date(timestamp),
+      })
+      .orderBy("updated_at", orderBy);
+
+    if (first) {
+      const result = await query.getRawOne();
+      return result ? result.key : null;
+    }
+
+    const results = await query.getRawMany();
+    return results.map((result) => result.key);
   }
 }

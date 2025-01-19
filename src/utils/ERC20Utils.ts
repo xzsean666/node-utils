@@ -46,7 +46,7 @@ export class ERC20Utils {
    * @param accountAddress 账户地址
    * @returns 余额（原始数值，未经过 decimals 转换）
    */
-  public async getBalance(accountAddress: string): Promise<bigint> {
+  public async balanceOf(accountAddress: string): Promise<bigint> {
     return await this.contract.balanceOf(accountAddress);
   }
 
@@ -187,7 +187,7 @@ export class ERC20Utils {
 
   public async estimateTransferGasCost(
     toAddress: string,
-    amount: bigint
+    amount: bigint | number
   ): Promise<bigint> {
     try {
       // 首先尝试获取历史平均值

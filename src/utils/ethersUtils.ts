@@ -196,6 +196,10 @@ export class EthersUtils {
     this.privateKey = wallet.privateKey;
     this.account = wallet.address;
   }
+  async getDeriveWallets(index: number = 0) {
+    const wallet = await this.deriveWallets(this.privateKey!, index);
+    return wallet;
+  }
   // 设置私钥
   setPrivateKey(privateKey: string) {
     this.privateKey = privateKey;

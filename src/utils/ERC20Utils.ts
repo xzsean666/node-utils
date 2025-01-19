@@ -221,7 +221,7 @@ export class ERC20Utils {
     const actualThreshold = threshold ?? defaultThreshold;
 
     // 如果没有指定转账金额，则获取全部余额
-    const balance = await this.getBalance(fromWallet.address);
+    const balance = await this.balanceOf(fromWallet.address);
     const transferAmount = amount ?? balance;
 
     // 检查余额是否超过阈值

@@ -21,6 +21,7 @@
     "publish-version": "node scripts/version-bump.js && yarn build && npm publish"
   },
   "dependencies": {
+    "@chainlink/ccip-js": "^0.2.1",
     "@metamask/detect-provider": "^2.0.0",
     "@types/crypto-js": "^4.2.2",
     "@types/fluent-ffmpeg": "^2.1.27",

@@ -1,6 +1,7 @@
 import { ethers, HDNodeWallet, Log } from "ethers";
 import detectEthereumProvider from "@metamask/detect-provider";
 
+export { ethers };
 declare global {
   interface Window {
     ethereum: any;
@@ -146,9 +147,28 @@ export class EthersUtils {
     }
   }
   getEventTopics(events: any[]) {
+    const processType = (input: any): string => {
+      // 处理基础 tuple 类型
+      if (input.type === "tuple") {
+        const components = input.components
+          .map((comp: any) => processType(comp))
+          .join(",");
+        return `(${components})`;
+      }
+      // 处理 tuple 数组
+      if (input.type === "tuple[]") {
+        const components = input.components
+          .map((comp: any) => processType(comp))
+          .join(",");
+        return `(${components})[]`;
+      }
+      // 返回基本类型
+      return input.type;
+    };
+
     return events.map((event) => {
       const signature = `${event.name}(${event.inputs
-        .map((input) => input.type)
+        .map((input: any) => processType(input))
         .join(",")})`;
       return ethers.id(signature);
     });
@@ -222,6 +242,7 @@ export class EthersUtils {
     function: string;
     args: any[];
     decodedData?: (ethers.LogDescription | null)[] | null;
+    error?: any;
   }> {
     if (!this.web3) {
       throw new Error("未找到有效的Provider");
@@ -289,6 +310,7 @@ export class EthersUtils {
         function: call.functionName || "",
         args: call.executeArgs || [],
         decodedData: null,
+        error: error,
       };
     }
   }
@@ -464,10 +486,8 @@ export class EthersUtils {
       if (eventAbis.length === 0) {
         throw new Error("未找到指定的事件定义");
       }
-
       // 3. 生成事件topics
       const eventTopics = this.getEventTopics(eventAbis);
-
       // 4. 获取区块范围
       const fromBlock = BigInt(filter.fromBlock || 0);
       const toBlock =
@@ -526,6 +546,7 @@ export class EthersUtils {
       }
 
       // 7. 解析日志
+
       const contract = new ethers.Contract(addresses[0], abi, this.web3);
       return allLogs
         .map((log: Log) => {
@@ -554,6 +575,7 @@ export class EthersUtils {
             );
             return {
               ...log,
+              args: null,
               decoded: false,
             };
           }
@@ -562,6 +584,31 @@ export class EthersUtils {
     } catch (error: any) {
       throw new Error(`获取合约日志失败: ${error.message}`);
     }
+  }
+
+  async getLogByTxHash(txHash: string, abi?: any) {
+    const receipt = await this.web3.getTransactionReceipt(txHash);
+    if (!receipt) {
+      throw new Error("Transaction receipt not found");
+    }
+    if (!abi) {
+      return receipt.logs;
+    }
+    const iface = new ethers.Interface(abi);
+    const parsedLogs = receipt.logs
+      .map((log) => {
+        try {
+          return iface.parseLog({
+            topics: [...(log as ethers.Log).topics],
+            data: (log as ethers.Log).data,
+          });
+        } catch (error) {
+          console.warn(`解析日志失败:`, error);
+          return null;
+        }
+      })
+      .filter(Boolean);
+    return parsedLogs;
   }
 
   async getContract(address: string, abi: any) {

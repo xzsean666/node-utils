@@ -24,7 +24,7 @@ interface CCIPMessage {
   extraArgs: string;
 }
 export class CCIPLiteHelper {
-  private ethersUtils: EthersUtils;
+  ethersUtils: EthersUtils;
 
   constructor(rpcUrl: string) {
     this.ethersUtils = new EthersUtils(rpcUrl);
@@ -107,13 +107,18 @@ export class CCIPLiteHelper {
       txHash,
       IEVM2EVMOnRamp
     );
+    const receipt = await this.ethersUtils.web3.getTransactionReceipt(txHash);
     const log = alllogs.find(
       (log) =>
         (log as ethers.LogDescription)?.topic ===
         "0xd0c3c799bf9e2639de44391e7f524d229b2b55f5b1ea94b2bf7da42f7243dddd"
     );
     const messageId = (log as ethers.LogDescription)?.args[0].at(-1);
-    return messageId;
+    const result = {
+      messageId,
+      blockNumber: Number(receipt?.blockNumber) || 0,
+    };
+    return result;
   }
   async getAddressCCIPsendStatus({
     fromAddress,
@@ -254,7 +259,8 @@ export class CCIPLiteHelper {
     // 获取起始区块
     const latestBlock = await this.ethersUtils.getLatestBlockNumber();
     const fromBlock = Math.max(0, latestBlock - BLOCKS_TO_SEARCH);
-
+    let status: any = {};
+    status.state = "UNTOUCHED";
     // 检查每个OffRamp的状态
     for (const offRamp of matchingOffRamps) {
       const logs = (
@@ -274,24 +280,30 @@ export class CCIPLiteHelper {
           "event ExecutionStateChanged(uint64 indexed sequenceNumber, bytes32 indexed messageId, uint8 state, bytes returnData)",
         ]);
         const parsedLog = iface.parseLog(logs[0]);
+        status.blockNumber = logs[0].blockNumber;
+        status.messageId = parsedLog?.args[1];
+        status.transactionHash = logs[0].transactionHash;
         if (parsedLog?.args) {
-          console.log(logs[0]);
           const state = Number(parsedLog.args[2]);
           switch (state) {
             case 0:
-              return "UNTOUCHED";
+              return status;
             case 1:
-              return "IN_PROGRESS";
+              status.state = "IN_PROGRESS";
+              return status;
             case 2:
-              return "SUCCESS";
+              status.state = "SUCCESS";
+              return status;
             case 3:
-              return "FAILURE";
+              status.state = "FAILURE";
+              return status;
             default:
-              return "UNKNOWN";
+              status.state = "UNKNOWN";
+              return status;
           }
         }
       }
     }
-    return "UNTOUCHED"; // 默认状态
+    return status; // 默认状态
   }
 }

@@ -120,7 +120,7 @@ export class PriceService {
         fromCache: false,
       };
     } catch (error) {
-      console.error(`Error fetching price from ${exchange}:`, error);
+      // console.error(`Error fetching price from ${exchange}:`, error);
       return {
         exchange,
         price: null,

@@ -202,7 +202,7 @@ export class CCIPLiteHelper {
     messageId: string,
     destinationRouterAddress: string,
     sourceChainSelector: string,
-    fromBlockNumber?: number
+    BLOCKS_TO_SEARCH = 1000
   ) {
     // 验证目标路由地址
     if (!ethers.isAddress(destinationRouterAddress)) {
@@ -252,23 +252,22 @@ export class CCIPLiteHelper {
     }
 
     // 获取起始区块
-    let fromBlock = fromBlockNumber;
-    if (!fromBlock) {
-      const blockNumber = await this.ethersUtils.getLatestBlockNumber();
-      fromBlock = blockNumber - 1000; // 默认查询最近1000个区块
-    }
+    const latestBlock = await this.ethersUtils.getLatestBlockNumber();
+    const fromBlock = Math.max(0, latestBlock - BLOCKS_TO_SEARCH);
 
     // 检查每个OffRamp的状态
     for (const offRamp of matchingOffRamps) {
-      const logs = await this.ethersUtils.web3.getLogs({
-        address: offRamp.offRamp,
-        topics: [
-          ethers.id("ExecutionStateChanged(uint64,bytes32,uint8,bytes)"),
-          null,
-          ethers.zeroPadValue(messageId, 32),
-        ],
-        fromBlock,
-      });
+      const logs = (
+        await this.ethersUtils.web3.getLogs({
+          address: offRamp.offRamp,
+          topics: [
+            ethers.id("ExecutionStateChanged(uint64,bytes32,uint8,bytes)"),
+            null,
+            ethers.zeroPadValue(messageId, 32),
+          ],
+          fromBlock,
+        })
+      ).reverse();
 
       if (logs && logs.length > 0) {
         const iface = new ethers.Interface([
@@ -276,6 +275,7 @@ export class CCIPLiteHelper {
         ]);
         const parsedLog = iface.parseLog(logs[0]);
         if (parsedLog?.args) {
+          console.log(logs[0]);
           const state = Number(parsedLog.args[2]);
           switch (state) {
             case 0:

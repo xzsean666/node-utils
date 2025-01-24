@@ -13,7 +13,6 @@ interface LogFilter {
   toBlock?: number | string;
   topics?: string[];
 }
-
 export class EthersUtils {
   web3: ethers.JsonRpcProvider | ethers.BrowserProvider;
   NODE_PROVIDER?: string;
@@ -611,7 +610,7 @@ export class EthersUtils {
     return parsedLogs;
   }
 
-  async getContract(address: string, abi: any) {
+  getContract(address: string, abi: any) {
     if (!this.web3) {
       throw new Error("未找到有效的Provider");
     }

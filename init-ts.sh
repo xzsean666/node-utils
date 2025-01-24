@@ -89,6 +89,15 @@ dist
 coverage
 .DS_Store
 .env
+src/utils
+EOL
+
+# 创建 utils 软链接
+ln -s ../../node-utils/src/utils src/utils
+
+cat > src/utils-index.ts << EOL
+export { EthersUtils } from "./utils/ethersUtils";
+export { KVDatabase } from "./utils/PGKVDatabase";
 EOL
 
 # 创建 README.md

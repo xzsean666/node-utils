@@ -50,6 +50,25 @@ export class ERC20Utils {
     return await this.contract.balanceOf(accountAddress);
   }
 
+  async getUniSwapTokenInfo(): Promise<any> {
+    const [name, symbol, decimals] = await Promise.all([
+      this.contract.name(),
+      this.contract.symbol(),
+      this.contract.decimals(),
+      this.contract.totalSupply(),
+    ]);
+
+    const tokenInfo: any = {};
+    tokenInfo.chainId = await this.provider
+      .getNetwork()
+      .then((network) => network.chainId);
+    tokenInfo.address = this.contract.target;
+    tokenInfo.decimals = decimals;
+    tokenInfo.name = name;
+    tokenInfo.symbol = symbol;
+    return tokenInfo;
+  }
+
   /**
    * 获取代币信息
    * @returns 代币信息对象

@@ -28,7 +28,7 @@ export class KVDatabase {
   private tableName: string;
   private CustomKVStore: any;
 
-  constructor(datasourceOrUrl: string, tableName: string = "kv_store") {
+  constructor(datasourceOrUrl?: string, tableName: string = "kv_store") {
     this.tableName = tableName;
 
     @Entity(tableName)
@@ -50,7 +50,7 @@ export class KVDatabase {
 
     this.dataSource = new DataSource({
       type: "sqlite",
-      database: datasourceOrUrl,
+      database: datasourceOrUrl || ":memory:",
       entities: [CustomKVStore],
       synchronize: false,
     });
@@ -127,7 +127,7 @@ export class KVDatabase {
 
       if (currentTime - createdTime > expire) {
         // 可选：删除过期数据
-        await this.delete(key);
+        // await this.delete(key);
         return null;
       }
     }

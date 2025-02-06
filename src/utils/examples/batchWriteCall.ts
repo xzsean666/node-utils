@@ -140,6 +140,12 @@ async function batchERC20Transfer() {
     const calls = await Promise.all(
       transfers.map(async (transfer) => {
         // 编码 transferFrom 函数调用
+        console.log(
+          "transfer",
+          ethersUtils.getSignerAddress(), // from 参数，当前用户地址
+          transfer.to, // to 参数
+          transfer.amount // amount 参数
+        );
         const { data } = await ethersUtils.encodeDataByABI({
           abi: ERC20_ABI,
           functionName: "transferFrom",

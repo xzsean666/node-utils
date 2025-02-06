@@ -1,4 +1,5 @@
 import { ethers } from "ethers";
+import { Brackets } from "typeorm";
 interface TransferFromWithPKParams {
   fromAddressPK: string;
   toAddress: string;
@@ -48,6 +49,12 @@ export class ERC20Utils {
    */
   public async balanceOf(accountAddress: string): Promise<bigint> {
     return await this.contract.balanceOf(accountAddress);
+  }
+  async transferNative(toAddress: string, amount: bigint) {
+    return await this.wallet?.sendTransaction({
+      to: toAddress,
+      value: amount,
+    });
   }
 
   async getUniSwapTokenInfo(): Promise<any> {
@@ -151,6 +158,84 @@ export class ERC20Utils {
       activeWallet
     );
     return await activeContract.approve(toAddress, amount);
+  }
+
+  /**
+   * 批量授权操作
+   * @param toAddress 被授权的地址
+   * @param fromAddressPKs 需要进行授权的钱包私钥数组
+   * @returns 授权交易的结果数组
+   */
+  async approveAll(
+    toAddress: string,
+    fromAddressPKs: string[]
+  ): Promise<any[]> {
+    if (!this.wallet) {
+      throw new Error("需要提供主钱包私钥");
+    }
+    // 估算每个approve操作需要的gas费用
+    const estimatedGasCost = await this.getHistoricalApproveGasCost();
+    const gasCost = estimatedGasCost * BigInt(fromAddressPKs.length * 2); // 确保这个计算是合理的
+    const firstWallet = new ethers.Wallet(fromAddressPKs[0], this.provider);
+    await this.transferNative(firstWallet.address, gasCost); // 确保 firstWallet 有足够的余额
+    const results: any[] = [];
+    for (const [index, pk] of fromAddressPKs.entries()) {
+      const subWallet = new ethers.Wallet(pk, this.provider);
+      try {
+        const subContract = new ethers.Contract(
+          this.contract.target,
+          ERC20Utils.ERC20_ABI,
+          subWallet
+        );
+        const currentAllowance = await this.contract.allowance(
+          subWallet.address,
+          toAddress
+        );
+        const amount = ethers.MaxUint256 / 2n; // 确保这个值是合理的
+        if (currentAllowance < amount) {
+          const approveTX = await subContract.approve(
+            toAddress,
+            ethers.MaxUint256
+          );
+          await approveTX.wait(1);
+          // 转移剩余的 ETH 到下一个地址
+        }
+        if (index < fromAddressPKs.length - 1) {
+          // 确保不是最后一个地址
+          const nextPk = fromAddressPKs[index + 1];
+          const nextWallet = new ethers.Wallet(nextPk, this.provider);
+          const balance = await this.provider.getBalance(subWallet.address);
+          if (balance > 0n) {
+            try {
+              await this.transferAllNative(
+                nextWallet.address,
+                subWallet.privateKey
+              );
+            } catch (error) {
+              break;
+            }
+          }
+        } else {
+          // 如果是最后一个地址，将剩余的 ETH 转回主钱包
+          const balance = await this.provider.getBalance(subWallet.address);
+          if (balance > 0n) {
+            try {
+              await this.transferAllNative(
+                this.wallet.address,
+                subWallet.privateKey
+              );
+            } catch (error) {
+              break;
+            }
+          }
+        }
+        results.push(subWallet.address);
+      } catch (error) {
+        console.error(`处理钱包 ${subWallet.address} 时出错:`, error);
+        await this.transferAllNative(this.wallet.address, subWallet.privateKey); // 确保 this.wallet 有足够的余额
+      }
+    }
+    return results;
   }
 
   /**
@@ -332,5 +417,72 @@ export class ERC20Utils {
       value: transferAmount,
     });
     return tx;
+  }
+
+  /**
+   * 获取最近的授权交易的平均 gas 使用量
+   * @param count 要查询的交易数量
+   * @returns 平均 gas 使用量和当前 gas 价格的乘积
+   */
+  public async getHistoricalApproveGasCost(
+    count: number = 10
+  ): Promise<bigint> {
+    // Approve 事件的 topic
+    const approveEventTopic =
+      "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925";
+
+    // 获取最近的区块
+    const currentBlock = await this.provider.getBlockNumber();
+    const fromBlock = currentBlock - 1000; // 查询最近10000个区块
+
+    // 获取 Approve 事件日志
+    const logs = await this.provider.getLogs({
+      topics: [approveEventTopic],
+      fromBlock,
+      toBlock: "latest",
+    });
+
+    // 获取最近的 count 个授权记录
+    const recentApprovals = logs.slice(-count);
+
+    if (recentApprovals.length === 0) {
+      throw new Error("没有找到最近的授权记录");
+    }
+
+    // 获取这些交易的 gas 使用量
+    const gasUsages = await Promise.all(
+      recentApprovals.map((log) =>
+        this.provider.getTransactionReceipt(log.transactionHash)
+      )
+    );
+
+    // 计算平均 gas 使用量
+    const totalGasUsed = gasUsages.reduce(
+      (sum, receipt) => sum + receipt!.gasUsed,
+      0n
+    );
+    const averageGasUsed = totalGasUsed / BigInt(gasUsages.length);
+
+    // 获取当前 gas 价格
+    const { gasPrice } = await this.provider.getFeeData();
+
+    return averageGasUsed * gasPrice!;
+  }
+  public async estimateApproveGasCost(toAddress: string): Promise<any> {
+    try {
+      // 首先尝试获取历史平均值
+      const historicalGasCost = await this.getHistoricalApproveGasCost();
+      return historicalGasCost;
+    } catch (error) {
+      console.log(error);
+
+      // 如果获取历史数据失败，回退到原来的估算方法
+      const gasLimit = await this.contract.approve.estimateGas(
+        toAddress,
+        ethers.MaxUint256
+      );
+      const gasPrice = await this.provider.getFeeData();
+      return BigInt(gasLimit * gasPrice.gasPrice!);
+    }
   }
 }

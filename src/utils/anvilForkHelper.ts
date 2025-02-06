@@ -1,12 +1,55 @@
 import { ethers } from "ethers";
 
 export class AnvilForkHelper {
-  private forkUrl: string;
+  forkUrl: string;
   private provider: ethers.JsonRpcProvider;
 
   constructor(forkUrl: string = "http://localhost:8545") {
     this.forkUrl = forkUrl;
     this.provider = new ethers.JsonRpcProvider(forkUrl);
+  }
+
+  public async deployContract(
+    abi: any[],
+    bytecode: string,
+    wallet: ethers.Wallet
+  ): Promise<any> {
+    try {
+      // 验证钱包状态
+      const address = wallet.address;
+      const balance = await this.provider.getBalance(address);
+      const nonce = await this.provider.getTransactionCount(address);
+
+      console.log("部署前状态检查:");
+      console.log(`- 部署者地址: ${address}`);
+      console.log(`- 当前余额: ${ethers.formatEther(balance)} ETH`);
+      console.log(`- 当前 Nonce: ${nonce}`);
+
+      // 验证是否仍在模拟状态
+      try {
+        await this.provider.send("anvil_impersonateAccount", [address]);
+      } catch (e) {
+        console.log("重新启动模拟账户");
+      }
+
+      // 创建合约工厂
+      const factory = new ethers.ContractFactory(abi, bytecode, wallet);
+
+      // 估算部署 gas
+      const deployTx = await factory.getDeployTransaction();
+      const estimatedGas = await this.provider.estimateGas(deployTx);
+      console.log(`- 估算 Gas: ${estimatedGas}`);
+
+      // 部署合约
+      const contract = await factory.deploy();
+      await contract.waitForDeployment();
+
+      console.log(`合约已部署到: ${await contract.getAddress()}`);
+      return contract;
+    } catch (error) {
+      console.error("部署错误详细信息:", error);
+      throw new Error(`部署合约失败: ${error}`);
+    }
   }
 
   // 新增方法：铸造 ETH

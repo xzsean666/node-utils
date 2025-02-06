@@ -114,6 +114,21 @@ export class KVDatabase {
       value,
     });
   }
+  async merge(key: string, partialValue: any): Promise<boolean> {
+    await this.ensureInitialized();
+
+    const result = await this.db
+      .createQueryBuilder()
+      .update(this.CustomKVStore)
+      .set({
+        value: () => `value || :newValue::jsonb`,
+      })
+      .where("key = :key", { key })
+      .setParameter("newValue", JSON.stringify(partialValue))
+      .execute();
+
+    return !!result.affected && result.affected > 0;
+  }
 
   async get<T = any>(key: string, expire?: number): Promise<T | null> {
     await this.ensureInitialized();
@@ -223,26 +238,6 @@ export class KVDatabase {
   }
 
   /**
-   * 根据条件查找值
-   * @param condition 查询条件函数
-   * @returns 匹配条件的键值对Map
-   */
-  async findByCondition(
-    condition: (value: any) => boolean
-  ): Promise<Map<string, any>> {
-    await this.ensureInitialized();
-    const allRecords = await this.db.find();
-    const matchedRecords = allRecords.filter((record: { value: any }) =>
-      condition(record.value)
-    );
-    return new Map(
-      matchedRecords.map((record: { key: any; value: any }) => [
-        record.key,
-        record.value,
-      ])
-    );
-  }
-  /**
    * 查找布尔值记录
    * @param boolValue true 或 false
    * @param first 是否只返回第一条记录
@@ -258,7 +253,10 @@ export class KVDatabase {
 
     const queryBuilder = this.db
       .createQueryBuilder(this.tableName)
-      .select("key")
+      .select([
+        `${this.tableName}.key as "key"`,
+        `${this.tableName}.value as "value"`,
+      ])
       .where("value = :value::jsonb", {
         value: JSON.stringify(boolValue),
       })
@@ -270,7 +268,7 @@ export class KVDatabase {
     }
 
     const results = await queryBuilder.getRawMany();
-    return results.map((result) => result.key);
+    return results;
   }
 
   /**
@@ -282,10 +280,16 @@ export class KVDatabase {
     equals?: object; // 完全匹配的 JSON
     path?: string; // JSON 路径
     value?: any; // 路径对应的值
-  }): Promise<string[]> {
+    take?: number;
+  }): Promise<any[]> {
     await this.ensureInitialized();
 
-    let queryBuilder = this.db.createQueryBuilder(this.tableName).select("key");
+    let queryBuilder = this.db
+      .createQueryBuilder(this.tableName)
+      .select([
+        `${this.tableName}.key as "key"`,
+        `${this.tableName}.value as "value"`,
+      ]);
 
     if (searchOptions.contains) {
       queryBuilder = queryBuilder.andWhere(`value @> :contains::jsonb`, {
@@ -306,8 +310,10 @@ export class KVDatabase {
       });
     }
 
+    queryBuilder = queryBuilder.take(searchOptions.take || 100);
+
     const results = await queryBuilder.getRawMany();
-    return results.map((record) => record.key);
+    return results;
   }
 
   /**
@@ -329,7 +335,10 @@ export class KVDatabase {
 
     const query = this.db
       .createQueryBuilder(this.tableName)
-      .select("key")
+      .select([
+        `${this.tableName}.key as "key"`,
+        `${this.tableName}.value as "value"`,
+      ])
       .where(`updated_at ${operator} :timestamp`, {
         timestamp: new Date(timestamp),
       })
@@ -341,6 +350,115 @@ export class KVDatabase {
     }
 
     const results = await query.getRawMany();
-    return results.map((result) => result.key);
+    return results;
+  }
+
+  async searchByTime(params: {
+    timestamp: number;
+    take?: number;
+    type?: "before" | "after";
+    orderBy?: "ASC" | "DESC";
+    timeColumn?: "updated_at" | "created_at";
+  }): Promise<Array<{ key: string; value: any }>> {
+    await this.ensureInitialized();
+    const timeColumn = params.timeColumn || "updated_at";
+    let queryBuilder = this.db
+      .createQueryBuilder()
+      .select([
+        `${this.tableName}.key as "key"`,
+        `${this.tableName}.value as "value"`,
+      ])
+      .from(this.tableName, this.tableName);
+
+    const operator = (params.type || "after") === "before" ? "<" : ">";
+    queryBuilder.where(
+      `${this.tableName}.${timeColumn} ${operator} :timestamp`,
+      {
+        timestamp: new Date(params.timestamp),
+      }
+    );
+
+    queryBuilder.orderBy(
+      `${this.tableName}.${timeColumn}`,
+      params.orderBy || "ASC"
+    );
+    queryBuilder.limit(params.take || 1);
+    try {
+      const results = await queryBuilder.getRawMany();
+      return results;
+    } catch (error) {
+      console.error("查询错误:", queryBuilder.getSql());
+      console.error("查询参数:", queryBuilder.getParameters());
+      throw error;
+    }
+  }
+
+  /**
+   * 优化后的 JSON 和时间复合搜索
+   */
+  async searchJsonByTime(
+    searchOptions: {
+      contains?: object;
+      equals?: object;
+      path?: string;
+      value?: any;
+    },
+    timeOptions: {
+      timestamp: number;
+      take?: number;
+      type?: "before" | "after";
+      orderBy?: "ASC" | "DESC";
+      timeColumn?: "updated_at" | "created_at";
+    }
+  ): Promise<Array<{ key: string; value: any }>> {
+    await this.ensureInitialized();
+    const timeColumn = timeOptions.timeColumn || "updated_at";
+    let queryBuilder = this.db
+      .createQueryBuilder()
+      .select([
+        `${this.tableName}.key as "key"`,
+        `${this.tableName}.value as "value"`,
+      ])
+      .from(this.tableName, this.tableName);
+
+    const operator = (timeOptions.type || "after") === "before" ? "<" : ">";
+    queryBuilder.where(
+      `${this.tableName}.${timeColumn} ${operator} :timestamp`,
+      {
+        timestamp: new Date(timeOptions.timestamp),
+      }
+    );
+
+    if (searchOptions.contains) {
+      queryBuilder.andWhere(`${this.tableName}.value @> :contains::jsonb`, {
+        contains: JSON.stringify(searchOptions.contains),
+      });
+    }
+
+    if (searchOptions.equals) {
+      queryBuilder.andWhere(`${this.tableName}.value = :equals::jsonb`, {
+        equals: JSON.stringify(searchOptions.equals),
+      });
+    }
+
+    if (searchOptions.path && searchOptions.value !== undefined) {
+      queryBuilder.andWhere(`${this.tableName}.value #>> :path = :value`, {
+        path: `{${searchOptions.path}}`,
+        value: String(searchOptions.value),
+      });
+    }
+
+    queryBuilder
+      .orderBy(`${this.tableName}.${timeColumn}`, timeOptions.orderBy || "ASC")
+      .limit(timeOptions.take || 1);
+
+    try {
+      const results = await queryBuilder.getRawMany();
+      return results;
+    } catch (error) {
+      console.error("Query error:", queryBuilder.getSql());
+      console.error("Query parameters:", queryBuilder.getParameters());
+      throw error;
+    }
   }
 }

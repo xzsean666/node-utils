@@ -52,6 +52,18 @@ export class EthersUtils {
 
     return new ethers.BrowserProvider(window.ethereum);
   }
+  public async deployContract(abi: any[], bytecode: string): Promise<any> {
+    try {
+      const signer = new ethers.Wallet(this.privateKey || "", this.web3);
+      const factory = new ethers.ContractFactory(abi, bytecode, signer);
+      const contract = await factory.deploy();
+      await contract.waitForDeployment();
+      console.log(`合约已部署到: ${await contract.getAddress()}`);
+      return contract;
+    } catch (error) {
+      throw new Error(`部署合约失败: ${error}`);
+    }
+  }
   async getBalance(address: string): Promise<string> {
     return (await this.web3.getBalance(address)).toString();
   }

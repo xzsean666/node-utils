@@ -170,6 +170,15 @@ export class KVDatabase {
     }, {} as Record<string, any>);
   }
 
+  async getMany(limit: number = 10): Promise<Record<string, any>> {
+    await this.ensureInitialized();
+    const records = await this.db.find({ take: limit });
+    return records.reduce((acc, record: { key: any; value: any }) => {
+      acc[record.key] = JSON.parse(record.value);
+      return acc;
+    }, {} as Record<string, any>);
+  }
+
   // 获取所有键
   async keys(): Promise<string[]> {
     await this.ensureInitialized();

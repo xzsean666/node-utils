@@ -1,4 +1,4 @@
-import { EthersUtils } from "../ethersUtils";
+import { EthersUtils } from "../ethersUtilsV2";
 import dotenv from "dotenv";
 
 dotenv.config();

@@ -1,5 +1,12 @@
 import { ethers, HDNodeWallet, Log } from "ethers";
+import detectEthereumProvider from "@metamask/detect-provider";
+
 export { ethers };
+declare global {
+  interface Window {
+    ethereum: any;
+  }
+}
 
 interface LogFilter {
   fromBlock?: number | string;
@@ -14,7 +21,7 @@ export class EthersUtils {
   config?: any;
   batchCallAddress?: string;
   ethers: typeof ethers;
-  constructor(NODE_PROVIDER: string | ethers.BrowserProvider, config?: any) {
+  constructor(NODE_PROVIDER?: string | ethers.BrowserProvider, config?: any) {
     this.NODE_PROVIDER = NODE_PROVIDER;
     this.privateKey = config?.privateKey;
     this.config = config;
@@ -24,9 +31,29 @@ export class EthersUtils {
       this.web3 = new ethers.JsonRpcProvider(NODE_PROVIDER);
     } else if (NODE_PROVIDER instanceof ethers.BrowserProvider) {
       this.web3 = NODE_PROVIDER;
+    } else {
+      this.web3 = null as any;
+      this.init();
     }
   }
 
+  private async init() {
+    this.web3 = await this.setup();
+  }
+
+  private async setup(): Promise<ethers.BrowserProvider> {
+    const provider = await detectEthereumProvider();
+
+    if (!provider || provider !== window.ethereum) {
+      throw new Error("MetaMask未安装或检测到多个钱包插件");
+    }
+
+    if (!provider.isMetaMask) {
+      throw new Error("请安装MetaMask钱包");
+    }
+
+    return new ethers.BrowserProvider(window.ethereum);
+  }
   public async deployContract(abi: any[], bytecode: string): Promise<any> {
     try {
       const signer = new ethers.Wallet(this.privateKey || "", this.web3);
@@ -152,13 +179,12 @@ export class EthersUtils {
     if (this.privateKey && this.web3 instanceof ethers.JsonRpcProvider) {
       const wallet = new ethers.Wallet(this.privateKey);
       return wallet.address;
-    } else if (this.web3 instanceof ethers.BrowserProvider) {
-      try {
-        const signer = await this.web3.getSigner();
-        return await signer.getAddress();
-      } catch (error: any) {
-        throw new Error(`获取浏览器账户失败: ${error.message}`);
-      }
+    } else {
+      const accounts = await window.ethereum.request({
+        method: "eth_requestAccounts",
+      });
+      this.account = accounts[0];
+      return this.account;
     }
   }
   getEventTopics(events: any[]) {
@@ -274,12 +300,6 @@ export class EthersUtils {
           call.data,
           call.value || "0"
         );
-      } else if (this.web3 instanceof ethers.BrowserProvider) {
-        txHash = await this.sendWithBrowserProvider(
-          call.target,
-          call.data,
-          call.value || "0"
-        );
       } else {
         txHash = await this.sendWithMetaMask(
           call.target,
@@ -333,43 +353,6 @@ export class EthersUtils {
         decodedData: null,
         error: error,
       };
-    }
-  }
-  private async sendWithBrowserProvider(
-    to: string,
-    data?: string,
-    value: string = "0"
-  ): Promise<string> {
-    if (!this.web3 || !(this.web3 instanceof ethers.BrowserProvider)) {
-      throw new Error("未找到有效的BrowserProvider");
-    }
-
-    try {
-      // 获取签名者
-      const signer = await this.web3.getSigner();
-
-      // 构建交易对象
-      const tx = {
-        to,
-        data: data?.startsWith("0x") ? data : data ? "0x" + data : undefined,
-        value: value === "0" ? "0x0" : ethers.parseEther(value),
-      };
-
-      // 发送交易
-      const txResponse = await signer.sendTransaction(tx);
-
-      // 等待交易被确认
-      const receipt = await txResponse.wait();
-
-      if (!receipt) {
-        throw new Error("交易未被确认");
-      }
-
-      // 返回交易哈希
-      return txResponse.hash;
-    } catch (error: any) {
-      console.error("发送交易失败:", error);
-      throw new Error(`发送交易失败: ${error.message}`);
     }
   }
 

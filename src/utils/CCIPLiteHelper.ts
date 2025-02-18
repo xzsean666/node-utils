@@ -1,4 +1,4 @@
-import { EthersUtils, ethers } from "./ethersUtils";
+import { EthersUtils, ethers } from "./ethersUtilsV2";
 import IEVM2EVMOnRamp from "./abis/IEVM2EVMOnRamp.json";
 import IRouterClientABI from "./abis/IRouterClient.json";
 

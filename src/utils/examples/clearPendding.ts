@@ -1,4 +1,4 @@
-import { EthersUtils } from "../ethersUtils";
+import { EthersUtils } from "../ethersUtilsV2";
 import { config } from "dotenv";
 config();
 const minatourl =

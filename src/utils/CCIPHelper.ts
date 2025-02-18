@@ -1,4 +1,4 @@
-import { EthersUtils, ethers } from "./ethersUtils";
+import { EthersUtils, ethers } from "./ethersUtilsV2";
 import { KVDatabase } from "./PGKVDatabase";
 import IEVM2EVMOnRamp from "./abis/IEVM2EVMOnRamp.json";
 import IEVM2EVMOffRamp from "./abis/IEVM2EVMOffRamp.json";

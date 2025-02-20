@@ -1,24 +1,24 @@
-#!/bin/bash
+# #!/bin/bash
 
-# 暂时取消 PREFIX 环境变量
-OLD_PREFIX=$PREFIX
-unset PREFIX
+# # 暂时取消 PREFIX 环境变量
+# OLD_PREFIX=$PREFIX
+# unset PREFIX
 
-# 加载 NVM
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # 加载 nvm
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # 加载 nvm bash_completion
+# # 加载 NVM
+# export NVM_DIR="$HOME/.nvm"
+# [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # 加载 nvm
+# [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # 加载 nvm bash_completion
 
-# 使用指定的 node 版本
-nvm use v20.12.2
+# # 使用指定的 node 版本
+# nvm use v20.12.2
 
-# 直接设置 NODE 路径
-export PATH="$NVM_DIR/versions/node/v20.12.2/bin:$PATH"
+# # 直接设置 NODE 路径
+# export PATH="$NVM_DIR/versions/node/v20.12.2/bin:$PATH"
 
-# 执行命令
-node scripts/version-bump.js && \
-yarn build && \
-npm publish || exit 1
+# # 执行命令
+# node scripts/version-bump.js && \
+# yarn build && \
+# npm publish || exit 1
 
-# 执行完成后恢复 PREFIX
-export PREFIX=$OLD_PREFIX
+# # 执行完成后恢复 PREFIX
+# export PREFIX=$OLD_PREFIX

@@ -8,7 +8,7 @@ interface LogFilter {
 }
 let window: any;
 export class EthersUtils {
-  web3: ethers.JsonRpcProvider | ethers.BrowserProvider;
+  web3!: ethers.JsonRpcProvider | ethers.BrowserProvider;
   NODE_PROVIDER?: string | ethers.BrowserProvider;
   private privateKey?: string;
   account?: string;
@@ -25,6 +25,8 @@ export class EthersUtils {
       this.web3 = new ethers.JsonRpcProvider(NODE_PROVIDER);
     } else if (NODE_PROVIDER instanceof ethers.BrowserProvider) {
       this.web3 = NODE_PROVIDER;
+    } else {
+      throw new Error("Invalid NODE_PROVIDER type");
     }
   }
 

@@ -1,11 +1,11 @@
-import { DataSource, Repository, Table, In } from "typeorm";
+import { DataSource, Repository, Table, In } from 'typeorm';
 import {
   Entity,
   PrimaryColumn,
   Column,
   CreateDateColumn,
   UpdateDateColumn,
-} from "typeorm";
+} from 'typeorm';
 
 // 添加接口定义
 interface KVEntity {
@@ -22,31 +22,44 @@ export class KVDatabase {
   private tableName: string;
   private CustomKVStore: any;
 
-  constructor(datasourceOrUrl: string, tableName: string = "kv_store") {
+  constructor(datasourceOrUrl: string, tableName: string = 'kv_store') {
     this.tableName = tableName;
 
     @Entity(tableName)
     class CustomKVStore implements KVEntity {
-      @PrimaryColumn("varchar", { length: 255 })
+      @PrimaryColumn('varchar', { length: 255 })
       key: string;
 
-      @Column("jsonb")
+      @Column('jsonb')
       value: any;
 
-      @CreateDateColumn({ type: "timestamptz", name: "created_at" })
+      @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
       created_at: Date;
 
-      @UpdateDateColumn({ type: "timestamptz", name: "updated_at" })
+      @UpdateDateColumn({ type: 'timestamptz', name: 'updated_at' })
       updated_at: Date;
     }
 
     this.CustomKVStore = CustomKVStore;
 
     this.dataSource = new DataSource({
-      type: "postgres",
+      type: 'postgres',
       url: datasourceOrUrl,
       entities: [CustomKVStore],
       synchronize: false,
+      extra: {
+        max: 50,
+        min: 5,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 3000,
+        statement_timeout: 15000,
+        query_timeout: 15000,
+        keepAlive: true,
+        keepAliveInitialDelay: 10000,
+        poolSize: 100,
+        maxUses: 7500,
+      },
+      logging: ['error', 'warn'],
     });
   }
 
@@ -65,35 +78,35 @@ export class KVDatabase {
               name: this.tableName,
               columns: [
                 {
-                  name: "key",
-                  type: "varchar",
-                  length: "255",
+                  name: 'key',
+                  type: 'varchar',
+                  length: '255',
                   isPrimary: true,
                 },
                 {
-                  name: "value",
-                  type: "jsonb",
+                  name: 'value',
+                  type: 'jsonb',
                   isNullable: true,
                 },
                 {
-                  name: "created_at",
-                  type: "timestamptz",
-                  default: "CURRENT_TIMESTAMP",
+                  name: 'created_at',
+                  type: 'timestamptz',
+                  default: 'CURRENT_TIMESTAMP',
                 },
                 {
-                  name: "updated_at",
-                  type: "timestamptz",
-                  default: "CURRENT_TIMESTAMP",
+                  name: 'updated_at',
+                  type: 'timestamptz',
+                  default: 'CURRENT_TIMESTAMP',
                 },
               ],
             }),
-            true // ifNotExists: true
+            true, // ifNotExists: true
           );
 
           // 创建 GIN 索引
           try {
             await queryRunner.query(
-              `CREATE INDEX IF NOT EXISTS "IDX_${this.tableName}_value_gin" ON "${this.tableName}" USING gin (value);`
+              `CREATE INDEX IF NOT EXISTS "IDX_${this.tableName}_value_gin" ON "${this.tableName}" USING gin (value);`,
             );
           } catch (err) {
             console.warn(`创建索引失败，可能已存在: ${err}`);
@@ -123,8 +136,8 @@ export class KVDatabase {
       .set({
         value: () => `value || :newValue::jsonb`,
       })
-      .where("key = :key", { key })
-      .setParameter("newValue", JSON.stringify(partialValue))
+      .where('key = :key', { key })
+      .setParameter('newValue', JSON.stringify(partialValue))
       .execute();
 
     return !!result.affected && result.affected > 0;
@@ -183,14 +196,14 @@ export class KVDatabase {
       records.map((record: { key: any; value: any }) => [
         record.key,
         record.value,
-      ])
+      ]),
     );
   }
 
   // 获取所有键
   async keys(): Promise<string[]> {
     await this.ensureInitialized();
-    const records = await this.db.find({ select: ["key"] });
+    const records = await this.db.find({ select: ['key'] });
     return records.map((record: { key: any }) => record.key);
   }
 
@@ -203,18 +216,41 @@ export class KVDatabase {
   // 批量添加键值对
   async putMany(
     entries: Array<[string, any]>,
-    batchSize: number = 1000
+    batchSize: number = 1000,
   ): Promise<void> {
     await this.ensureInitialized();
 
-    // 分批处理大量数据
-    for (let i = 0; i < entries.length; i += batchSize) {
-      const batch = entries.slice(i, i + batchSize);
-      const entities = batch.map(([key, value]) => ({
-        key,
-        value,
-      }));
-      await this.db.save(entities);
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // 使用 VALUES 语法构建批量插入语句
+      for (let i = 0; i < entries.length; i += batchSize) {
+        const batch = entries.slice(i, i + batchSize);
+        const values = batch
+          .map(
+            ([key, value]) =>
+              `('${key}', '${JSON.stringify(value)}', NOW(), NOW())`,
+          )
+          .join(',');
+
+        await queryRunner.query(`
+          INSERT INTO "${this.tableName}" (key, value, created_at, updated_at)
+          VALUES ${values}
+          ON CONFLICT (key) 
+          DO UPDATE SET 
+            value = EXCLUDED.value,
+            updated_at = EXCLUDED.updated_at
+        `);
+      }
+
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
   }
 
@@ -247,7 +283,7 @@ export class KVDatabase {
   async findBoolValues(
     boolValue: boolean,
     first: boolean = true,
-    orderBy: "ASC" | "DESC" = "ASC"
+    orderBy: 'ASC' | 'DESC' = 'ASC',
   ): Promise<string[] | string | null> {
     await this.ensureInitialized();
 
@@ -257,10 +293,10 @@ export class KVDatabase {
         `${this.tableName}.key as "key"`,
         `${this.tableName}.value as "value"`,
       ])
-      .where("value = :value::jsonb", {
+      .where('value = :value::jsonb', {
         value: JSON.stringify(boolValue),
       })
-      .orderBy("created_at", orderBy);
+      .orderBy('created_at', orderBy);
 
     if (first) {
       const result = await queryBuilder.getRawOne();
@@ -276,44 +312,67 @@ export class KVDatabase {
    * @param searchOptions 搜索选项
    */
   async searchJson(searchOptions: {
-    contains?: object; // 包含的 JSON
-    equals?: object; // 完全匹配的 JSON
-    path?: string; // JSON 路径
-    value?: any; // 路径对应的值
-    take?: number;
-  }): Promise<any[]> {
+    contains?: object;
+    limit?: number;
+    cursor?: string;
+  }): Promise<{
+    data: any[];
+    nextCursor: string | null;
+  }> {
     await this.ensureInitialized();
+
+    const limit = searchOptions.limit || 100;
 
     let queryBuilder = this.db
       .createQueryBuilder(this.tableName)
       .select([
         `${this.tableName}.key as "key"`,
         `${this.tableName}.value as "value"`,
-      ]);
+        `${this.tableName}.created_at as "created_at"`,
+        `${this.tableName}.updated_at as "updated_at"`,
+      ])
+      .take(limit + 1);
 
     if (searchOptions.contains) {
-      queryBuilder = queryBuilder.andWhere(`value @> :contains::jsonb`, {
-        contains: JSON.stringify(searchOptions.contains),
-      });
+      const containsJson = JSON.stringify(searchOptions.contains);
+      if (Object.keys(searchOptions.contains).length === 1) {
+        const [key, value] = Object.entries(searchOptions.contains)[0];
+        queryBuilder.andWhere(`value->:key = :value::jsonb`, {
+          key,
+          value: JSON.stringify(value),
+        });
+      } else {
+        queryBuilder.andWhere(`value @> :contains::jsonb`, {
+          contains: containsJson,
+        });
+      }
     }
 
-    if (searchOptions.equals) {
-      queryBuilder = queryBuilder.andWhere(`value = :equals::jsonb`, {
-        equals: JSON.stringify(searchOptions.equals),
-      });
+    if (searchOptions.cursor) {
+      queryBuilder
+        .andWhere(`${this.tableName}.key > :cursor`, {
+          cursor: searchOptions.cursor,
+        })
+        .orderBy(`${this.tableName}.key`, 'ASC')
+        .useIndex(`${this.tableName}_pkey`);
     }
 
-    if (searchOptions.path && searchOptions.value !== undefined) {
-      queryBuilder = queryBuilder.andWhere(`value #>> :path = :value`, {
-        path: `{${searchOptions.path}}`,
-        value: String(searchOptions.value),
-      });
+    try {
+      const results = await queryBuilder.getMany();
+
+      const hasMore = results.length > limit;
+      const data = results.slice(0, limit);
+      const nextCursor = hasMore ? data[data.length - 1].key : null;
+
+      return {
+        data,
+        nextCursor,
+      };
+    } catch (error) {
+      console.error('Query error:', queryBuilder.getSql());
+      console.error('Query parameters:', queryBuilder.getParameters());
+      throw error;
     }
-
-    queryBuilder = queryBuilder.take(searchOptions.take || 100);
-
-    const results = await queryBuilder.getRawMany();
-    return results;
   }
 
   /**
@@ -326,12 +385,12 @@ export class KVDatabase {
   async findByUpdateTime(
     timestamp: number,
     first: boolean = true,
-    type: "before" | "after" = "after",
-    orderBy: "ASC" | "DESC" = "ASC"
+    type: 'before' | 'after' = 'after',
+    orderBy: 'ASC' | 'DESC' = 'ASC',
   ): Promise<string[] | string | null> {
     await this.ensureInitialized();
 
-    const operator = type === "before" ? "<" : ">";
+    const operator = type === 'before' ? '<' : '>';
 
     const query = this.db
       .createQueryBuilder(this.tableName)
@@ -342,7 +401,7 @@ export class KVDatabase {
       .where(`updated_at ${operator} :timestamp`, {
         timestamp: new Date(timestamp),
       })
-      .orderBy("updated_at", orderBy);
+      .orderBy('updated_at', orderBy);
 
     if (first) {
       const result = await query.getRawOne();
@@ -356,12 +415,12 @@ export class KVDatabase {
   async searchByTime(params: {
     timestamp: number;
     take?: number;
-    type?: "before" | "after";
-    orderBy?: "ASC" | "DESC";
-    timeColumn?: "updated_at" | "created_at";
+    type?: 'before' | 'after';
+    orderBy?: 'ASC' | 'DESC';
+    timeColumn?: 'updated_at' | 'created_at';
   }): Promise<Array<{ key: string; value: any }>> {
     await this.ensureInitialized();
-    const timeColumn = params.timeColumn || "updated_at";
+    const timeColumn = params.timeColumn || 'updated_at';
     let queryBuilder = this.db
       .createQueryBuilder()
       .select([
@@ -370,25 +429,25 @@ export class KVDatabase {
       ])
       .from(this.tableName, this.tableName);
 
-    const operator = (params.type || "after") === "before" ? "<" : ">";
+    const operator = (params.type || 'after') === 'before' ? '<' : '>';
     queryBuilder.where(
       `${this.tableName}.${timeColumn} ${operator} :timestamp`,
       {
         timestamp: new Date(params.timestamp),
-      }
+      },
     );
 
     queryBuilder.orderBy(
       `${this.tableName}.${timeColumn}`,
-      params.orderBy || "ASC"
+      params.orderBy || 'ASC',
     );
     queryBuilder.limit(params.take || 1);
     try {
       const results = await queryBuilder.getRawMany();
       return results;
     } catch (error) {
-      console.error("查询错误:", queryBuilder.getSql());
-      console.error("查询参数:", queryBuilder.getParameters());
+      console.error('查询错误:', queryBuilder.getSql());
+      console.error('查询参数:', queryBuilder.getParameters());
       throw error;
     }
   }
@@ -406,13 +465,13 @@ export class KVDatabase {
     timeOptions: {
       timestamp: number;
       take?: number;
-      type?: "before" | "after";
-      orderBy?: "ASC" | "DESC";
-      timeColumn?: "updated_at" | "created_at";
-    }
+      type?: 'before' | 'after';
+      orderBy?: 'ASC' | 'DESC';
+      timeColumn?: 'updated_at' | 'created_at';
+    },
   ): Promise<Array<{ key: string; value: any }>> {
     await this.ensureInitialized();
-    const timeColumn = timeOptions.timeColumn || "updated_at";
+    const timeColumn = timeOptions.timeColumn || 'updated_at';
     let queryBuilder = this.db
       .createQueryBuilder()
       .select([
@@ -421,12 +480,12 @@ export class KVDatabase {
       ])
       .from(this.tableName, this.tableName);
 
-    const operator = (timeOptions.type || "after") === "before" ? "<" : ">";
+    const operator = (timeOptions.type || 'after') === 'before' ? '<' : '>';
     queryBuilder.where(
       `${this.tableName}.${timeColumn} ${operator} :timestamp`,
       {
         timestamp: new Date(timeOptions.timestamp),
-      }
+      },
     );
 
     if (searchOptions.contains) {
@@ -449,15 +508,15 @@ export class KVDatabase {
     }
 
     queryBuilder
-      .orderBy(`${this.tableName}.${timeColumn}`, timeOptions.orderBy || "ASC")
+      .orderBy(`${this.tableName}.${timeColumn}`, timeOptions.orderBy || 'ASC')
       .limit(timeOptions.take || 1);
 
     try {
       const results = await queryBuilder.getRawMany();
       return results;
     } catch (error) {
-      console.error("Query error:", queryBuilder.getSql());
-      console.error("Query parameters:", queryBuilder.getParameters());
+      console.error('Query error:', queryBuilder.getSql());
+      console.error('Query parameters:', queryBuilder.getParameters());
       throw error;
     }
   }

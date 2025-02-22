@@ -2,25 +2,34 @@ import axios from 'axios';
 
 interface SystemMetrics {
   current: {
-    cpu: {
-      total: number;
-      details: { [key: string]: number };
-    };
+    cpu: any;
     memory: any;
+    network: any;
+    diskio: any;
+    disk: any;
   };
   average: {
-    cpu: number;
+    cpu: any;
     memory: any;
+    network: any;
+    diskio: any;
+    disk: any;
   };
 }
 
 export class NetDataHelper {
-  private baseUrl: string;
+  baseUrl: string;
+  domain: string;
 
   constructor(baseUrl: string) {
     this.baseUrl = `${baseUrl}/api/v1`;
+    this.domain = baseUrl.replace(/^https?:\/\//, '').replace(/:\d+$/, '');
   }
 
+  async getAllCharts() {
+    const response = await axios.get(`${this.baseUrl}/charts`);
+    return response.data;
+  }
   /**
    * 获取系统基础信息
    */
@@ -63,14 +72,65 @@ export class NetDataHelper {
   /**
    * 获取磁盘使用情况
    */
+  async getDiskIO() {
+    try {
+      const response = await axios.get(`${this.baseUrl}/data?chart=system.io`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get disk usage:', error);
+      throw error;
+    }
+  }
+  async getAverageDiskIO() {
+    const data = await this.getDiskIO();
+    const dataCount = data.data.length;
+    let count60 = 0; // 添加计数器用于计算平均值
+    let average60 = { read: 0, write: 0 };
+    let average600 = { read: 0, write: 0 };
+    for (const item of data.data) {
+      if (count60 <= 60) {
+        average60.read += item[1];
+        average60.write += item[2];
+        count60++;
+      }
+      average600.read += item[1];
+      average600.write += item[2];
+    }
+    return {
+      average60: {
+        read: Number((average60.read / 60).toFixed(2)) || 0,
+        write: Math.abs(Number((average60.write / 60).toFixed(2))) || 0,
+      },
+      average600: {
+        read: Number((average600.read / dataCount).toFixed(2)) || 0,
+        write: Math.abs(Number((average600.write / dataCount).toFixed(2))) || 0,
+      },
+    };
+  }
   async getDiskUsage() {
     try {
       const response = await axios.get(
-        `${this.baseUrl}/data?chart=disk_space._`,
+        `${this.baseUrl}/data?chart=disk_space./&format=json&points=1`,
       );
-      return response.data;
+
+      const data = response.data;
+      if (!data || !data.data || !data.data[0]) {
+        throw new Error('Invalid disk space data');
+      }
+
+      // 正确解析数据顺序：[timestamp, avail, used, reserved]
+      const [timestamp, avail, used] = data.data[0];
+      const total = used + avail;
+      const used_percent = (used / total) * 100;
+
+      return {
+        used_percent: Number(used_percent.toFixed(2)),
+        avail,
+        used,
+        total,
+      };
     } catch (error) {
-      console.error('获取磁盘使用情况失败:', error);
+      console.error('Failed to get disk space usage:', error);
       throw error;
     }
   }
@@ -87,7 +147,40 @@ export class NetDataHelper {
       throw error;
     }
   }
+  async getAverageNetworkTraffic() {
+    try {
+      let average60 = { received: 0, sent: 0 };
+      let average600 = { received: 0, sent: 0 };
+      const data = await this.getNetworkTraffic();
+      const dataCount = data.data.length;
+      let count60 = 0; // 添加计数器用于计算平均值
 
+      for (const item of data.data) {
+        // 修改条件：只统计最近60秒的数据
+        if (count60 <= 60) {
+          average60.received += item[1];
+          average60.sent += item[2];
+          count60++;
+        }
+        average600.received += item[1];
+        average600.sent += item[2];
+      }
+
+      return {
+        average60: {
+          received: Number((average60.received / 60).toFixed(2)) || 0,
+          sent: Math.abs(Number((average60.sent / 60).toFixed(2))) || 0,
+        },
+        average600: {
+          received: Number((average600.received / dataCount).toFixed(2)) || 0,
+          sent: Math.abs(Number((average600.sent / dataCount).toFixed(2))) || 0,
+        },
+      };
+    } catch (error) {
+      console.error('Failed to get network traffic info:', error);
+      throw error;
+    }
+  }
   /**
    * 获取CPU平均使用率
    * @param cpuData getCPUUsage()的结果
@@ -201,38 +294,40 @@ export class NetDataHelper {
 
       // 获取内存平均值
       const memoryAvg = this.getMemoryAverageUsage(memResponse);
-      console.log(memoryAvg);
 
+      const networkAvg = await this.getAverageNetworkTraffic();
+
+      const diskIOAvg = await this.getAverageDiskIO();
+      const diskUsage = await this.getDiskUsage();
       return {
         current: {
           cpu: {
-            total: Number(currentCpuTotal.toFixed(2)),
-            details: {
-              user: cpuData.data[0][1],
-              system: cpuData.data[0][2],
-              nice: cpuData.data[0][3],
-              iowait: cpuData.data[0][4],
-              irq: cpuData.data[0][5],
-              softirq: cpuData.data[0][6],
-              steal: cpuData.data[0][7],
-              guest: cpuData.data[0][8],
-              guest_nice: cpuData.data[0][9],
-            },
+            data: Number(currentCpuTotal.toFixed(2)),
+            symbol: '%',
           },
           memory: {
-            total: totalMemory,
-            free: freeMemory,
-            used: usedMemory,
-            cached: cachedMemory,
-            buffers: buffersMemory,
-            usedPercentage: Number(
-              ((usedMemory / totalMemory) * 100).toFixed(2),
-            ),
+            data: Number(((usedMemory / totalMemory) * 100).toFixed(2)),
+            symbol: '%',
+          },
+          network: {
+            data: networkAvg.average60,
+            symbol: 'Kb/s',
+          },
+          diskio: {
+            data: diskIOAvg.average60,
+            symbol: 'Kb/s',
+          },
+          disk: {
+            data: diskUsage.used_percent,
+            symbol: '%',
           },
         },
         average: {
-          cpu: cpuAvg,
-          memory: memoryAvg,
+          cpu: { data: cpuAvg, symbol: '%' },
+          memory: { data: memoryAvg.usedPercentage, symbol: '%' },
+          network: { data: networkAvg.average600, symbol: 'Kb/s' },
+          diskio: { data: diskIOAvg.average600, symbol: 'Kb/s' },
+          disk: { data: diskUsage.used_percent, symbol: '%' },
         },
       };
     } catch (error) {

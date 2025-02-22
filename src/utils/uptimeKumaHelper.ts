@@ -1,4 +1,4 @@
-import io from 'socket.io-client';
+import { io } from 'socket.io-client';
 
 export interface UptimeKumaConfig {
   baseUrl: string;
@@ -229,7 +229,7 @@ export class UptimeKumaHelper {
       // 设置超时保护
       setTimeout(() => {
         resolve(monitors);
-      }, 5000);
+      }, 20000);
 
       this.emitAsync('getMonitorList').catch(reject);
     });

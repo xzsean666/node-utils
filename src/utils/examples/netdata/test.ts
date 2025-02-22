@@ -11,6 +11,19 @@ async function test() {
   //   console.log(diskUsage);
   const systemMetrics = await netDataHelper.getSystemMetrics();
   console.log(JSON.stringify(systemMetrics, null, 2));
+  // const netData = await netDataHelper.getAverageNetworkTraffic();
+  // console.log(netData);
+  // const allCharts = await netDataHelper.getAllCharts();
+  // console.log(Object.keys(allCharts.charts));
+  // // console.log(allCharts);
+  // console.log(allCharts.charts['disk_space./']);
+  // for (const chart of Object.keys(allCharts.charts)) {
+  //   if (chart.includes('system')) {
+  //     console.log(chart);
+  //   }
+  // }
+  // const diskUsage = await netDataHelper.getAverageDiskIO();
+  // console.log(diskUsage);
 }
 
 test();

@@ -3,16 +3,16 @@ import IEVM2EVMOnRamp from "./abis/IEVM2EVMOnRamp.json";
 import IRouterClientABI from "./abis/IRouterClient.json";
 
 interface TokenAmount {
-  token: string;
-  amount: string | bigint;
+  token?: string;
+  amount?: string | bigint;
 }
 
 interface MessageParams {
   receiver: string;
   data: string;
-  token: string;
-  amount: string | bigint;
-  feeToken: string;
+  token?: string;
+  amount?: string | bigint;
+  feeToken?: string;
   gasLimit?: number;
 }
 
@@ -26,8 +26,10 @@ interface CCIPMessage {
 export class CCIPLiteHelper {
   ethersUtils: EthersUtils;
 
-  constructor(rpcUrl: string) {
-    this.ethersUtils = new EthersUtils(rpcUrl);
+  constructor(rpcUrl: string, privateKey?: string) {
+    this.ethersUtils = new EthersUtils(rpcUrl, {
+      privateKey,
+    });
   }
 
   async sendTransaction(callData: any) {
@@ -41,6 +43,7 @@ export class CCIPLiteHelper {
     message: CCIPMessage
   ): Promise<any> {
     const useNative = message.feeToken === ethers.ZeroAddress;
+
     const fee = await this.getFee(
       sourceRouterAddress,
       destinationChainSelector,
@@ -66,28 +69,47 @@ export class CCIPLiteHelper {
       IRouterClientABI
     );
     const fees = await routerContract.getFee(destinationChainSelector, message);
-    return fees;
+    return fees.toString();
   }
 
   createMessage(params: MessageParams): CCIPMessage {
-    let extraArgs = "";
-    if (params.gasLimit) {
-      extraArgs = this.createExtraArgs(params.gasLimit);
+    if (!params.receiver) {
+      throw new Error("Receiver address is required");
     }
 
-    const tokenAmounts: TokenAmount[] = [
-      {
-        token: params.token,
-        amount: params.amount,
-      },
-    ];
+    // Encode the receiver address using abi.encode
+    const abiCoder = new ethers.AbiCoder();
+    const formattedReceiver = abiCoder.encode(
+      ["address"],
+      [ethers.getAddress(params.receiver)]
+    );
+
+    // Only add tokenAmount if token or amount is provided
+    const tokenAmounts: TokenAmount[] = [];
+    if (params.token || params.amount) {
+      let formattedToken = ethers.ZeroAddress;
+      if (params.token) {
+        try {
+          formattedToken = ethers.getAddress(params.token);
+        } catch (error) {
+          throw new Error("Invalid token address format");
+        }
+      }
+
+      tokenAmounts.push({
+        token: formattedToken,
+        amount: BigInt(params.amount || "0"),
+      });
+    }
 
     return {
-      receiver: params.receiver,
-      data: params.data,
+      receiver: formattedReceiver,
+      data: params.data || "0x",
       tokenAmounts,
-      feeToken: params.feeToken,
-      extraArgs,
+      feeToken: params.feeToken
+        ? ethers.getAddress(params.feeToken)
+        : ethers.ZeroAddress,
+      extraArgs: "0x",
     };
   }
 

@@ -44,7 +44,59 @@ export class GraphQLHelper {
     mutation: string,
     variables?: Record<string, any>
   ): Promise<T> {
-    return this.query<T>(mutation, variables);
+    try {
+      // 预处理 variables，自动序列化 JSON 类型的值
+      const processedVariables = variables
+        ? this.processVariables(variables)
+        : undefined;
+
+      const response = await fetch(this.endpoint, {
+        method: "POST",
+        headers: this.headers,
+        body: JSON.stringify({
+          query: mutation,
+          variables: processedVariables,
+        }),
+      });
+      const result = await response.json();
+
+      if (result.errors) {
+        throw new Error(
+          `GraphQL Errors: ${result.errors
+            .map((e: any) => e.message)
+            .join(", ")}`
+        );
+      }
+
+      return result.data as T;
+    } catch (error) {
+      console.error("GraphQL mutation error:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * 处理变量，自动序列化需要的值
+   * @param variables 变量对象
+   * @returns 处理后的变量对象
+   */
+  private processVariables(
+    variables: Record<string, any>
+  ): Record<string, any> {
+    return Object.entries(variables).reduce((acc, [key, value]) => {
+      // 如果值是对象但不是Date、Array等，则序列化
+      if (
+        value &&
+        typeof value === "object" &&
+        !(value instanceof Date) &&
+        !Array.isArray(value)
+      ) {
+        acc[key] = JSON.stringify(value);
+      } else {
+        acc[key] = value;
+      }
+      return acc;
+    }, {} as Record<string, any>);
   }
 
   /**

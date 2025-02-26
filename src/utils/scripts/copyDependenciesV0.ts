@@ -47,8 +47,8 @@ function analyzeDependencies(filePath: string, depth = 0, maxDepth = 5) {
 
   const content = fs.readFileSync(filePath, 'utf-8');
   const relativePath = path.relative(sourceDir, filePath);
-  const relativeLastPath: any = relativePath.split('/').slice(-2).join('/');
-  const targetPath = path.join(targetDir, relativeLastPath);
+
+  const targetPath = path.join(targetDir, relativePath);
 
   // 创建目标文件所在的目录
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });

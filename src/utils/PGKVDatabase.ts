@@ -323,7 +323,7 @@ export class KVDatabase {
 
     const limit = searchOptions.limit || 100;
 
-    let queryBuilder = this.db
+    const queryBuilder = this.db
       .createQueryBuilder(this.tableName)
       .select([
         `${this.tableName}.key as "key"`,
@@ -421,7 +421,7 @@ export class KVDatabase {
   }): Promise<Array<{ key: string; value: any }>> {
     await this.ensureInitialized();
     const timeColumn = params.timeColumn || 'updated_at';
-    let queryBuilder = this.db
+    const queryBuilder = this.db
       .createQueryBuilder()
       .select([
         `${this.tableName}.key as "key"`,
@@ -472,7 +472,7 @@ export class KVDatabase {
   ): Promise<Array<{ key: string; value: any }>> {
     await this.ensureInitialized();
     const timeColumn = timeOptions.timeColumn || 'updated_at';
-    let queryBuilder = this.db
+    const queryBuilder = this.db
       .createQueryBuilder()
       .select([
         `${this.tableName}.key as "key"`,

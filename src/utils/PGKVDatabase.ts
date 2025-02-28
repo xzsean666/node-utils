@@ -315,6 +315,11 @@ export class KVDatabase {
     contains?: object;
     limit?: number;
     cursor?: string;
+    compare?: Array<{
+      path: string;
+      operator: '>' | '<' | '>=' | '<=' | '=' | '!=';
+      value: number | string | Date;
+    }>;
   }): Promise<{
     data: any[];
     nextCursor: string | null;
@@ -346,6 +351,35 @@ export class KVDatabase {
           contains: containsJson,
         });
       }
+    }
+
+    // 添加比较操作的支持
+    if (searchOptions.compare) {
+      searchOptions.compare.forEach((condition, index) => {
+        const paramKey = `value${index}`;
+        const jsonPath = `{${condition.path}}`;
+
+        // 处理日期类型
+        let compareValue = condition.value;
+        if (condition.value instanceof Date) {
+          compareValue = condition.value.toISOString();
+        }
+
+        // 使用 #>> 操作符提取 JSON 路径的值，然后进行比较
+        // 对于数字类型，使用 (value #>> :path)::numeric 进行转换
+        // 对于日期类型，使用 (value #>> :path)::timestamp 进行转换
+        const isNumeric = typeof compareValue === 'number';
+        const isDate = condition.value instanceof Date;
+
+        const castType = isNumeric ? 'numeric' : isDate ? 'timestamp' : 'text';
+        queryBuilder.andWhere(
+          `(${this.tableName}.value #>> :path${index})::${castType} ${condition.operator} :${paramKey}`,
+          {
+            [`path${index}`]: jsonPath,
+            [paramKey]: compareValue,
+          },
+        );
+      });
     }
 
     if (searchOptions.cursor) {

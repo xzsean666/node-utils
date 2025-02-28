@@ -1,11 +1,11 @@
-import { DataSource, Repository, Table, In } from "typeorm";
+import { DataSource, Repository, Table, In } from 'typeorm';
 import {
   Entity,
   PrimaryColumn,
   Column,
   CreateDateColumn,
   UpdateDateColumn,
-} from "typeorm";
+} from 'typeorm';
 
 // 添加接口定义
 interface KVEntity {
@@ -15,7 +15,7 @@ interface KVEntity {
   updated_at: Date;
 }
 function bigintHandler(key: string, val: any) {
-  if (typeof val === "bigint") {
+  if (typeof val === 'bigint') {
     return val.toString(); // 将 BigInt 转换为字符串
   }
   return val;
@@ -28,29 +28,29 @@ export class KVDatabase {
   private tableName: string;
   private CustomKVStore: any;
 
-  constructor(datasourceOrUrl?: string, tableName: string = "kv_store") {
+  constructor(datasourceOrUrl?: string, tableName: string = 'kv_store') {
     this.tableName = tableName;
 
     @Entity(tableName)
     class CustomKVStore implements KVEntity {
-      @PrimaryColumn("varchar", { length: 255 })
+      @PrimaryColumn('varchar', { length: 255 })
       key: string;
 
-      @Column("text")
+      @Column('text')
       value: any;
 
-      @CreateDateColumn({ type: "datetime" })
+      @CreateDateColumn({ type: 'datetime' })
       created_at: Date;
 
-      @UpdateDateColumn({ type: "datetime" })
+      @UpdateDateColumn({ type: 'datetime' })
       updated_at: Date;
     }
 
     this.CustomKVStore = CustomKVStore;
 
     this.dataSource = new DataSource({
-      type: "sqlite",
-      database: datasourceOrUrl || ":memory:",
+      type: 'sqlite',
+      database: datasourceOrUrl || ':memory:',
       entities: [CustomKVStore],
       synchronize: false,
     });
@@ -73,27 +73,27 @@ export class KVDatabase {
                 name: this.tableName,
                 columns: [
                   {
-                    name: "key",
-                    type: "varchar",
-                    length: "255",
+                    name: 'key',
+                    type: 'varchar',
+                    length: '255',
                     isPrimary: true,
                   },
                   {
-                    name: "value",
-                    type: "text",
+                    name: 'value',
+                    type: 'text',
                   },
                   {
-                    name: "created_at",
-                    type: "datetime",
-                    default: "CURRENT_TIMESTAMP",
+                    name: 'created_at',
+                    type: 'datetime',
+                    default: 'CURRENT_TIMESTAMP',
                   },
                   {
-                    name: "updated_at",
-                    type: "datetime",
-                    default: "CURRENT_TIMESTAMP",
+                    name: 'updated_at',
+                    type: 'datetime',
+                    default: 'CURRENT_TIMESTAMP',
                   },
                 ],
-              })
+              }),
             );
           }
         } finally {
@@ -114,7 +114,11 @@ export class KVDatabase {
     });
   }
 
-  async get<T = any>(key: string, expire?: number): Promise<T | null> {
+  async get<T = any>(
+    key: string,
+    expire?: number,
+    deleteExpired: boolean = true,
+  ): Promise<T | null> {
     await this.ensureInitialized();
     const record = await this.db.findOne({ where: { key } });
 
@@ -127,7 +131,9 @@ export class KVDatabase {
 
       if (currentTime - createdTime > expire) {
         // 可选：删除过期数据
-        // await this.delete(key);
+        if (deleteExpired) {
+          await this.delete(key);
+        }
         return null;
       }
     }
@@ -164,25 +170,31 @@ export class KVDatabase {
   async getAll(): Promise<Record<string, any>> {
     await this.ensureInitialized();
     const records = await this.db.find();
-    return records.reduce((acc, record: { key: any; value: any }) => {
-      acc[record.key] = JSON.parse(record.value);
-      return acc;
-    }, {} as Record<string, any>);
+    return records.reduce(
+      (acc, record: { key: any; value: any }) => {
+        acc[record.key] = JSON.parse(record.value);
+        return acc;
+      },
+      {} as Record<string, any>,
+    );
   }
 
   async getMany(limit: number = 10): Promise<Record<string, any>> {
     await this.ensureInitialized();
     const records = await this.db.find({ take: limit });
-    return records.reduce((acc, record: { key: any; value: any }) => {
-      acc[record.key] = JSON.parse(record.value);
-      return acc;
-    }, {} as Record<string, any>);
+    return records.reduce(
+      (acc, record: { key: any; value: any }) => {
+        acc[record.key] = JSON.parse(record.value);
+        return acc;
+      },
+      {} as Record<string, any>,
+    );
   }
 
   // 获取所有键
   async keys(): Promise<string[]> {
     await this.ensureInitialized();
-    const records = await this.db.find({ select: ["key"] });
+    const records = await this.db.find({ select: ['key'] });
     return records.map((record: { key: any }) => record.key);
   }
 
@@ -195,7 +207,7 @@ export class KVDatabase {
   // 批量添加键值对
   async putMany(
     entries: Array<[string, any]>,
-    batchSize: number = 1000
+    batchSize: number = 1000,
   ): Promise<void> {
     await this.ensureInitialized();
 
@@ -248,7 +260,7 @@ export class KVDatabase {
     } else {
       // SQLite 的文本搜索
       const searchValue =
-        typeof value === "string" ? value : JSON.stringify(value);
+        typeof value === 'string' ? value : JSON.stringify(value);
       queryBuilder = queryBuilder.where(`value LIKE :value`, {
         value: `%${searchValue}%`,
       });
@@ -264,12 +276,12 @@ export class KVDatabase {
    * @returns 匹配条件的键值对Map
    */
   async findByCondition(
-    condition: (value: any) => boolean
+    condition: (value: any) => boolean,
   ): Promise<Map<string, any>> {
     await this.ensureInitialized();
     const allRecords = await this.db.find();
     const matchedRecords = allRecords.filter((record: { value: any }) =>
-      condition(JSON.parse(record.value))
+      condition(JSON.parse(record.value)),
     );
     return matchedRecords.reduce((acc, record: { key: any; value: any }) => {
       acc.set(record.key, JSON.parse(record.value));

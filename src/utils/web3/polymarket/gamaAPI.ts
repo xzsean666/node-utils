@@ -2,6 +2,30 @@ import axios from 'axios';
 
 const base_url = 'https://gamma-api.polymarket.com';
 
+export type Params = {
+  limit?: number;
+  offset?: number;
+  order?: string;
+  ascending?: boolean;
+  id?: number | number[];
+  slug?: string | string[];
+  archived?: boolean;
+  active?: boolean;
+  closed?: boolean;
+  clob_token_ids?: string | string[];
+  condition_ids?: string | string[];
+  liquidity_num_min?: number;
+  liquidity_num_max?: number;
+  volume_num_min?: number;
+  volume_num_max?: number;
+  start_date_min?: string;
+  start_date_max?: string;
+  end_date_min?: string;
+  end_date_max?: string;
+  tag_id?: number;
+  related_tags?: boolean;
+};
+
 export class GamaAPI {
   db: any;
 
@@ -14,7 +38,7 @@ export class GamaAPI {
     return response.data;
   }
 
-  async get_markets(params: any | null = null) {
+  async get_markets(params: Params | null = null) {
     const response = await axios.get(`${base_url}/markets`, {
       params: params ? params : undefined,
     });

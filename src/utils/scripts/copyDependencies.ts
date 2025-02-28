@@ -5,6 +5,7 @@ import * as path from 'path';
 const args = process.argv.slice(2);
 let inputFile: string | undefined;
 let outputDir: string | undefined;
+let relativeDir: string | undefined;
 
 // 解析命令行参数
 for (let i = 0; i < args.length; i++) {
@@ -13,6 +14,7 @@ for (let i = 0; i < args.length; i++) {
     i++;
   } else if (args[i] === '--output' && args[i + 1]) {
     outputDir = path.resolve(process.cwd(), args[i + 1]);
+    relativeDir = args[i + 1];
     i++;
   }
 }
@@ -31,6 +33,7 @@ if (!inputFile) {
 // 使用当前工作目录作为源目录
 const sourceDir = process.cwd();
 const targetDir = outputDir || 'src/main';
+const fixDir = relativeDir ? relativeDir.split('/').slice(0, -1).join('/') : '';
 
 // 创建目标目录
 if (!fs.existsSync(targetDir)) {
@@ -47,8 +50,11 @@ function analyzeDependencies(filePath: string, depth = 0, maxDepth = 5) {
 
   const content = fs.readFileSync(filePath, 'utf-8');
   const relativePath = path.relative(sourceDir, filePath);
-  const relativeLastPath: any = relativePath.split('/').slice(-2).join('/');
-  const targetPath = path.join(targetDir, relativeLastPath);
+  const relativePathFixed = relativePath.replace(new RegExp(`^${fixDir}/`), '');
+  // console.log('fixDir', fixDir);
+  // console.log('relativePath', relativePath);
+  // console.log('relativePathFixed', relativePathFixed);
+  const targetPath = path.join(targetDir, relativePathFixed);
 
   // 创建目标文件所在的目录
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });

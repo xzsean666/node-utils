@@ -44,7 +44,7 @@ if (!fs.existsSync(targetDir)) {
 const processedFiles = new Set<string>();
 
 // 递归分析文件依赖并复制
-function analyzeDependencies(filePath: string, depth = 0, maxDepth = 5) {
+function analyzeDependencies(filePath: string, depth = 0, maxDepth = 10) {
   if (processedFiles.has(filePath) || depth > maxDepth) return;
   processedFiles.add(filePath);
 

@@ -42,6 +42,7 @@ export class GamaAPI {
     const response = await axios.get(`${base_url}/markets`, {
       params: params ? params : undefined,
     });
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     return response.data;
   }
 

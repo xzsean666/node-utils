@@ -13,13 +13,13 @@ cp src/utils/sh/nestjs.sh .
 # 给nestjs.sh添加可执行权限
 chmod +x nestjs.sh
 
-# 忽略src/sdk和src/utils目录
-echo "src/sdk/" >> .gitignore
+# 忽略src/helper/sdk和src/utils目录
+echo "src/helper/sdk/" >> .gitignore
 echo "src/utils/" >> .gitignore
 
 # 添加"build:sdk"命令到package.json
-npx json -I -f package.json -e 'this.scripts["build:sdk"] = "npx ts-node src/utils/scripts/copyDependencies.ts --input src/sdk/index.ts --output src/main"'
+npx json -I -f package.json -e 'this.scripts["build:sdk"] = "npx ts-node src/utils/scripts/copyDependencies.ts --input src/helper/sdk/index.ts --output src/main"'
 
 
 # 修改tsconfig.build.json文件
-npx json -I -f tsconfig.build.json -e 'this.exclude.push("src/utils", "src/sdk")'
+npx json -I -f tsconfig.build.json -e 'this.exclude.push("src/utils", "src/helper/sdk")'

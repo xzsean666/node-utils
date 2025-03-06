@@ -689,6 +689,16 @@ export class EthersUtils {
     const contract = new ethers.Contract(address, abi, signer);
     return contract;
   }
+  async formatBatchCallResult(batchResults: any[]) {
+    const batchResultsFormat: any[] = [];
+    for (const result of batchResults) {
+      if (!batchResultsFormat[result.target]) {
+        batchResultsFormat[result.target] = {};
+      }
+      batchResultsFormat[result.target][result.function] = result.decodedData;
+    }
+    return batchResultsFormat;
+  }
 
   async batchReadCall(
     calls: Array<{

@@ -8,12 +8,22 @@ fi
 
 # 检查是否提供了参数
 if [ $# -eq 0 ]; then
-    echo "请提供参数: --start 或 --stop"
+    echo "请提供参数: --start 或 --stop 或 --restart"
     exit 1
 fi
 
+# 获取端口号，如果没有设置则使用默认值 3000
+PORT=$(grep "^PORT=" .env 2>/dev/null | cut -d '=' -f2)
+if [ -z "$PORT" ]; then
+    PORT="3000"
+    echo "未找到 PORT 环境变量，使用默认端口: $PORT"
+fi
 
-PORT=$(grep "^PORT=" .env 2>/dev/null | cut -d '=' -f2 || echo "3000")
+# 检查端口号是否为有效数字
+if ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
+    echo "错误：无效的端口号 '$PORT'"
+    exit 1
+fi
 
 # 添加守护进程函数
 monitor_app() {
@@ -96,10 +106,10 @@ case "$1" in
         sleep 2
 
         # 再次检查端口是否还在使用
-        if lsof -i:$PORT > /dev/null; then
+        if lsof -i:"$PORT" > /dev/null 2>&1; then
             echo "警告：端口 $PORT 仍在使用，尝试强制终止进程..."
-            kill -9 $PID 2>/dev/null
-            kill -9 $(lsof -t -i :$PORT)
+            kill -9 "$PID" 2>/dev/null
+            lsof -t -i:"$PORT" | xargs -r kill -9
         fi
         
         # 删除 PID 文件
@@ -107,8 +117,75 @@ case "$1" in
         echo "Nest.js 应用已关闭"
         ;;
     
+    --restart)
+        # 先停止应用
+        echo "正在重启 Nest.js 应用..."
+        
+        # 检查是否有守护进程
+        KEEPER_MODE=false
+        if [ -f keeper.pid ]; then
+            KEEPER_MODE=true
+        fi
+        
+        # 先停止守护进程（如果存在）
+        if [ -f keeper.pid ]; then
+            KEEPER_PID=$(cat keeper.pid)
+            kill $KEEPER_PID 2>/dev/null
+            rm keeper.pid
+            echo "守护进程已停止"
+        fi
+
+        # 检查 PID 文件是否存在
+        if [ -f app.pid ]; then
+            PID=$(cat app.pid)
+            kill $PID 2>/dev/null
+            pkill -f "node dist/main.js"
+            sleep 2
+            
+            # 再次检查端口是否还在使用
+            if lsof -i:"$PORT" > /dev/null 2>&1; then
+                echo "警告：端口 $PORT 仍在使用，尝试强制终止进程..."
+                kill -9 "$PID" 2>/dev/null
+                lsof -t -i:"$PORT" | xargs -r kill -9
+            fi
+            
+            rm app.pid
+            echo "Nest.js 应用已停止"
+        else
+            echo "找不到运行中的应用"
+        fi
+        
+        # 如果存在旧的日志文件，则进行备份
+        if [ -f "./app.log" ]; then
+            BACKUP_DATE=$(date '+%Y%m%d_%H%M%S')
+            mv ./app.log "./app_${BACKUP_DATE}.log"
+            echo "已将原有日志文件备份为 app_${BACKUP_DATE}.log"
+        fi
+
+        # 运行构建命令
+        npm run build
+
+        # 使用 node 直接启动主文件
+        nohup node --max-old-space-size=4096 dist/main.js > ./app.log 2>&1 &
+
+        # 获取进程ID并保存到文件
+        PID=$!
+        echo $PID > app.pid
+
+        echo "Nest.js 应用已重新启动，端口为 $PORT，进程ID为 $PID"
+        
+        # 如果之前有keeper或者指定了keeper参数，启动守护进程
+        if [ "$KEEPER_MODE" = "true" ] || [ "$2" = "--keeper" ]; then
+            echo "正在启动守护进程..."
+            nohup bash -c "$(declare -f monitor_app); monitor_app $PID" > ./keeper.log 2>&1 &
+            KEEPER_PID=$!
+            echo $KEEPER_PID > keeper.pid
+            echo "守护进程已启动，进程ID为 $KEEPER_PID"
+        fi
+        ;;
+    
     *)
-        echo "无效的参数。请使用 --start [--keeper] 或 --stop"
+        echo "无效的参数。请使用 --start [--keeper] 或 --stop 或 --restart [--keeper]"
         exit 1
         ;;
 esac

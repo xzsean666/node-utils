@@ -690,12 +690,12 @@ export class EthersUtils {
     return contract;
   }
   async formatBatchCallResult(batchResults: any[]) {
-    const batchResultsFormat: any[] = [];
+    const batchResultsFormat: any = {};
     for (const result of batchResults) {
       if (!batchResultsFormat[result.target]) {
-        batchResultsFormat[result.target] = {};
+        batchResultsFormat[result.target] = [];
       }
-      batchResultsFormat[result.target][result.function] = result.decodedData;
+      batchResultsFormat[result.target].push(result);
     }
     return batchResultsFormat;
   }

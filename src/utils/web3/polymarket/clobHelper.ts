@@ -214,4 +214,118 @@ export class ClobHelper {
     // Return data in the expected format with a single history array
     return sortedHistoryData;
   }
+  /**
+   * 根据指定的时间范围获取价格历史数据
+   * @param tokenId 要获取价格历史的令牌ID
+   * @param startTs 起始时间戳（秒）
+   * @param endTs 结束时间戳（秒）
+   * @param batchSizeDays 每批次请求的天数（默认为1天）
+   * @returns 指定时间范围内的价格历史数据数组
+   */
+  async getPriceHistoryByTimeRange({
+    tokenId,
+    startTs,
+    endTs,
+    batchSizeDays = 1,
+  }: {
+    tokenId: string;
+    startTs: number;
+    endTs: number;
+    batchSizeDays?: number;
+  }) {
+    // 验证输入参数
+    if (!tokenId || !startTs || !endTs) {
+      throw new Error(
+        'Missing required parameters: tokenId, startTs, or endTs',
+      );
+    }
+
+    if (startTs >= endTs) {
+      throw new Error('startTs must be less than endTs');
+    }
+
+    const secondsInDay = 24 * 60 * 60;
+    let allHistoryData: any[] = [];
+
+    // 计算时间范围的总天数
+    const totalDays = Math.ceil((endTs - startTs) / secondsInDay);
+
+    // 按批次获取数据
+    for (let dayOffset = 0; dayOffset < totalDays; dayOffset += batchSizeDays) {
+      // 计算当前批次的开始和结束时间
+      const batchSize = Math.min(batchSizeDays, totalDays - dayOffset);
+      const batchStartTs = startTs + dayOffset * secondsInDay;
+      const batchEndTs = Math.min(
+        batchStartTs + batchSize * secondsInDay,
+        endTs,
+      );
+
+      try {
+        console.log(
+          `Fetching data from ${new Date(batchStartTs * 1000)} to ${new Date(batchEndTs * 1000)}`,
+        );
+
+        const batchData: any = await this.getPricesHistory({
+          startTs: batchStartTs,
+          endTs: batchEndTs,
+          market: tokenId,
+        });
+
+        // 为避免API限制，在请求之间添加短暂延迟
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        // 提取并合并历史数据
+        if (
+          batchData &&
+          batchData.history &&
+          Array.isArray(batchData.history)
+        ) {
+          allHistoryData = [...allHistoryData, ...batchData.history];
+          console.log(
+            `Fetched ${tokenId} data for time range ${new Date(batchStartTs * 1000)} - ${new Date(batchEndTs * 1000)}: ${batchData.history.length} entries`,
+          );
+
+          // 如果获取到的数据少于预期，可能已经到达数据限制
+          if (batchData.history.length < 10) {
+            console.log(
+              'Received very few entries, API may have reached data limit',
+            );
+            break;
+          }
+        } else if (batchData && Array.isArray(batchData)) {
+          // 如果batchData已经是数组，直接合并
+          allHistoryData = [...allHistoryData, ...batchData];
+          console.log(
+            `Fetched ${tokenId} data for time range ${new Date(batchStartTs * 1000)} - ${new Date(batchEndTs * 1000)}: ${batchData.length} entries`,
+          );
+
+          if (batchData.length < 10) {
+            console.log(
+              'Received very few entries, API may have reached data limit',
+            );
+            break;
+          }
+        } else {
+          console.log(
+            `Fetched data for time range ${new Date(batchStartTs * 1000)} - ${new Date(batchEndTs * 1000)}, but format is unexpected:`,
+            batchData,
+          );
+        }
+      } catch (error) {
+        console.error(
+          `Failed to get price data for batch starting at ${new Date(batchStartTs * 1000)}:`,
+          error,
+        );
+      }
+    }
+
+    // 处理数据：排序并去除重复
+    const sortedHistoryData = allHistoryData
+      .sort((a, b) => a.t - b.t) // 按时间戳升序排序
+      .filter(
+        (item, index, self) => index === 0 || item.t !== self[index - 1].t, // 去除重复时间戳的条目
+      );
+
+    return sortedHistoryData;
+  }
 }

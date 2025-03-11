@@ -1,43 +1,34 @@
-import { KVDatabase } from "./SqliteKVDB";
+import { KVDatabase } from './SqliteKVDB';
 
-export function createCacheDecorator(
+export function createCacheDecorator<T = any>(
   db: KVDatabase,
-  defaultTTL: number = 1 * 60 * 1000
+  defaultTTL: number = 60, // 默认60秒
 ) {
-  return function cache(ttl: number = defaultTTL, prefix: string = "") {
+  return function cache(ttl: number = defaultTTL, prefix: string = '') {
     return function (
       target: any,
       propertyKey: string,
-      descriptor: PropertyDescriptor
+      descriptor: PropertyDescriptor,
     ) {
       const originalMethod = descriptor.value;
 
-      descriptor.value = async function (...args: any[]) {
+      descriptor.value = async function (...args: any[]): Promise<T> {
         try {
           const cacheKey = `${prefix}:${propertyKey}:${JSON.stringify(
-            args
+            args,
           )}`.slice(0, 255);
 
-          const cached = await db.get<{ value: any; timestamp: number }>(
-            cacheKey
-          );
-
-          const now = Date.now();
-
-          if (cached && now - cached.timestamp < ttl) {
-            return cached.value;
+          // 直接使用 KVDatabase 的 get 方法的缓存功能
+          const cached = await db.get<T>(cacheKey, ttl);
+          if (cached !== null) {
+            return cached;
           }
 
           const result = await originalMethod.apply(this, args);
-
-          await db.put(cacheKey, {
-            value: result,
-            timestamp: now,
-          });
-
+          await db.put(cacheKey, result);
           return result;
         } catch (error) {
-          console.error("Cache operation failed:", error);
+          console.error('Cache operation failed:', error);
           return originalMethod.apply(this, args);
         }
       };

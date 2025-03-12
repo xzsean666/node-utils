@@ -28,7 +28,7 @@ export function createCacheDecorator<T = any>(
           await db.put(cacheKey, result);
           return result;
         } catch (error) {
-          console.error('Cache operation failed:', error);
+          // console.error('Cache operation failed:', error);
           return originalMethod.apply(this, args);
         }
       };

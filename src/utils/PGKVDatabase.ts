@@ -208,8 +208,33 @@ export class KVDatabase {
         return null;
       }
     }
-
     return record.value;
+  }
+  async getValue(value: any): Promise<any> {
+    await this.ensureInitialized();
+    // Use proper JSONB comparison with query builder
+    const existing = await this.db
+      .createQueryBuilder()
+      .where('value = :value::jsonb', { value: JSON.stringify(value) })
+      .getOne();
+    return existing;
+  }
+  async isValueExists(value: any): Promise<boolean> {
+    await this.ensureInitialized();
+    const existing = await this.db
+      .createQueryBuilder()
+      .where('value = :value::jsonb', { value: JSON.stringify(value) })
+      .getOne();
+    return !!existing;
+  }
+  async getValues(value: any): Promise<any> {
+    await this.ensureInitialized();
+    // Use proper JSONB comparison with query builder
+    const existing = await this.db
+      .createQueryBuilder()
+      .where('value = :value::jsonb', { value: JSON.stringify(value) })
+      .getMany();
+    return existing;
   }
 
   async delete(key: string): Promise<boolean> {
@@ -229,6 +254,44 @@ export class KVDatabase {
       value,
     });
   }
+  async addUniquePair(key: string, value: any): Promise<void> {
+    await this.ensureInitialized();
+
+    // Use a proper JSONB comparison query
+    const existing = await this.db
+      .createQueryBuilder()
+      .where('key = :key', { key })
+      .andWhere('value = :value::jsonb', { value: JSON.stringify(value) })
+      .getOne();
+
+    if (existing) {
+      throw new Error(`Key-value pair already exists for key "${key}"`);
+    }
+
+    await this.db.save({
+      key,
+      value,
+    });
+  }
+  async addUniqueValue(key: string, value: any): Promise<void> {
+    await this.ensureInitialized();
+
+    // Use proper JSONB comparison with query builder
+    const existing = await this.db
+      .createQueryBuilder()
+      .where('value = :value::jsonb', { value: JSON.stringify(value) })
+      .getOne();
+
+    if (existing) {
+      const existingKey = existing.key;
+      throw new Error(`Value already exists with key "${existingKey}"`);
+    }
+
+    await this.db.save({
+      key,
+      value,
+    });
+  }
 
   async close(): Promise<void> {
     if (this.initialized && this.dataSource?.isInitialized) {
@@ -237,10 +300,20 @@ export class KVDatabase {
     }
   }
 
-  // 获取所有键值对
-  async getAll(): Promise<Map<string, any>> {
+  // 获取所有键值对，支持分页
+  async getAll(offset?: number, limit?: number): Promise<Map<string, any>> {
     await this.ensureInitialized();
-    const records = await this.db.find();
+    const options: any = {};
+
+    if (typeof offset === 'number') {
+      options.offset = offset;
+    }
+
+    if (typeof limit === 'number') {
+      options.limit = limit;
+    }
+
+    const records = await this.db.find(options);
     return new Map(
       records.map((record: { key: any; value: any }) => [
         record.key,

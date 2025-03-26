@@ -63,15 +63,51 @@ if [ "$CURRENT_HASH" = "$LATEST_HASH" ]; then
     echo "仓库已是最新状态"
 else
     echo "发现更新，正在拉取..."
-    git pull origin "$BRANCH"
-    echo "更新完成！"
     
-    # 显示更新内容
-    echo -e "\n更新内容如下："
-    git --no-pager log --oneline "$CURRENT_HASH..$LATEST_HASH"
+    # 检查是否有本地修改
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "检测到本地修改，正在执行 git stash 保存修改..."
+        git stash push -m "自动保存的修改 $(date '+%Y-%m-%d %H:%M:%S')"
+        STASHED=true
+    else
+        STASHED=false
+    fi
     
-    # 调用更新后的操作函数
-    post_update_actions
+    # 拉取更新
+    if git pull origin "$BRANCH"; then
+        echo "更新完成！"
+        
+        # 不再恢复本地修改，仅提示用户
+        if [ "$STASHED" = true ]; then
+            echo "本地修改已存储在 stash 中，未恢复"
+        fi
+        
+        # 显示更新内容
+        echo -e "\n更新内容如下："
+        git --no-pager log --oneline "$CURRENT_HASH..$LATEST_HASH"
+        
+        # 调用更新后的操作函数
+        post_update_actions
+    else
+        echo "更新失败！检测到合并冲突，尝试通过 stash 解决..."
+        # 保存任何未提交的更改（包括合并冲突）
+        git reset --hard HEAD
+        git clean -fd
+        
+        # 重新尝试拉取更新
+        if git pull origin "$BRANCH"; then
+            echo "冲突已解决，更新完成！"
+            
+            # 显示更新内容
+            echo -e "\n更新内容如下："
+            git --no-pager log --oneline "$CURRENT_HASH..$LATEST_HASH"
+            
+            # 调用更新后的操作函数
+            post_update_actions
+        else
+            echo "错误：解决冲突后仍然无法更新，可能需要手动干预。"
+        fi
+    fi
 fi
 
 # 清理凭证配置

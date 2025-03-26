@@ -166,7 +166,8 @@ case "$1" in
         npm run build
 
         # 使用 node 直接启动主文件
-        nohup node --max-old-space-size=4096 dist/main.js > ./app.log 2>&1 &
+        # nohup node --max-old-space-size=4096 dist/main.js > ./app.log 2>&1 &
+        nohup /usr/local/bin/node --max-old-space-size=4096 dist/main.js > ./app.log 2>&1 &
 
         # 获取进程ID并保存到文件
         PID=$!

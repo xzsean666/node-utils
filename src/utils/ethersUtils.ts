@@ -73,6 +73,42 @@ export class EthersUtils {
       return acc;
     }, {} as { [key: string]: { blockNumber: number; latency: number } });
   }
+  static async getCurrentChainStatus(rpc: string) {
+    const provider = new ethers.JsonRpcProvider(rpc);
+
+    try {
+      // Get multiple chain properties in parallel
+      const [blockNumber, chainId, feeData, network, latestBlock] =
+        await Promise.all([
+          provider.getBlockNumber(),
+          provider.getNetwork().then((network) => network.chainId),
+          provider.getFeeData(),
+          provider.getNetwork().then((network) => network.name),
+          provider.getBlock("latest"),
+        ]);
+
+      return {
+        blockNumber,
+        chainId: Number(chainId),
+        gasPrice: feeData.gasPrice
+          ? ethers.formatUnits(feeData.gasPrice, "gwei")
+          : null,
+        maxFeePerGas: feeData.maxFeePerGas
+          ? ethers.formatUnits(feeData.maxFeePerGas, "gwei")
+          : null,
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
+          ? ethers.formatUnits(feeData.maxPriorityFeePerGas, "gwei")
+          : null,
+        network: network || "unknown",
+        timestamp: latestBlock?.timestamp
+          ? Number(latestBlock.timestamp)
+          : null,
+        latestBlockHash: latestBlock?.hash || null,
+      };
+    } catch (error: any) {
+      throw new Error(`获取链状态失败: ${error.message}`);
+    }
+  }
 
   async getLatestBlockNumber(): Promise<number> {
     if (!this.web3) {

@@ -154,7 +154,7 @@ export class KVDatabase {
   async merge(
     key: string,
     partialValue: any,
-    deep: boolean = true,
+    deep: boolean = false,
   ): Promise<boolean> {
     await this.ensureInitialized();
 
@@ -1014,6 +1014,58 @@ export class KVDatabase {
     }
 
     return recentItems;
+  }
+  async getArrays<T = any>(
+    key: string,
+    offset: number,
+    limit: number,
+    orderBy: 'ASC' | 'DESC' = 'ASC',
+  ): Promise<T[]> {
+    await this.ensureInitialized();
+
+    // Get metadata
+    const metaKey = `${key}_meta`;
+    const meta = await this.get(metaKey);
+
+    if (!meta || !meta.batchCount) {
+      return [];
+    }
+
+    // Get batch size from metadata or use default
+    const batchSize = meta.batchSize || 1000;
+
+    // Calculate which batches we need based on offset and limit
+    const startBatch = Math.floor(offset / batchSize);
+    const endBatch = Math.floor((offset + limit - 1) / batchSize);
+
+    // Ensure we don't exceed the total number of batches
+    const lastBatchIndex = Math.min(endBatch, meta.batchCount - 1);
+
+    // Create array of batch keys we need to fetch
+    const batchKeys = Array.from(
+      { length: lastBatchIndex - startBatch + 1 },
+      (_, i) => `${key}_${startBatch + i}`,
+    );
+
+    // Fetch all needed batches in a single query
+    const records = await this.db.find({
+      where: { key: In(batchKeys) },
+      order: { key: orderBy },
+    });
+
+    // Process results
+    let result: T[] = [];
+    for (const record of records) {
+      const batch = record.value || [];
+      result = result.concat(batch);
+    }
+
+    // Calculate the exact slice we need from the combined results
+    const startOffset = offset % batchSize;
+    const slicedResult = result.slice(startOffset, startOffset + limit);
+
+    // Reverse the array if DESC order is requested
+    return orderBy === 'DESC' ? slicedResult.reverse() : slicedResult;
   }
 
   /**

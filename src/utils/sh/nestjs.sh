@@ -25,15 +25,21 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
+# 在脚本开始处添加创建日志目录的代码
+if [ ! -d "./logs" ]; then
+    mkdir -p ./logs
+    echo "创建日志目录 ./logs"
+fi
+
 # 添加守护进程函数
 monitor_app() {
     while true; do
         if ! ps -p $1 > /dev/null; then
-            echo "$(date '+%Y-%m-%d %H:%M:%S') 检测到应用停止运行，正在重新启动..." >> ./keeper.log
-            nohup node dist/main.js > ./app.log 2>&1 &
+            echo "$(date '+%Y-%m-%d %H:%M:%S') 检测到应用停止运行，正在重新启动..." >> ./logs/keeper.log
+            nohup node dist/main.js > ./logs/app.log 2>&1 &
             NEW_PID=$!
             echo $NEW_PID > app.pid
-            echo "应用已重新启动，新的进程ID为 $NEW_PID" >> ./keeper.log
+            echo "应用已重新启动，新的进程ID为 $NEW_PID" >> ./logs/keeper.log
             return $NEW_PID
         fi
         sleep 10
@@ -49,17 +55,17 @@ case "$1" in
         fi
 
         # 如果存在旧的日志文件，则进行备份
-        if [ -f "./app.log" ]; then
+        if [ -f "./logs/app.log" ]; then
             BACKUP_DATE=$(date '+%Y%m%d_%H%M%S')
-            mv ./app.log "./app_${BACKUP_DATE}.log"
-            echo "已将原有日志文件备份为 app_${BACKUP_DATE}.log"
+            mv ./logs/app.log "./logs/app_${BACKUP_DATE}.log"
+            echo "已将原有日志文件备份为 logs/app_${BACKUP_DATE}.log"
         fi
 
         # 运行构建命令
         npm run build
 
         # 使用 node 直接启动主文件
-        nohup node --max-old-space-size=4096 dist/main.js > ./app.log 2>&1 &
+        nohup node --max-old-space-size=4096 dist/main.js > ./logs/app.log 2>&1 &
 
         # 获取进程ID并保存到文件
         PID=$!
@@ -71,7 +77,7 @@ case "$1" in
         # 如果指定了keeper参数，启动守护进程
         if [ "$2" = "--keeper" ]; then
             echo "正在启动守护进程..."
-            nohup bash -c "$(declare -f monitor_app); monitor_app $PID" > ./keeper.log 2>&1 &
+            nohup bash -c "$(declare -f monitor_app); monitor_app $PID" > ./logs/keeper.log 2>&1 &
             KEEPER_PID=$!
             echo $KEEPER_PID > keeper.pid
             echo "守护进程已启动，进程ID为 $KEEPER_PID"
@@ -156,10 +162,10 @@ case "$1" in
         fi
         
         # 如果存在旧的日志文件，则进行备份
-        if [ -f "./app.log" ]; then
+        if [ -f "./logs/app.log" ]; then
             BACKUP_DATE=$(date '+%Y%m%d_%H%M%S')
-            mv ./app.log "./app_${BACKUP_DATE}.log"
-            echo "已将原有日志文件备份为 app_${BACKUP_DATE}.log"
+            mv ./logs/app.log "./logs/app_${BACKUP_DATE}.log"
+            echo "已将原有日志文件备份为 logs/app_${BACKUP_DATE}.log"
         fi
 
         # 运行构建命令
@@ -167,7 +173,7 @@ case "$1" in
 
         # 使用 node 直接启动主文件
         # nohup node --max-old-space-size=4096 dist/main.js > ./app.log 2>&1 &
-        nohup /usr/local/bin/node --max-old-space-size=4096 dist/main.js > ./app.log 2>&1 &
+        nohup /usr/local/bin/node --max-old-space-size=4096 dist/main.js > ./logs/app.log 2>&1 &
 
         # 获取进程ID并保存到文件
         PID=$!
@@ -178,7 +184,7 @@ case "$1" in
         # 如果之前有keeper或者指定了keeper参数，启动守护进程
         if [ "$KEEPER_MODE" = "true" ] || [ "$2" = "--keeper" ]; then
             echo "正在启动守护进程..."
-            nohup bash -c "$(declare -f monitor_app); monitor_app $PID" > ./keeper.log 2>&1 &
+            nohup bash -c "$(declare -f monitor_app); monitor_app $PID" > ./logs/keeper.log 2>&1 &
             KEEPER_PID=$!
             echo $KEEPER_PID > keeper.pid
             echo "守护进程已启动，进程ID为 $KEEPER_PID"

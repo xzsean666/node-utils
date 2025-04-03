@@ -7,16 +7,32 @@ dotenv.config();
 async function main() {
   try {
     // 初始化 MinIO 客户端
+    // const config = {
+    //   endPoint: process.env.MINIO_ENDPOINT || "localhost",
+    //   port: parseInt(process.env.MINIO_PORT || "9000"),
+    //   useSSL: process.env.MINIO_USE_SSL === "true",
+    //   accessKey: process.env.MINIO_ACCESS_KEY || "minioadmin",
+    //   secretKey: process.env.MINIO_SECRET_KEY || "minioadmin",
+    // };
+    // http://52.73.157.190:5079/
+
     const config = {
-      endPoint: process.env.MINIO_ENDPOINT || "localhost",
-      port: parseInt(process.env.MINIO_PORT || "9000"),
-      useSSL: process.env.MINIO_USE_SSL === "true",
-      accessKey: process.env.MINIO_ACCESS_KEY || "minioadmin",
-      secretKey: process.env.MINIO_SECRET_KEY || "minioadmin",
+      endPoint: "images.666666666.eu.org",
+      port: 443,
+      useSSL: true,
+      accessKey: "aLvuMXWQ56WxBkRZBASm",
+      secretKey: "5PKfGYNZfjofNp9IcPKuFsLDIUOteBCq2QFfq5Jv",
     };
+    // const config = {
+    //   endPoint: "52.73.157.190",
+    //   port: 5078,
+    //   useSSL: false,
+    //   accessKey: "aLvuMXWQ56WxBkRZBASm",
+    //   secretKey: "5PKfGYNZfjofNp9IcPKuFsLDIUOteBCq2QFfq5Jv",
+    // };
     const minioHelper = new MinioHelper(config);
 
-    const bucketName = "test-bucket";
+    const bucketName = "aibuddism";
     const filePath = path.join(__dirname, "images/test.jpeg"); // 替换为实际的文件路径
     const objectName = "uploaded/test.txt";
 
@@ -32,7 +48,7 @@ async function main() {
     await minioHelper.uploadFile(bucketName, objectName, filePath);
     console.log("文件上传成功!");
 
-    // 获取文件信息
+    // // 获取文件信息
     console.log("获取文件信息...");
     const stats = await minioHelper.statObject(bucketName, objectName);
     console.log("文件信息:", stats);
@@ -46,7 +62,7 @@ async function main() {
     const url = await minioHelper.getPresignedUrl(bucketName, objectName);
     console.log("文件访问链接:", url);
   } catch (error: any) {
-    console.error("发生错误:", error.message);
+    console.error("发生错误:", error);
   }
 }
 

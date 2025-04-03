@@ -1,11 +1,11 @@
-import { DataSource, Repository, Table, In } from 'typeorm';
+import { DataSource, Repository, Table, In } from "typeorm";
 import {
   Entity,
   PrimaryColumn,
   Column,
   CreateDateColumn,
   UpdateDateColumn,
-} from 'typeorm';
+} from "typeorm";
 
 // 添加接口定义
 interface KVEntity {
@@ -22,28 +22,28 @@ export class KVDatabase {
   private tableName: string;
   private CustomKVStore: any;
 
-  constructor(datasourceOrUrl: string, tableName: string = 'kv_store') {
+  constructor(datasourceOrUrl: string, tableName: string = "kv_store") {
     this.tableName = tableName;
 
     @Entity(tableName)
     class CustomKVStore implements KVEntity {
-      @PrimaryColumn('varchar', { length: 255 })
+      @PrimaryColumn("varchar", { length: 255 })
       key: string;
 
-      @Column('jsonb')
+      @Column("jsonb")
       value: any;
 
-      @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
+      @CreateDateColumn({ type: "timestamptz", name: "created_at" })
       created_at: Date;
 
-      @UpdateDateColumn({ type: 'timestamptz', name: 'updated_at' })
+      @UpdateDateColumn({ type: "timestamptz", name: "updated_at" })
       updated_at: Date;
     }
 
     this.CustomKVStore = CustomKVStore;
 
     this.dataSource = new DataSource({
-      type: 'postgres',
+      type: "postgres",
       url: datasourceOrUrl,
       entities: [CustomKVStore],
       synchronize: false,
@@ -59,7 +59,7 @@ export class KVDatabase {
         poolSize: 100,
         maxUses: 7500,
       },
-      logging: ['error', 'warn'],
+      logging: ["error", "warn"],
     });
   }
 
@@ -78,35 +78,35 @@ export class KVDatabase {
               name: this.tableName,
               columns: [
                 {
-                  name: 'key',
-                  type: 'varchar',
-                  length: '255',
+                  name: "key",
+                  type: "varchar",
+                  length: "255",
                   isPrimary: true,
                 },
                 {
-                  name: 'value',
-                  type: 'jsonb',
+                  name: "value",
+                  type: "jsonb",
                   isNullable: true,
                 },
                 {
-                  name: 'created_at',
-                  type: 'timestamptz',
-                  default: 'CURRENT_TIMESTAMP',
+                  name: "created_at",
+                  type: "timestamptz",
+                  default: "CURRENT_TIMESTAMP",
                 },
                 {
-                  name: 'updated_at',
-                  type: 'timestamptz',
-                  default: 'CURRENT_TIMESTAMP',
+                  name: "updated_at",
+                  type: "timestamptz",
+                  default: "CURRENT_TIMESTAMP",
                 },
               ],
             }),
-            true, // ifNotExists: true
+            true // ifNotExists: true
           );
 
           // 创建 GIN 索引
           try {
             await queryRunner.query(
-              `CREATE INDEX IF NOT EXISTS "IDX_${this.tableName}_value_gin" ON "${this.tableName}" USING gin (value);`,
+              `CREATE INDEX IF NOT EXISTS "IDX_${this.tableName}_value_gin" ON "${this.tableName}" USING gin (value);`
             );
           } catch (err) {
             console.warn(`创建索引失败，可能已存在: ${err}`);
@@ -196,7 +196,7 @@ export class KVDatabase {
     // Use proper JSONB comparison with query builder
     const existing = await this.db
       .createQueryBuilder()
-      .where('value = :value::jsonb', { value: JSON.stringify(value) })
+      .where("value = :value::jsonb", { value: JSON.stringify(value) })
       .getOne();
     return existing;
   }
@@ -204,7 +204,7 @@ export class KVDatabase {
     await this.ensureInitialized();
     const existing = await this.db
       .createQueryBuilder()
-      .where('value = :value::jsonb', { value: JSON.stringify(value) })
+      .where("value = :value::jsonb", { value: JSON.stringify(value) })
       .getOne();
     return !!existing;
   }
@@ -213,7 +213,7 @@ export class KVDatabase {
     // Use proper JSONB comparison with query builder
     const existing = await this.db
       .createQueryBuilder()
-      .where('value = :value::jsonb', { value: JSON.stringify(value) })
+      .where("value = :value::jsonb", { value: JSON.stringify(value) })
       .getMany();
     return existing;
   }
@@ -241,8 +241,8 @@ export class KVDatabase {
     // Use a proper JSONB comparison query
     const existing = await this.db
       .createQueryBuilder()
-      .where('key = :key', { key })
-      .andWhere('value = :value::jsonb', { value: JSON.stringify(value) })
+      .where("key = :key", { key })
+      .andWhere("value = :value::jsonb", { value: JSON.stringify(value) })
       .getOne();
 
     if (existing) {
@@ -260,7 +260,7 @@ export class KVDatabase {
     // Use proper JSONB comparison with query builder
     const existing = await this.db
       .createQueryBuilder()
-      .where('value = :value::jsonb', { value: JSON.stringify(value) })
+      .where("value = :value::jsonb", { value: JSON.stringify(value) })
       .getOne();
 
     if (existing) {
@@ -286,11 +286,11 @@ export class KVDatabase {
     await this.ensureInitialized();
     const options: any = {};
 
-    if (typeof offset === 'number') {
+    if (typeof offset === "number") {
       options.offset = offset;
     }
 
-    if (typeof limit === 'number') {
+    if (typeof limit === "number") {
       options.limit = limit;
     }
 
@@ -299,14 +299,14 @@ export class KVDatabase {
       records.map((record: { key: any; value: any }) => [
         record.key,
         record.value,
-      ]),
+      ])
     );
   }
 
   // 获取所有键
   async keys(): Promise<string[]> {
     await this.ensureInitialized();
-    const records = await this.db.find({ select: ['key'] });
+    const records = await this.db.find({ select: ["key"] });
     return records.map((record: { key: any }) => record.key);
   }
 
@@ -319,7 +319,7 @@ export class KVDatabase {
   // 批量添加键值对
   async putMany(
     entries: Array<[string, any]>,
-    batchSize: number = 1000,
+    batchSize: number = 1000
   ): Promise<void> {
     await this.ensureInitialized();
 
@@ -334,9 +334,9 @@ export class KVDatabase {
         const values = batch
           .map(
             ([key, value]) =>
-              `('${key}', '${JSON.stringify(value)}', NOW(), NOW())`,
+              `('${key}', '${JSON.stringify(value)}', NOW(), NOW())`
           )
-          .join(',');
+          .join(",");
 
         await queryRunner.query(`
           INSERT INTO "${this.tableName}" (key, value, created_at, updated_at)
@@ -386,7 +386,7 @@ export class KVDatabase {
   async findBoolValues(
     boolValue: boolean,
     first: boolean = true,
-    orderBy: 'ASC' | 'DESC' = 'ASC',
+    orderBy: "ASC" | "DESC" = "ASC"
   ): Promise<string[] | string | null> {
     await this.ensureInitialized();
 
@@ -396,10 +396,10 @@ export class KVDatabase {
         `${this.tableName}.key as "key"`,
         `${this.tableName}.value as "value"`,
       ])
-      .where('value = :value::jsonb', {
+      .where("value = :value::jsonb", {
         value: JSON.stringify(boolValue),
       })
-      .orderBy('created_at', orderBy);
+      .orderBy("created_at", orderBy);
 
     if (first) {
       const result = await queryBuilder.getRawOne();
@@ -420,7 +420,7 @@ export class KVDatabase {
     cursor?: string;
     compare?: Array<{
       path: string;
-      operator: '>' | '<' | '>=' | '<=' | '=' | '!=';
+      operator: ">" | "<" | ">=" | "<=" | "=" | "!=";
       value: number | string | Date;
     }>;
   }): Promise<{
@@ -471,16 +471,16 @@ export class KVDatabase {
         // 使用 #>> 操作符提取 JSON 路径的值，然后进行比较
         // 对于数字类型，使用 (value #>> :path)::numeric 进行转换
         // 对于日期类型，使用 (value #>> :path)::timestamp 进行转换
-        const isNumeric = typeof compareValue === 'number';
+        const isNumeric = typeof compareValue === "number";
         const isDate = condition.value instanceof Date;
 
-        const castType = isNumeric ? 'numeric' : isDate ? 'timestamp' : 'text';
+        const castType = isNumeric ? "numeric" : isDate ? "timestamp" : "text";
         queryBuilder.andWhere(
           `(${this.tableName}.value #>> :path${index})::${castType} ${condition.operator} :${paramKey}`,
           {
             [`path${index}`]: jsonPath,
             [paramKey]: compareValue,
-          },
+          }
         );
       });
     }
@@ -490,7 +490,7 @@ export class KVDatabase {
         .andWhere(`${this.tableName}.key > :cursor`, {
           cursor: searchOptions.cursor,
         })
-        .orderBy(`${this.tableName}.key`, 'ASC')
+        .orderBy(`${this.tableName}.key`, "ASC")
         .useIndex(`${this.tableName}_pkey`);
     }
 
@@ -506,8 +506,8 @@ export class KVDatabase {
         nextCursor,
       };
     } catch (error) {
-      console.error('Query error:', queryBuilder.getSql());
-      console.error('Query parameters:', queryBuilder.getParameters());
+      console.error("Query error:", queryBuilder.getSql());
+      console.error("Query parameters:", queryBuilder.getParameters());
       throw error;
     }
   }
@@ -522,12 +522,12 @@ export class KVDatabase {
   async findByUpdateTime(
     timestamp: number,
     first: boolean = true,
-    type: 'before' | 'after' = 'after',
-    orderBy: 'ASC' | 'DESC' = 'ASC',
+    type: "before" | "after" = "after",
+    orderBy: "ASC" | "DESC" = "ASC"
   ): Promise<string[] | string | null> {
     await this.ensureInitialized();
 
-    const operator = type === 'before' ? '<' : '>';
+    const operator = type === "before" ? "<" : ">";
 
     const query = this.db
       .createQueryBuilder(this.tableName)
@@ -538,7 +538,7 @@ export class KVDatabase {
       .where(`updated_at ${operator} :timestamp`, {
         timestamp: new Date(timestamp),
       })
-      .orderBy('updated_at', orderBy);
+      .orderBy("updated_at", orderBy);
 
     if (first) {
       const result = await query.getRawOne();
@@ -552,12 +552,12 @@ export class KVDatabase {
   async searchByTime(params: {
     timestamp: number;
     take?: number;
-    type?: 'before' | 'after';
-    orderBy?: 'ASC' | 'DESC';
-    timeColumn?: 'updated_at' | 'created_at';
+    type?: "before" | "after";
+    orderBy?: "ASC" | "DESC";
+    timeColumn?: "updated_at" | "created_at";
   }): Promise<Array<{ key: string; value: any }>> {
     await this.ensureInitialized();
-    const timeColumn = params.timeColumn || 'updated_at';
+    const timeColumn = params.timeColumn || "updated_at";
     const queryBuilder = this.db
       .createQueryBuilder()
       .select([
@@ -566,25 +566,25 @@ export class KVDatabase {
       ])
       .from(this.tableName, this.tableName);
 
-    const operator = (params.type || 'after') === 'before' ? '<' : '>';
+    const operator = (params.type || "after") === "before" ? "<" : ">";
     queryBuilder.where(
       `${this.tableName}.${timeColumn} ${operator} :timestamp`,
       {
         timestamp: new Date(params.timestamp),
-      },
+      }
     );
 
     queryBuilder.orderBy(
       `${this.tableName}.${timeColumn}`,
-      params.orderBy || 'ASC',
+      params.orderBy || "ASC"
     );
     queryBuilder.limit(params.take || 1);
     try {
       const results = await queryBuilder.getRawMany();
       return results;
     } catch (error) {
-      console.error('查询错误:', queryBuilder.getSql());
-      console.error('查询参数:', queryBuilder.getParameters());
+      console.error("查询错误:", queryBuilder.getSql());
+      console.error("查询参数:", queryBuilder.getParameters());
       throw error;
     }
   }
@@ -602,13 +602,13 @@ export class KVDatabase {
     timeOptions: {
       timestamp: number;
       take?: number;
-      type?: 'before' | 'after';
-      orderBy?: 'ASC' | 'DESC';
-      timeColumn?: 'updated_at' | 'created_at';
-    },
+      type?: "before" | "after";
+      orderBy?: "ASC" | "DESC";
+      timeColumn?: "updated_at" | "created_at";
+    }
   ): Promise<Array<{ key: string; value: any }>> {
     await this.ensureInitialized();
-    const timeColumn = timeOptions.timeColumn || 'updated_at';
+    const timeColumn = timeOptions.timeColumn || "updated_at";
     const queryBuilder = this.db
       .createQueryBuilder()
       .select([
@@ -617,12 +617,12 @@ export class KVDatabase {
       ])
       .from(this.tableName, this.tableName);
 
-    const operator = (timeOptions.type || 'after') === 'before' ? '<' : '>';
+    const operator = (timeOptions.type || "after") === "before" ? "<" : ">";
     queryBuilder.where(
       `${this.tableName}.${timeColumn} ${operator} :timestamp`,
       {
         timestamp: new Date(timeOptions.timestamp),
-      },
+      }
     );
 
     if (searchOptions.contains) {
@@ -645,15 +645,15 @@ export class KVDatabase {
     }
 
     queryBuilder
-      .orderBy(`${this.tableName}.${timeColumn}`, timeOptions.orderBy || 'ASC')
+      .orderBy(`${this.tableName}.${timeColumn}`, timeOptions.orderBy || "ASC")
       .limit(timeOptions.take || 1);
 
     try {
       const results = await queryBuilder.getRawMany();
       return results;
     } catch (error) {
-      console.error('Query error:', queryBuilder.getSql());
-      console.error('Query parameters:', queryBuilder.getParameters());
+      console.error("Query error:", queryBuilder.getSql());
+      console.error("Query parameters:", queryBuilder.getParameters());
       throw error;
     }
   }
@@ -670,7 +670,7 @@ export class KVDatabase {
     key: string,
     array: any[],
     batchSize: number = 1000,
-    forceUpdateBatchSize: boolean = false,
+    forceUpdateBatchSize: boolean = false
   ): Promise<void> {
     await this.ensureInitialized();
 
@@ -692,7 +692,7 @@ export class KVDatabase {
       // Handle batch size change if requested
       if (forceUpdateBatchSize && batchSize !== storedBatchSize) {
         console.log(
-          `Updating batch size from ${storedBatchSize} to ${batchSize}`,
+          `Updating batch size from ${storedBatchSize} to ${batchSize}`
         );
         activeBatchSize = batchSize;
 
@@ -719,7 +719,7 @@ export class KVDatabase {
         }
       } else if (batchSize !== storedBatchSize) {
         console.warn(
-          `Warning: Provided batchSize (${batchSize}) differs from originally stored batchSize (${storedBatchSize}). Using stored value. Set forceUpdateBatchSize=true to change batch size.`,
+          `Warning: Provided batchSize (${batchSize}) differs from originally stored batchSize (${storedBatchSize}). Using stored value. Set forceUpdateBatchSize=true to change batch size.`
         );
       }
 
@@ -774,7 +774,7 @@ export class KVDatabase {
             const batchKey = `${key}_${existingBatchCount + newBatchesCount}`;
 
             bulkValues.push(
-              `($${paramIndex}, $${paramIndex + 1}, NOW(), NOW())`,
+              `($${paramIndex}, $${paramIndex + 1}, NOW(), NOW())`
             );
             bulkParams.push(batchKey, JSON.stringify(batchData));
             paramIndex += 2;
@@ -786,7 +786,7 @@ export class KVDatabase {
               INSERT INTO "${
                 this.tableName
               }" (key, value, created_at, updated_at)
-              VALUES ${bulkValues.join(',')}
+              VALUES ${bulkValues.join(",")}
             `);
             parameters.push(bulkParams);
           }
@@ -859,7 +859,7 @@ export class KVDatabase {
           const batchKey = `${key}_${i}`;
 
           placeholders.push(
-            `($${paramIndex}, $${paramIndex + 1}, NOW(), NOW())`,
+            `($${paramIndex}, $${paramIndex + 1}, NOW(), NOW())`
           );
           bulkParams.push(batchKey, JSON.stringify(batchData));
           paramIndex += 2;
@@ -869,9 +869,9 @@ export class KVDatabase {
         await queryRunner.query(
           `
           INSERT INTO "${this.tableName}" (key, value, created_at, updated_at)
-          VALUES ${placeholders.join(',')}
+          VALUES ${placeholders.join(",")}
         `,
-          bulkParams,
+          bulkParams
         );
 
         await queryRunner.commitTransaction();
@@ -903,18 +903,18 @@ export class KVDatabase {
     // Optimize by fetching multiple batches in a single query
     const batchKeys = Array.from(
       { length: meta.batchCount },
-      (_, i) => `${key}_${i}`,
+      (_, i) => `${key}_${i}`
     );
 
     // Use IN clause to fetch all batches at once
     const records = await this.db.find({
       where: { key: In(batchKeys) },
-      order: { key: 'ASC' },
+      order: { key: "ASC" },
     });
 
     // Map results to a map for faster lookup
     const batchMap = new Map(
-      records.map((record) => [record.key, record.value]),
+      records.map((record) => [record.key, record.value])
     );
 
     // Combine all batches in order
@@ -971,7 +971,7 @@ export class KVDatabase {
     // Fetch all needed batches in a single query
     const records = await this.db.find({
       where: { key: In(neededBatches) },
-      order: { key: 'DESC' },
+      order: { key: "DESC" },
     });
 
     // Process results
@@ -1007,7 +1007,7 @@ export class KVDatabase {
   async getArrayRange<T = any>(
     key: string,
     startIndex: number,
-    endIndex: number,
+    endIndex: number
   ): Promise<T[]> {
     await this.ensureInitialized();
 
@@ -1041,18 +1041,18 @@ export class KVDatabase {
     // Create a list of needed batch keys
     const batchKeys = Array.from(
       { length: endBatch - startBatch + 1 },
-      (_, i) => `${key}_${startBatch + i}`,
+      (_, i) => `${key}_${startBatch + i}`
     );
 
     // Fetch all needed batches in a single query
     const records = await this.db.find({
       where: { key: In(batchKeys) },
-      order: { key: 'ASC' },
+      order: { key: "ASC" },
     });
 
     // Map results to a map for faster lookup
     const batchMap = new Map(
-      records.map((record) => [record.key, record.value]),
+      records.map((record) => [record.key, record.value])
     );
 
     // Process results
@@ -1081,7 +1081,7 @@ export class KVDatabase {
    * @returns 随机记录数组
    */
   async getRandomData(
-    count: number = 1,
+    count: number = 1
   ): Promise<Array<{ key: string; value: any }>> {
     await this.ensureInitialized();
 
@@ -1092,7 +1092,7 @@ export class KVDatabase {
         `${this.tableName}.key as "key"`,
         `${this.tableName}.value as "value"`,
       ])
-      .orderBy('RANDOM()')
+      .orderBy("RANDOM()")
       .limit(count)
       .getRawMany();
 

@@ -26,7 +26,7 @@ export class MinioHelper {
     try {
       return await this.client.bucketExists(bucketName);
     } catch (error: any) {
-      throw new Error(`检查 bucket 失败: ${error.message}`);
+      throw new Error(`检查 bucket 失败: ${error}`);
     }
   }
 

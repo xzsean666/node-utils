@@ -151,38 +151,20 @@ export class KVDatabase {
       value,
     });
   }
-  async merge(
-    key: string,
-    partialValue: any,
-    deep: boolean = true,
-  ): Promise<boolean> {
+  async merge(key: string, partialValue: any): Promise<boolean> {
     await this.ensureInitialized();
 
-    // 确保深度合并函数存在
-    if (deep) {
-      await this.ensureJsonbDeepMergeFunction();
-    }
-
-    const query = deep
-      ? `
-        INSERT INTO "${this.tableName}" (key, value, created_at, updated_at)
-        VALUES ($1, $2, NOW(), NOW())
-        ON CONFLICT (key) DO UPDATE
-        SET value = jsonb_deep_merge(
-          COALESCE("${this.tableName}".value, '{}'::jsonb),
-          $2::jsonb
-        ),
-        updated_at = NOW()
-        RETURNING value
-      `
-      : `
-        INSERT INTO "${this.tableName}" (key, value, created_at, updated_at)
-        VALUES ($1, $2, NOW(), NOW())
-        ON CONFLICT (key) DO UPDATE
-        SET value = COALESCE("${this.tableName}".value, '{}'::jsonb) || $2::jsonb,
-        updated_at = NOW()
-        RETURNING value
-      `;
+    const query = `
+      INSERT INTO "${this.tableName}" (key, value, created_at, updated_at)
+      VALUES ($1, $2, NOW(), NOW())
+      ON CONFLICT (key) DO UPDATE
+      SET value = CASE
+        WHEN "${this.tableName}".value IS NULL THEN $2::jsonb
+        ELSE "${this.tableName}".value || $2::jsonb
+      END,
+      updated_at = NOW()
+      RETURNING value
+    `;
 
     const result = await this.db.query(query, [
       key,
@@ -191,7 +173,6 @@ export class KVDatabase {
 
     return !!result?.length;
   }
-
   async get<T = any>(key: string, expire?: number): Promise<T | null> {
     await this.ensureInitialized();
     const record = await this.db.findOne({ where: { key } });

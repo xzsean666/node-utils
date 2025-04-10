@@ -93,6 +93,7 @@ coverage
 .DS_Store
 .env
 src/utils
+db
 EOL
 
 # 创建 utils 软链接

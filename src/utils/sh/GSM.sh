@@ -46,13 +46,8 @@ LATEST_HASH=$(git rev-parse origin/"$BRANCH")
 post_update_actions() {
     echo -e "\n开始执行更新后的操作..."
     if [ -n "$POST_UPDATE_SCRIPT" ]; then
-        if [ -f "$POST_UPDATE_SCRIPT" ] && [ -x "$POST_UPDATE_SCRIPT" ]; then
-            echo "执行自定义更新脚本: $POST_UPDATE_SCRIPT $POST_UPDATE_ARGS"
-            bash "$POST_UPDATE_SCRIPT" $POST_UPDATE_ARGS
-        else
-            echo "错误: 更新脚本不存在或没有执行权限: $POST_UPDATE_SCRIPT"
-            exit 1
-        fi
+        echo "执行自定义更新脚本: $POST_UPDATE_SCRIPT $POST_UPDATE_ARGS"
+        eval "$POST_UPDATE_SCRIPT $POST_UPDATE_ARGS"
     else
         echo "未指定更新后操作脚本"
     fi

@@ -48,7 +48,7 @@ export class PostgresqlDbHelper<T extends ObjectLiteral> {
     // 初始化连接
     if (!this.dataSource.isInitialized) {
       await this.dataSource.initialize();
-      console.log("数据库连接已成功建立");
+      // console.log("数据库连接已成功建立");
     }
 
     // 获取仓库

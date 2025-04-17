@@ -28,7 +28,8 @@ fi
 
 # Create a safe log file name by replacing spaces and special characters
 SAFE_COMMAND=$(echo "$COMMAND" | tr -c '[:alnum:]' '_')
-LOG_FILE="$LOG_DIR/$SAFE_COMMAND.log"
+BACKUP_DATE=$(date '+%Y%m%d_%H%M%S')
+LOG_FILE="$LOG_DIR/${SAFE_COMMAND}_${BACKUP_DATE}.log"
 
 echo "$(date): 开始执行 $COMMAND 脚本" >> $LOG_FILE
 

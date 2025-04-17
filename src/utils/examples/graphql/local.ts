@@ -9,6 +9,7 @@ query Query($getValueKey2: String!) {
   getValue(key: $getValueKey2)
 }
 `;
+
 async function main() {
   try {
     const mutation = await gh.mutate(setValue, {

@@ -14,5 +14,10 @@ export const rpcs = {
   testpolygon:
     "https://polygon-amoy.infura.io/v3/7264e62271c24c22b31bc13bd3755d51",
   testpolygon1: "https://rpc-amoy.polygon.technology",
+  sepolia:
+    "https://eth-sepolia.nodereal.io/v1/aff09ffcae0a40ae80cd7fe3d1a9cf35",
+  soneium:
+    "https://soneium.rpc.scs.startale.com?apikey=CBKpDfekGVM2CdVP8o1hCzjuDHgexAmR",
+  soneiumPublic: "https://rpc.soneium.org",
   local: "http://localhost:8545",
 };

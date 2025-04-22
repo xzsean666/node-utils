@@ -149,14 +149,17 @@ export class CCIPLiteHelper {
     destinationChainSelector,
     BLOCKS_TO_SEARCH = 1000,
   }: {
-    fromAddress: string;
-    toAddress: string;
+    fromAddress?: string;
+    toAddress?: string;
     sourceRouterAddress: string;
     destinationChainSelector: string;
     BLOCKS_TO_SEARCH?: number;
   }) {
-    // 输入参数验证
-    const addresses = [fromAddress, toAddress, sourceRouterAddress];
+    // 输入参数验证 - 只验证必填地址
+    const addresses = [sourceRouterAddress];
+    if (fromAddress) addresses.push(fromAddress);
+    if (toAddress) addresses.push(toAddress);
+
     if (!addresses.every((addr) => ethers.isAddress(addr))) {
       throw new Error("Invalid address provided");
     }
@@ -194,16 +197,20 @@ export class CCIPLiteHelper {
         toBlock: latestBlock,
       }
     );
+    // console.log(logs[0]);
 
     // 处理匹配的交易
     const matchingTransactions = await Promise.all(
       logs
         .filter((log: any) => {
           const message = log.args[0];
-          return (
-            message.sender.toLowerCase() === fromAddress.toLowerCase() &&
-            message.receiver.toLowerCase() === toAddress.toLowerCase()
-          );
+          const fromMatch =
+            !fromAddress ||
+            message.sender.toLowerCase() === fromAddress.toLowerCase();
+          const toMatch =
+            !toAddress ||
+            message.receiver.toLowerCase() === toAddress.toLowerCase();
+          return fromMatch && toMatch;
         })
         .map(async (log: any) => {
           const message = log.args[0];
@@ -214,6 +221,7 @@ export class CCIPLiteHelper {
             blockNumber: log.blockNumber,
             transactionHash: log.transactionHash,
             tokenAmounts: message.tokenAmounts,
+            data: message.data,
             fees: {
               feeToken: message.feeToken,
               feeAmount: message.feeTokenAmount,

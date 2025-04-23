@@ -6,7 +6,9 @@ import {
   BinanceTrade,
   BinanceOrder,
   FuturesAccountInfo,
+  BinanceAccountInfo,
 } from "./types";
+export * from "./types";
 
 export class BinanceAPIHelper {
   private apiKey?: string;
@@ -65,19 +67,7 @@ export class BinanceAPIHelper {
    * Get current account information
    * @returns Account information including balances
    */
-  async getAccountInfo(): Promise<{
-    makerCommission: number;
-    takerCommission: number;
-    buyerCommission: number;
-    sellerCommission: number;
-    canTrade: boolean;
-    canWithdraw: boolean;
-    canDeposit: boolean;
-    updateTime: number;
-    accountType: string;
-    balances: BinanceBalance[];
-    permissions: string[];
-  }> {
+  async getAccountInfo(): Promise<BinanceAccountInfo> {
     return this.makeRequest("GET", "/api/v3/account");
   }
 

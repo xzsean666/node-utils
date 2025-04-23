@@ -37,3 +37,21 @@ export interface UnifiedPosition {
   // 原始数据
   rawData: any; // 保留原始数据，方便调试和扩展
 }
+
+export interface UnifiedTrade {
+  exchange: ExchangeName;
+  accountId: string; // 用于区分不同账号
+  symbol: string;
+  id: number;
+  orderId: number;
+  price: string;
+  qty: string;
+  quoteQty: string;
+  commission: string;
+  commissionAsset: string;
+  time: number;
+  isBuyer: boolean;
+  isMaker: boolean;
+  isBestMatch: boolean;
+  rawData: any; // Keep raw exchange-specific data
+}

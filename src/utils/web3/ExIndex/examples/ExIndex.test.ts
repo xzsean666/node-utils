@@ -22,8 +22,12 @@ const exIndex = new ExIndex([
 ]);
 
 async function main() {
-  const accountInfo = await exIndex.getUnifiedPositions();
-  console.log(accountInfo);
+  // const accountInfo = await exIndex.getUnifiedPositions();
+  // console.log(accountInfo);
+  const history = await exIndex.getFuturesTradingHistory(ExchangeName.BINANCE);
+
+  console.log(history);
+  console.log(history.length);
 }
 
 main();

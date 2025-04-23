@@ -11,17 +11,21 @@ export interface BinanceBalance {
 }
 
 export interface BinanceTrade {
+  symbol: string;
   id: number;
   orderId: number;
+  side: string;
   price: string;
   qty: string;
+  realizedPnl: string;
   quoteQty: string;
   commission: string;
   commissionAsset: string;
   time: number;
-  isBuyer: boolean;
-  isMaker: boolean;
-  isBestMatch: boolean;
+  positionSide: string;
+  maker: boolean;
+  buyer: boolean;
+  rawData?: any;
 }
 
 export interface BinanceOrder {

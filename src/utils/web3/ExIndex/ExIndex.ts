@@ -1,8 +1,14 @@
 import {
   BinanceAPIHelper,
   FormattedPosition,
+  BinanceTrade,
 } from "../binance/BinanceAPIHelper";
-import { ExchangeConfig, ExchangeName, UnifiedPosition } from "./types";
+import {
+  ExchangeConfig,
+  ExchangeName,
+  UnifiedPosition,
+  UnifiedTrade,
+} from "./types";
 export * from "./types";
 export class ExIndex {
   private exchangeConfigs: ExchangeConfig[] = [];
@@ -274,5 +280,85 @@ export class ExIndex {
     return allPositions.filter(
       (p) => p.healthStatus.healthLevel === healthLevel
     );
+  }
+
+  /**
+   * 格式化币安交易记录
+   */
+  private formatBinanceTrade(
+    trade: BinanceTrade,
+    accountId: string
+  ): UnifiedTrade {
+    return {
+      exchange: ExchangeName.BINANCE,
+      accountId,
+      symbol: trade.symbol,
+      id: trade.id,
+      orderId: trade.orderId,
+      price: trade.price,
+      qty: trade.qty,
+      quoteQty: trade.quoteQty,
+      commission: trade.commission,
+      commissionAsset: trade.commissionAsset,
+      time: trade.time,
+      isBuyer: trade.buyer,
+      isMaker: trade.maker,
+      isBestMatch: true, // 币安期货API不返回这个字段，默认为true
+      rawData: trade.rawData || trade,
+    };
+  }
+
+  /**
+   * 获取指定交易所的期货交易历史
+   * @param exchangeName 交易所名称
+   * @param options 查询参数
+   * @returns 交易历史记录
+   */
+  async getFuturesTradingHistory(
+    exchangeName: ExchangeName,
+    options: {
+      startTime?: number;
+      endTime?: number;
+      fromId?: number;
+      limit?: number;
+    } = {}
+  ): Promise<UnifiedTrade[]> {
+    const trades: UnifiedTrade[] = [];
+
+    switch (exchangeName) {
+      case ExchangeName.BINANCE: {
+        const binanceConfigs = this.getExchangeConfigs(ExchangeName.BINANCE);
+        for (const config of binanceConfigs) {
+          try {
+            const binanceAPIHelper = config.apiHelper as BinanceAPIHelper;
+            if (binanceAPIHelper) {
+              const binanceTrades =
+                await binanceAPIHelper.getAllFuturesTradingHistory(options);
+              trades.push(
+                ...binanceTrades.map((trade) =>
+                  this.formatBinanceTrade(
+                    trade,
+                    binanceAPIHelper.getAccountId()
+                  )
+                )
+              );
+            }
+          } catch (error) {
+            console.error(
+              `Failed to get futures trading history from Binance instance: ${error}`
+            );
+          }
+        }
+        break;
+      }
+      // TODO: Add support for other exchanges
+      default:
+        console.warn(
+          `Exchange ${exchangeName} is not supported yet for futures trading history`
+        );
+    }
+
+    // Sort trades by time in descending order (newest first)
+    return trades.sort((a, b) => b.time - a.time);
   }
 }

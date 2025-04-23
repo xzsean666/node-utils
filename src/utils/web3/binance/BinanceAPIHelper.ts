@@ -29,6 +29,14 @@ export class BinanceAPIHelper {
       : "https://fapi.binance.com";
   }
 
+  /**
+   * Get account ID (API key)
+   * @returns Account ID
+   */
+  getAccountId(): string {
+    return this.apiKey?.slice(0, 10) || "unknown";
+  }
+
   private async signRequest(params: Record<string, any>): Promise<string> {
     const timestamp = Date.now();
     const queryString = Object.entries({ ...params, timestamp })

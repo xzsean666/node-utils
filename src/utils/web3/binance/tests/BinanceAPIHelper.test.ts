@@ -33,8 +33,8 @@ async function main() {
   //   { fromId: 1684018 }
   // );
   // console.log(spotTradingHistory);
-  const accountFuturesInfo = await binanceAPIHelper1.getFuturesAccountInfo();
-  console.log(accountFuturesInfo);
+  // const accountFuturesInfo = await binanceAPIHelper1.getFuturesAccountInfo();
+  // console.log(accountFuturesInfo);
   const futuresTradingHistory =
     await binanceAPIHelper1.getAllFuturesTradingHistory();
   console.log(futuresTradingHistory);

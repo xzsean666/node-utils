@@ -26,18 +26,18 @@ const binanceAPIHelper1 = new BinanceAPIHelper(config1);
 const allSymbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT"];
 
 async function main() {
-  const accountInfo = await binanceAPIHelper.getAccountInfo();
-  console.log(accountInfo);
+  // const accountInfo = await binanceAPIHelper.getAccountInfo();
+  // console.log(accountInfo);
   // const spotTradingHistory = await binanceAPIHelper.getAllSpotTradingHistory(
   //   allSymbols,
   //   { fromId: 1684018 }
   // );
   // console.log(spotTradingHistory);
-  // const accountFuturesInfo = await binanceAPIHelper1.getFuturesAccountInfo();
-  // console.log(accountFuturesInfo);
-  // const futuresTradingHistory =
-  //   await binanceAPIHelper1.getAllFuturesTradingHistory();
-  // console.log(futuresTradingHistory);
+  const accountFuturesInfo = await binanceAPIHelper1.getFuturesAccountInfo();
+  console.log(accountFuturesInfo);
+  const futuresTradingHistory =
+    await binanceAPIHelper1.getAllFuturesTradingHistory();
+  console.log(futuresTradingHistory);
 }
 
 main();

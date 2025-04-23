@@ -73,6 +73,7 @@ export interface FuturesPosition {
   initialMargin: string;
   maintMargin: string;
   updateTime: number;
+  entryPrice: string;
 }
 
 export interface FuturesAccountInfo {
@@ -103,4 +104,32 @@ export interface BinanceAccountInfo {
   accountType: string;
   balances: BinanceBalance[];
   permissions: string[];
+}
+
+export interface FormattedPosition {
+  symbol: string;
+  positionSide: string;
+  positionAmt: string;
+  unrealizedProfit: string;
+  isolatedMargin: string;
+  notional: string;
+  isolatedWallet: string;
+  initialMargin: string;
+  maintMargin: string;
+  updateTime: number;
+  healthStatus: {
+    riskRatio: number;
+    marginRatio: number;
+    leverage: number;
+    liquidationPrice: string;
+    safetyDistance: number;
+    healthLevel: "SAFE" | "WARNING" | "DANGER";
+  };
+  metrics: {
+    entryPrice: string;
+    markPrice: string;
+    roe: number;
+    pnl: string;
+    pnlPercentage: number;
+  };
 }

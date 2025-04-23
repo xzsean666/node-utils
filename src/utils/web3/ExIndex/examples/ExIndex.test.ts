@@ -19,6 +19,7 @@ const allSymbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT"];
 
 const exIndex = new ExIndex([
   { name: ExchangeName.BINANCE, apiHelper: binanceAPIHelper1 },
+  { name: ExchangeName.BINANCE, apiHelper: binanceAPIHelper1 },
 ]);
 
 async function main() {

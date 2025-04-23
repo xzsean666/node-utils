@@ -217,6 +217,7 @@ export class ExIndex {
     // 获取币安持仓
     const binanceConfigs = this.getExchangeConfigs(ExchangeName.BINANCE);
     for (const config of binanceConfigs) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       try {
         const binanceAPIHelper = config.apiHelper as BinanceAPIHelper;
         if (binanceAPIHelper) {
@@ -329,6 +330,7 @@ export class ExIndex {
       case ExchangeName.BINANCE: {
         const binanceConfigs = this.getExchangeConfigs(ExchangeName.BINANCE);
         for (const config of binanceConfigs) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
           try {
             const binanceAPIHelper = config.apiHelper as BinanceAPIHelper;
             if (binanceAPIHelper) {

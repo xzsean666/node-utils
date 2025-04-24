@@ -1,30 +1,139 @@
 import { authenticator } from "otplib";
 import * as qrcode from "qrcode";
 
-class OTPUtils {
-  secret: string;
-  constructor(secret: string) {
-    this.secret = secret;
-  }
-
-  async newSecret(user: string, service: string) {
-    const secret = authenticator.generateSecret();
-    const otpauth = authenticator.keyuri(user, service, secret);
-    const imageUrl = await qrcode.toDataURL(otpauth);
-    const result = {
-      secret: secret,
-      otpauth: otpauth,
-      imageUrl: imageUrl,
-    };
-    return result;
-  }
-  timer() {
-    return authenticator.timeRemaining();
-  }
-  getToken() {
-    const token = authenticator.generate(this.secret);
-    return token;
-  }
+export interface OTPOptions {
+  window?: number;
+  step?: number;
+  algorithm?: string;
+  digits?: number;
 }
 
-export default OTPUtils;
+export interface OTPSecretResult {
+  secret: string;
+  otpauth: string;
+  imageUrl: string;
+}
+
+export interface VerifyResult {
+  isValid: boolean;
+  delta?: number;
+}
+
+export class OTPUtils {
+  private readonly secret: string;
+  private readonly options: OTPOptions;
+
+  constructor(secret: string, options: OTPOptions = {}) {
+    if (!secret) {
+      throw new Error("Secret is required");
+    }
+    this.secret = secret;
+    this.options = {
+      window: 1,
+      step: 30,
+      algorithm: "SHA1",
+      digits: 6,
+      ...options,
+    };
+    this.configureAuthenticator();
+  }
+
+  private configureAuthenticator() {
+    authenticator.options = {
+      window: this.options.window,
+      step: this.options.step,
+      algorithm: this.options.algorithm as any,
+      digits: this.options.digits,
+    };
+  }
+
+  /**
+   * 生成新的 OTP 密钥和二维码
+   * @param user - 用户标识
+   * @param service - 服务名称
+   * @returns OTP 配置信息，包含密钥和二维码
+   */
+  async newSecret(user: string, service: string): Promise<OTPSecretResult> {
+    try {
+      const secret = authenticator.generateSecret();
+      const otpauth = authenticator.keyuri(user, service, secret);
+      const imageUrl = await qrcode.toDataURL(otpauth);
+
+      return {
+        secret,
+        otpauth,
+        imageUrl,
+      };
+    } catch (error) {
+      throw new Error(
+        `Failed to generate OTP secret: ${(error as Error).message}`
+      );
+    }
+  }
+
+  /**
+   * 获取当前 OTP 令牌的剩余有效时间
+   * @returns 剩余秒数
+   */
+  timer(): number {
+    return authenticator.timeRemaining();
+  }
+
+  /**
+   * 生成当前 OTP 令牌
+   * @returns OTP 令牌
+   */
+  getToken(): string {
+    try {
+      return authenticator.generate(this.secret);
+    } catch (error) {
+      throw new Error(
+        `Failed to generate OTP token: ${(error as Error).message}`
+      );
+    }
+  }
+
+  /**
+   * 验证 OTP 令牌是否有效
+   * @param token - 待验证的 OTP 令牌
+   * @param window - 验证窗口大小（可选，覆盖构造函数中的设置）
+   * @returns 是否有效
+   */
+  verifyToken(token: string, window?: number): boolean {
+    try {
+      return authenticator.verify({
+        token,
+        secret: this.secret,
+        window: window ?? this.options.window,
+      } as any);
+    } catch (error) {
+      throw new Error(
+        `Failed to verify OTP token: ${(error as Error).message}`
+      );
+    }
+  }
+
+  /**
+   * 验证 OTP 令牌是否有效，并返回验证结果详情
+   * @param token - 待验证的 OTP 令牌
+   * @param window - 验证窗口大小（可选，覆盖构造函数中的设置）
+   * @returns 验证结果详情
+   */
+  verifyTokenWithDetail(token: string, window?: number): VerifyResult {
+    try {
+      const result = authenticator.verify({
+        token,
+        secret: this.secret,
+        window: window ?? this.options.window,
+      } as any);
+      return {
+        isValid: result,
+        delta: result ? authenticator.timeUsed() : undefined,
+      };
+    } catch (error) {
+      throw new Error(
+        `Failed to verify OTP token: ${(error as Error).message}`
+      );
+    }
+  }
+}

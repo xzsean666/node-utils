@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken';
+import * as jwt from 'jsonwebtoken';
 
 export interface JWTPayload {
   [key: string]: any;
@@ -65,6 +65,27 @@ export class JWTHelper {
       return !decoded.exp || decoded.exp < currentTime;
     } catch {
       return true;
+    }
+  }
+
+  /**
+   * 简单加密 JWT 令牌（无过期时间）
+   * @param payload 需要加密的数据
+   */
+  public encode(payload: JWTPayload): string {
+    return jwt.sign(payload, this.secretKey);
+  }
+
+  /**
+   * 简单解密 JWT 令牌（无过期时间验证）
+   * @param token JWT 令牌
+   * @returns 解码后的数据
+   */
+  public decode(token: string): JWTPayload {
+    try {
+      return jwt.verify(token, this.secretKey) as JWTPayload;
+    } catch {
+      throw new Error('Invalid token');
     }
   }
 }

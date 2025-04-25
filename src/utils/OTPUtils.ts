@@ -1,5 +1,5 @@
-import { authenticator } from "otplib";
-import * as qrcode from "qrcode";
+import { authenticator } from 'otplib';
+import * as qrcode from 'qrcode';
 
 export interface OTPOptions {
   window?: number;
@@ -20,18 +20,14 @@ export interface VerifyResult {
 }
 
 export class OTPUtils {
-  private readonly secret: string;
+  private secret?: string;
   private readonly options: OTPOptions;
 
-  constructor(secret: string, options: OTPOptions = {}) {
-    if (!secret) {
-      throw new Error("Secret is required");
-    }
-    this.secret = secret;
+  constructor(options: OTPOptions = {}) {
     this.options = {
       window: 1,
       step: 30,
-      algorithm: "SHA1",
+      algorithm: 'sha1',
       digits: 6,
       ...options,
     };
@@ -66,7 +62,7 @@ export class OTPUtils {
       };
     } catch (error) {
       throw new Error(
-        `Failed to generate OTP secret: ${(error as Error).message}`
+        `Failed to generate OTP secret: ${(error as Error).message}`,
       );
     }
   }
@@ -81,14 +77,15 @@ export class OTPUtils {
 
   /**
    * 生成当前 OTP 令牌
+   * @param secret - OTP 密钥
    * @returns OTP 令牌
    */
-  getToken(): string {
+  getToken(secret: string): string {
     try {
-      return authenticator.generate(this.secret);
+      return authenticator.generate(secret);
     } catch (error) {
       throw new Error(
-        `Failed to generate OTP token: ${(error as Error).message}`
+        `Failed to generate OTP token: ${(error as Error).message}`,
       );
     }
   }
@@ -96,19 +93,20 @@ export class OTPUtils {
   /**
    * 验证 OTP 令牌是否有效
    * @param token - 待验证的 OTP 令牌
+   * @param secret - OTP 密钥
    * @param window - 验证窗口大小（可选，覆盖构造函数中的设置）
    * @returns 是否有效
    */
-  verifyToken(token: string, window?: number): boolean {
+  verifyToken(token: string, secret: string, window?: number): boolean {
     try {
       return authenticator.verify({
         token,
-        secret: this.secret,
+        secret,
         window: window ?? this.options.window,
       } as any);
     } catch (error) {
       throw new Error(
-        `Failed to verify OTP token: ${(error as Error).message}`
+        `Failed to verify OTP token: ${(error as Error).message}`,
       );
     }
   }
@@ -116,14 +114,19 @@ export class OTPUtils {
   /**
    * 验证 OTP 令牌是否有效，并返回验证结果详情
    * @param token - 待验证的 OTP 令牌
+   * @param secret - OTP 密钥
    * @param window - 验证窗口大小（可选，覆盖构造函数中的设置）
    * @returns 验证结果详情
    */
-  verifyTokenWithDetail(token: string, window?: number): VerifyResult {
+  verifyTokenWithDetail(
+    token: string,
+    secret: string,
+    window?: number,
+  ): VerifyResult {
     try {
       const result = authenticator.verify({
         token,
-        secret: this.secret,
+        secret,
         window: window ?? this.options.window,
       } as any);
       return {
@@ -132,7 +135,7 @@ export class OTPUtils {
       };
     } catch (error) {
       throw new Error(
-        `Failed to verify OTP token: ${(error as Error).message}`
+        `Failed to verify OTP token: ${(error as Error).message}`,
       );
     }
   }

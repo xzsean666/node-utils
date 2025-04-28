@@ -1,4 +1,4 @@
-import { ExIndex, ExchangeName } from "../ExIndex";
+import { ExIndex, ExchangeName, TradeStatisticsPeriod } from "../ExIndex";
 import { BinanceAPIHelper } from "../../binance/BinanceAPIHelper";
 
 const config = {
@@ -19,7 +19,7 @@ const allSymbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT"];
 
 const exIndex = new ExIndex([
   { name: ExchangeName.BINANCE, apiHelper: binanceAPIHelper1 },
-  { name: ExchangeName.BINANCE, apiHelper: binanceAPIHelper1 },
+  // { name: ExchangeName.BINANCE, apiHelper: binanceAPIHelper1 },
 ]);
 
 async function main() {
@@ -28,7 +28,15 @@ async function main() {
   const history = await exIndex.getFuturesTradingHistory(ExchangeName.BINANCE);
 
   console.log(history);
-  console.log(history.length);
+  // const stateChange = await exIndex.getFuturesAccountStateChanges(
+  //   ExchangeName.BINANCE,
+  //   60 * 24
+  // );
+  // console.log(stateChange);
+  // const statistics = exIndex.getTradeStatistics(history, {
+  //   period: TradeStatisticsPeriod.WEEK,
+  // });
+  // console.log(statistics);
 }
 
 main();

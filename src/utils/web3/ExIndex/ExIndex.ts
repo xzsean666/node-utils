@@ -2,14 +2,20 @@ import {
   BinanceAPIHelper,
   FormattedPosition,
   BinanceTrade,
+  FuturesAccountChanges,
 } from "../binance/BinanceAPIHelper";
 import {
   ExchangeConfig,
   ExchangeName,
   UnifiedPosition,
   UnifiedTrade,
+  UnifiedAccountStateChanges,
+  TradeStatisticsOptions,
+  TradeStatistics,
+  TradeStatisticsPeriod,
 } from "./types";
 export * from "./types";
+export { BinanceAPIHelper };
 export class ExIndex {
   private exchangeConfigs: ExchangeConfig[] = [];
 
@@ -290,6 +296,32 @@ export class ExIndex {
     trade: BinanceTrade,
     accountId: string
   ): UnifiedTrade {
+    // Parse necessary values
+    const price = parseFloat(trade.price);
+    const qty = parseFloat(trade.qty);
+    const realizedPnl = parseFloat(trade.realizedPnl || "0");
+
+    // Calculate entryPrice
+    let entryPrice: number | undefined;
+
+    // If realizedPnl exists, we can calculate entryPrice (this is likely a closing trade)
+    if (realizedPnl !== 0) {
+      // For long positions (isBuyer = false when closing)
+      if (!trade.buyer) {
+        // When closing a long: entryPrice = price - (realizedPnl / qty)
+        entryPrice = price - realizedPnl / qty;
+      }
+      // For short positions (isBuyer = true when closing)
+      else {
+        // When closing a short: entryPrice = price + (realizedPnl / qty)
+        entryPrice = price + realizedPnl / qty;
+      }
+    }
+    // If no realizedPnl, this is likely an opening trade
+    else {
+      entryPrice = price;
+    }
+
     return {
       exchange: ExchangeName.BINANCE,
       accountId,
@@ -305,6 +337,8 @@ export class ExIndex {
       isBuyer: trade.buyer,
       isMaker: trade.maker,
       isBestMatch: true, // 币安期货API不返回这个字段，默认为true
+      realizedPnl: trade.realizedPnl || "0", // 添加已实现盈亏字段，如果不存在则默认为'0'
+      entryPrice: entryPrice?.toString(), // Add calculated entryPrice
       rawData: trade.rawData || trade,
     };
   }
@@ -362,5 +396,444 @@ export class ExIndex {
 
     // Sort trades by time in descending order (newest first)
     return trades.sort((a, b) => b.time - a.time);
+  }
+
+  /**
+   * 格式化币安账户状态变化信息
+   */
+  private formatBinanceAccountChanges(
+    accountChanges: FuturesAccountChanges,
+    accountId: string
+  ): UnifiedAccountStateChanges {
+    // Ensure all position changes have directionChanged as boolean
+    const positionChanges = accountChanges.positionChanges.map((position) => ({
+      ...position,
+      // Make sure directionChanged is a boolean (default to false if undefined)
+      directionChanged: position.directionChanged === true,
+    }));
+
+    return {
+      exchange: ExchangeName.BINANCE,
+      accountId,
+      timeSpan: accountChanges.timeSpan,
+      balanceChanges: accountChanges.balanceChanges,
+      positionChanges,
+      rawData: accountChanges,
+    };
+  }
+
+  /**
+   * 获取指定交易所的期货账户状态变化
+   * @param exchangeName 交易所名称
+   * @param minutes 过去的分钟数
+   * @param options 额外选项
+   * @returns 账户状态变化信息
+   */
+  async getFuturesAccountStateChanges(
+    exchangeName: ExchangeName,
+    minutes: number,
+    options: {
+      includeUnchangedPositions?: boolean;
+    } = {}
+  ): Promise<UnifiedAccountStateChanges[]> {
+    const results: UnifiedAccountStateChanges[] = [];
+
+    switch (exchangeName) {
+      case ExchangeName.BINANCE: {
+        const binanceConfigs = this.getExchangeConfigs(ExchangeName.BINANCE);
+
+        for (const config of binanceConfigs) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          try {
+            const binanceAPIHelper = config.apiHelper as BinanceAPIHelper;
+            if (binanceAPIHelper) {
+              const accountChanges =
+                await binanceAPIHelper.getFuturesAccountStateChanges(
+                  minutes,
+                  options
+                );
+              if (accountChanges) {
+                results.push(
+                  this.formatBinanceAccountChanges(
+                    accountChanges,
+                    binanceAPIHelper.getAccountId()
+                  )
+                );
+              }
+            }
+          } catch (error) {
+            console.error(
+              `Failed to get futures account state changes from Binance instance: ${error}`
+            );
+          }
+        }
+        break;
+      }
+      // TODO: Add support for other exchanges like OKX
+      // case ExchangeName.OKX: {
+      //   const okxConfigs = this.getExchangeConfigs(ExchangeName.OKX);
+      //   for (const config of okxConfigs) {
+      //     try {
+      //       const okxAPIHelper = config.apiHelper as OkxAPIHelper;
+      //       if (okxAPIHelper) {
+      //         const okxChanges = await okxAPIHelper.getAccountStateChanges(minutes, options);
+      //         results.push(this.formatOkxAccountChanges(okxChanges, okxAPIHelper.getAccountId()));
+      //       }
+      //     } catch (error) {
+      //       console.error(`Failed to get account state changes from OKX: ${error}`);
+      //     }
+      //   }
+      //   break;
+      // }
+      default:
+        console.warn(
+          `Exchange ${exchangeName} is not supported yet for futures account state changes`
+        );
+    }
+
+    return results;
+  }
+
+  /**
+   * 获取所有交易所的期货账户状态变化
+   * @param minutes 过去的分钟数
+   * @param options 额外选项
+   * @returns 所有交易所的账户状态变化信息
+   */
+  async getAllFuturesAccountStateChanges(
+    minutes: number,
+    options: {
+      includeUnchangedPositions?: boolean;
+    } = {}
+  ): Promise<UnifiedAccountStateChanges[]> {
+    const results: UnifiedAccountStateChanges[] = [];
+
+    // Get unique exchange names from configs
+    const exchangeNames = Array.from(
+      new Set(this.exchangeConfigs.map((config) => config.name))
+    );
+
+    // Get state changes for each exchange
+    for (const exchangeName of exchangeNames) {
+      const exchangeResults = await this.getFuturesAccountStateChanges(
+        exchangeName,
+        minutes,
+        options
+      );
+      results.push(...exchangeResults);
+    }
+
+    return results;
+  }
+
+  /**
+   * 获取指定账户ID的期货账户状态变化
+   * @param accountId 账户ID
+   * @param minutes 过去的分钟数
+   * @param options 额外选项
+   * @returns 账户状态变化信息
+   */
+  async getFuturesAccountStateChangesByAccountId(
+    accountId: string,
+    minutes: number,
+    options: {
+      includeUnchangedPositions?: boolean;
+    } = {}
+  ): Promise<UnifiedAccountStateChanges | null> {
+    const allChanges = await this.getAllFuturesAccountStateChanges(
+      minutes,
+      options
+    );
+    const accountChanges = allChanges.find(
+      (change) => change.accountId === accountId
+    );
+    return accountChanges || null;
+  }
+
+  /**
+   * 计算交易统计数据，按天/周/月分组
+   * @param trades 交易记录数组
+   * @param options 统计选项
+   * @returns 按指定周期分组的交易统计数据
+   */
+  getTradeStatistics(
+    trades: UnifiedTrade[],
+    options: TradeStatisticsOptions = {}
+  ): Record<string, TradeStatistics> {
+    // 设置默认选项
+    const period = options.period || TradeStatisticsPeriod.DAY;
+    const startTime = options.startTime || 0;
+    const endTime = options.endTime || Date.now();
+    const includeEmptyPeriods = options.includeEmptyPeriods || false;
+
+    // 过滤交易数据
+    let filteredTrades = trades.filter(
+      (trade) => trade.time >= startTime && trade.time <= endTime
+    );
+
+    // 按指定的交易对过滤
+    if (options.symbols && options.symbols.length > 0) {
+      filteredTrades = filteredTrades.filter((trade) =>
+        options.symbols!.includes(trade.symbol)
+      );
+    }
+
+    // 按账户ID过滤
+    if (options.accountIds && options.accountIds.length > 0) {
+      filteredTrades = filteredTrades.filter((trade) =>
+        options.accountIds!.includes(trade.accountId)
+      );
+    }
+
+    // 按周期分组
+    const stats: Record<string, TradeStatistics> = {};
+
+    // 处理每笔交易
+    for (const trade of filteredTrades) {
+      const date = new Date(trade.time);
+      let periodKey: string;
+      let periodStartTime: number;
+      let periodEndTime: number;
+
+      // 按不同周期生成键值和时间范围
+      switch (period) {
+        case TradeStatisticsPeriod.DAY:
+          // 日期格式: YYYY-MM-DD
+          periodKey = date.toISOString().split("T")[0];
+          periodStartTime = new Date(
+            date.getFullYear(),
+            date.getMonth(),
+            date.getDate()
+          ).getTime();
+          periodEndTime =
+            new Date(
+              date.getFullYear(),
+              date.getMonth(),
+              date.getDate() + 1
+            ).getTime() - 1;
+          break;
+
+        case TradeStatisticsPeriod.WEEK:
+          // 获取本周的开始日期 (周日为一周的开始)
+          const firstDayOfWeek = new Date(date);
+          const day = date.getDay(); // 0 是周日，1 是周一，...
+          firstDayOfWeek.setDate(date.getDate() - day);
+
+          // 周格式: YYYY-WW (ISO周)
+          const weekNumber = Math.ceil(
+            ((date.getTime() - new Date(date.getFullYear(), 0, 1).getTime()) /
+              86400000 +
+              1) /
+              7
+          );
+          periodKey = `${date.getFullYear()}-W${weekNumber
+            .toString()
+            .padStart(2, "0")}`;
+
+          periodStartTime = new Date(
+            firstDayOfWeek.getFullYear(),
+            firstDayOfWeek.getMonth(),
+            firstDayOfWeek.getDate()
+          ).getTime();
+
+          periodEndTime =
+            new Date(
+              firstDayOfWeek.getFullYear(),
+              firstDayOfWeek.getMonth(),
+              firstDayOfWeek.getDate() + 7
+            ).getTime() - 1;
+          break;
+
+        case TradeStatisticsPeriod.MONTH:
+          // 月格式: YYYY-MM
+          periodKey = `${date.getFullYear()}-${(date.getMonth() + 1)
+            .toString()
+            .padStart(2, "0")}`;
+
+          periodStartTime = new Date(
+            date.getFullYear(),
+            date.getMonth(),
+            1
+          ).getTime();
+
+          periodEndTime =
+            new Date(date.getFullYear(), date.getMonth() + 1, 0).getTime() +
+            86399999; // 23:59:59.999
+          break;
+
+        default:
+          throw new Error(`Unsupported period: ${period}`);
+      }
+
+      // 如果该周期未初始化，创建初始值
+      if (!stats[periodKey]) {
+        stats[periodKey] = {
+          period: periodKey,
+          startTime: periodStartTime,
+          endTime: periodEndTime,
+          totalTrades: 0,
+          totalBuyTrades: 0,
+          totalSellTrades: 0,
+          totalMakerTrades: 0,
+          totalTakerTrades: 0,
+          totalQuantity: 0,
+          totalValue: 0,
+          totalCommission: 0,
+          totalRealizedPnl: 0, // 添加已实现盈亏
+          commissionByAsset: {},
+          symbolCounts: {},
+          symbolVolumes: {},
+        };
+      }
+
+      // 更新统计数据
+      const periodStats = stats[periodKey];
+      periodStats.totalTrades += 1;
+      periodStats.totalBuyTrades += trade.isBuyer ? 1 : 0;
+      periodStats.totalSellTrades += trade.isBuyer ? 0 : 1;
+      periodStats.totalMakerTrades += trade.isMaker ? 1 : 0;
+      periodStats.totalTakerTrades += trade.isMaker ? 0 : 1;
+
+      // 将字符串转换为数字
+      const qty = parseFloat(trade.qty);
+      const quoteQty = parseFloat(trade.quoteQty);
+      const commission = parseFloat(trade.commission);
+      const realizedPnl = parseFloat(trade.realizedPnl || "0"); // 解析已实现盈亏
+
+      periodStats.totalQuantity += qty;
+      periodStats.totalValue += quoteQty;
+      periodStats.totalCommission += commission;
+      periodStats.totalRealizedPnl += realizedPnl; // 累加已实现盈亏
+
+      // 按资产类型累计手续费
+      if (!periodStats.commissionByAsset[trade.commissionAsset]) {
+        periodStats.commissionByAsset[trade.commissionAsset] = 0;
+      }
+      periodStats.commissionByAsset[trade.commissionAsset] += commission;
+
+      // 按交易对统计
+      if (!periodStats.symbolCounts[trade.symbol]) {
+        periodStats.symbolCounts[trade.symbol] = 0;
+        periodStats.symbolVolumes[trade.symbol] = 0;
+      }
+      periodStats.symbolCounts[trade.symbol] += 1;
+      periodStats.symbolVolumes[trade.symbol] += qty;
+    }
+
+    // 生成空白周期数据（如果需要）
+    if (includeEmptyPeriods && period !== TradeStatisticsPeriod.WEEK) {
+      // 为天或月生成连续的空白数据
+      const periodMs =
+        period === TradeStatisticsPeriod.DAY
+          ? 86400000 // 一天的毫秒数
+          : 0; // 月份处理方式不同
+
+      if (period === TradeStatisticsPeriod.DAY) {
+        // 按天填充
+        let currentDate = new Date(startTime);
+        const endDate = new Date(endTime);
+
+        while (currentDate <= endDate) {
+          const dateStr = currentDate.toISOString().split("T")[0];
+
+          if (!stats[dateStr]) {
+            // 添加空白日期数据
+            const dayStart = new Date(
+              currentDate.getFullYear(),
+              currentDate.getMonth(),
+              currentDate.getDate()
+            ).getTime();
+
+            const dayEnd = dayStart + 86399999; // 23:59:59.999
+
+            stats[dateStr] = {
+              period: dateStr,
+              startTime: dayStart,
+              endTime: dayEnd,
+              totalTrades: 0,
+              totalBuyTrades: 0,
+              totalSellTrades: 0,
+              totalMakerTrades: 0,
+              totalTakerTrades: 0,
+              totalQuantity: 0,
+              totalValue: 0,
+              totalCommission: 0,
+              totalRealizedPnl: 0, // 初始化已实现盈亏
+              commissionByAsset: {},
+              symbolCounts: {},
+              symbolVolumes: {},
+            };
+          }
+
+          // 下一天
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+      } else if (period === TradeStatisticsPeriod.MONTH) {
+        // 按月填充
+        let currentMonth = new Date(startTime);
+        const endMonth = new Date(endTime);
+
+        while (
+          currentMonth.getFullYear() < endMonth.getFullYear() ||
+          (currentMonth.getFullYear() === endMonth.getFullYear() &&
+            currentMonth.getMonth() <= endMonth.getMonth())
+        ) {
+          const monthStr = `${currentMonth.getFullYear()}-${(
+            currentMonth.getMonth() + 1
+          )
+            .toString()
+            .padStart(2, "0")}`;
+
+          if (!stats[monthStr]) {
+            // 添加空白月份数据
+            const monthStart = new Date(
+              currentMonth.getFullYear(),
+              currentMonth.getMonth(),
+              1
+            ).getTime();
+
+            const monthEnd =
+              new Date(
+                currentMonth.getFullYear(),
+                currentMonth.getMonth() + 1,
+                0
+              ).getTime() + 86399999; // 23:59:59.999
+
+            stats[monthStr] = {
+              period: monthStr,
+              startTime: monthStart,
+              endTime: monthEnd,
+              totalTrades: 0,
+              totalBuyTrades: 0,
+              totalSellTrades: 0,
+              totalMakerTrades: 0,
+              totalTakerTrades: 0,
+              totalQuantity: 0,
+              totalValue: 0,
+              totalCommission: 0,
+              totalRealizedPnl: 0, // 初始化已实现盈亏
+              commissionByAsset: {},
+              symbolCounts: {},
+              symbolVolumes: {},
+            };
+          }
+
+          // 下一月
+          currentMonth.setMonth(currentMonth.getMonth() + 1);
+        }
+      }
+    }
+
+    return stats;
+  }
+
+  /**
+   * 获取每日交易统计（兼容旧版本）
+   * @deprecated 请使用 getTradeStatistics 代替
+   */
+  getDailyTradeStatistics(trades: UnifiedTrade[]): Record<string, any> {
+    return this.getTradeStatistics(trades, {
+      period: TradeStatisticsPeriod.DAY,
+    }) as any;
   }
 }

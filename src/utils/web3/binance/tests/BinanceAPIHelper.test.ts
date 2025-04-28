@@ -38,6 +38,17 @@ async function main() {
   const futuresTradingHistory =
     await binanceAPIHelper1.getAllFuturesTradingHistory();
   console.log(futuresTradingHistory);
+  // const currentAccountStates =
+  //   await binanceAPIHelper1.getCurrentFuturesAccountState();
+  // console.log(currentAccountStates);
+  // 获取过去30分钟的账户变化
+  // const changes = await binanceAPIHelper1.getFuturesAccountStateChanges(
+  //   60 * 24
+  // );
+  // console.log(changes);
+  // const currentAccountStates =
+  //   await binanceAPIHelper1.getCurrentFuturesAccountState();
+  // console.log(currentAccountStates);
 }
 
 main();

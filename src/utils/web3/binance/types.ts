@@ -137,3 +137,69 @@ export interface FormattedPosition {
     pnlPercentage: number;
   };
 }
+
+/**
+ * 期货账户状态接口，用于当前和历史账户状态查询
+ */
+export interface FuturesAccountState {
+  totalInitialMargin: string;
+  totalMaintMargin: string;
+  totalWalletBalance: string;
+  totalUnrealizedProfit: string;
+  totalMarginBalance: string;
+  totalPositionInitialMargin: string;
+  totalOpenOrderInitialMargin: string;
+  totalCrossWalletBalance: string;
+  totalCrossUnPnl: string;
+  availableBalance: string;
+  maxWithdrawAmount: string;
+  positions: Array<{
+    symbol: string;
+    positionAmt: string;
+    entryPrice: string;
+    unrealizedProfit: string;
+    initialMargin: string;
+    maintMargin: string;
+  }>;
+}
+
+/**
+ * 期货账户状态变化接口，用于展示一段时间内的账户变化
+ */
+export interface FuturesAccountChanges {
+  timeSpan: {
+    fromTime: number;
+    toTime: number;
+    minutes: number;
+  };
+  balanceChanges: {
+    walletBalance: string;
+    walletBalanceChange: string;
+    walletBalanceChangePercent: string;
+    unrealizedProfit: string;
+    unrealizedProfitChange: string;
+    unrealizedProfitChangePercent: string;
+    marginBalance: string;
+    marginBalanceChange: string;
+    marginBalanceChangePercent: string;
+    availableBalance: string;
+    availableBalanceChange: string;
+    availableBalanceChangePercent: string;
+  };
+  positionChanges: Array<{
+    symbol: string;
+    currentPositionAmt: string;
+    previousPositionAmt: string;
+    positionAmtChange: string;
+    currentEntryPrice: string;
+    previousEntryPrice: string;
+    entryPriceChange: string;
+    currentUnrealizedProfit: string;
+    previousUnrealizedProfit: string;
+    unrealizedProfitChange: string;
+    unrealizedProfitChangePercent: string;
+    isNew: boolean;
+    isClosed: boolean;
+    directionChanged?: boolean;
+  }>;
+}

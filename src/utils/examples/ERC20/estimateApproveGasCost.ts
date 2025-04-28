@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-import { ERC20Utils } from "../../ERC20Utils";
+import { ERC20Utils } from "../../web3/ERC20Utils";
 import { rpcs, testbnbTOKENS } from "./config";
 
 dotenv.config();

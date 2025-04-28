@@ -1,4 +1,4 @@
-import { MinioHelper } from "../minioHelper";
+import { MinioHelper } from "../db/minioHelper";
 import dotenv from "dotenv";
 import path from "path";
 

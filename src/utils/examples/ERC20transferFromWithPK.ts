@@ -1,4 +1,4 @@
-import { ERC20Utils } from "../ERC20Utils";
+import { ERC20Utils } from "../web3/ERC20Utils";
 import dotenv from "dotenv";
 dotenv.config();
 export const shibuya = {

@@ -1,4 +1,4 @@
-import { GateioService } from "../gateioService";
+import { GateioService } from "../web3/gateioService";
 
 async function main() {
   // 创建 GateioService 实例

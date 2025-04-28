@@ -1,4 +1,4 @@
-import { EthersUtils } from "../ethersUtils";
+import { EthersUtils } from "../web3/ethersUtils";
 
 async function main() {
   const astar =

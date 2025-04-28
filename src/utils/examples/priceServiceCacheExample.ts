@@ -1,5 +1,5 @@
-import { PriceService } from "../priceServiceCache";
-import { KVDatabase } from "../PGKVDatabase";
+import { PriceService } from "../web3/priceServiceCache";
+import { KVDatabase } from "../db/PGKVDatabase";
 
 import dotenv from "dotenv";
 

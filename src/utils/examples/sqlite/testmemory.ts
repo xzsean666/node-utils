@@ -1,4 +1,4 @@
-import { KVDatabase } from "../../SqliteKVDB";
+import { KVDatabase } from "../../db/SqliteKVDB";
 
 async function testMemoryDatabase() {
   console.log("开始测试内存数据库...");

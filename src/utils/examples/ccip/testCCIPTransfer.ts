@@ -1,4 +1,4 @@
-import { CCIPLiteHelper } from "../../CCIPLiteHelper";
+import { CCIPLiteHelper } from "../../web3/CCIPLiteHelper";
 import { rpcs } from "./rpcs";
 import ccip from "./ccip.json";
 

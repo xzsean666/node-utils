@@ -1,2 +1,2 @@
-export { EthersUtils } from "./ethersUtilsV2";
-export { KVDatabase } from "./PGKVDatabase";
+export { EthersUtils } from "./web3/ethersUtilsV2";
+export { KVDatabase } from "./db/PGKVDatabase";

@@ -1,4 +1,4 @@
-import { EthersUtils } from "../ethersUtilsV2";
+import { EthersUtils } from "../web3/ethersUtilsV2";
 
 import { IERC20 } from "../abis";
 

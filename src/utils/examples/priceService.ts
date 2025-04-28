@@ -1,4 +1,4 @@
-import { PriceService } from "../priceService";
+import { PriceService } from "../web3/priceService";
 
 async function runPriceServiceExample() {
   // 创建 PriceService 实例

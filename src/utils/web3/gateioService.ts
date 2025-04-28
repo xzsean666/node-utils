@@ -1,5 +1,5 @@
 import axios from "axios";
-import { KVDatabase } from "./PGKVDatabase";
+import { KVDatabase } from "../db/PGKVDatabase";
 import dotenv from "dotenv";
 dotenv.config();
 

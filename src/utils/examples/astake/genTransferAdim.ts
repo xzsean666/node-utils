@@ -1,4 +1,4 @@
-import { EthersUtils } from "../../ethersUtils";
+import { EthersUtils } from "../../web3/ethersUtils";
 const rpc = "https://evm.shibuya.astar.network";
 const ethersUtils = new EthersUtils(rpc);
 const abi = [

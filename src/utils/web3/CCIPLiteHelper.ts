@@ -1,6 +1,6 @@
 import { EthersUtils, ethers } from "./ethersUtilsV2";
-import IEVM2EVMOnRamp from "./abis/IEVM2EVMOnRamp.json";
-import IRouterClientABI from "./abis/IRouterClient.json";
+import IEVM2EVMOnRamp from "../web3config/abis/IEVM2EVMOnRamp.json";
+import IRouterClientABI from "../web3config/abis/IRouterClient.json";
 
 interface TokenAmount {
   token?: string;

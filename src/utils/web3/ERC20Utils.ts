@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import { Brackets } from "typeorm";
+
 interface TransferFromWithPKParams {
   fromAddressPK: string;
   toAddress: string;

@@ -26,6 +26,13 @@ const binanceAPIHelper1 = new BinanceAPIHelper(config1);
 const allSymbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT"];
 
 async function main() {
+  const result = await binanceAPIHelper.checkAPIKeyAndSecret();
+  if (result.spot) {
+    console.log("现货账号有效");
+  }
+  if (result.futures) {
+    console.log("合约账号有效");
+  }
   // const accountInfo = await binanceAPIHelper.getAccountInfo();
   // console.log(accountInfo);
   // const spotTradingHistory = await binanceAPIHelper.getAllSpotTradingHistory(
@@ -35,9 +42,9 @@ async function main() {
   // console.log(spotTradingHistory);
   // const accountFuturesInfo = await binanceAPIHelper1.getFuturesAccountInfo();
   // console.log(accountFuturesInfo);
-  const futuresTradingHistory =
-    await binanceAPIHelper1.getAllFuturesTradingHistory();
-  console.log(futuresTradingHistory);
+  // const futuresTradingHistory =
+  //   await binanceAPIHelper1.getAllFuturesTradingHistory();
+  // console.log(futuresTradingHistory);
   // const currentAccountStates =
   //   await binanceAPIHelper1.getCurrentFuturesAccountState();
   // console.log(currentAccountStates);

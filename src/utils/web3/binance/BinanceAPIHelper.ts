@@ -102,6 +102,39 @@ export class BinanceAPIHelper {
     return this.makeRequest("GET", "/api/v3/account");
   }
 
+  async checkAPIKeyAndSecret(): Promise<{
+    spot: boolean;
+    futures: boolean;
+  }> {
+    const result = {
+      spot: false,
+      futures: false,
+    };
+
+    try {
+      // 验证现货账号
+      await this.getAccountInfo();
+      result.spot = true;
+    } catch (error) {
+      result.spot = false;
+    }
+
+    try {
+      // 验证合约账号
+      await this.makeRequest<FuturesAccountInfo>(
+        "GET",
+        "/fapi/v3/account",
+        {},
+        this.futuresBaseUrl
+      );
+      result.futures = true;
+    } catch (error) {
+      result.futures = false;
+    }
+
+    return result;
+  }
+
   /**
    * Get trades for a specific symbol
    * @param symbol Trading pair symbol (e.g., 'BTCUSDT')

@@ -19,7 +19,7 @@ interface KlineUpdateParams {
   symbol: string;
   interval: string;
   startTime: number;
-  endTime: number;
+  endTime?: number;
   isFutures: boolean;
   limit?: number;
 }
@@ -1105,53 +1105,95 @@ export class BinanceAPIHelper {
       params.interval
     }_${params.isFutures ? "futures" : "spot"}`;
 
-    // 生成数据存储的key
-    const dataKey = `kline_data_${params.symbol}_${params.interval}_${
+    // 生成数据存储的key前缀
+    const dataKeyPrefix = `kline_data_${params.symbol}_${params.interval}_${
       params.isFutures ? "futures" : "spot"
-    }_${params.startTime}`;
+    }`;
 
     // 尝试获取现有的检查点
     let checkpoint: KlineUpdateCheckpoint | null = await this.kvdb.get(
       checkpointKey
     );
 
-    // 如果检查点存在且参数匹配，则从断点继续
-    if (checkpoint && this.isParamsMatch(checkpoint, params)) {
-      console.log(
-        `Resuming from checkpoint at ${new Date(
-          checkpoint.lastKlineTime
-        ).toISOString()}`
-      );
-    } else {
-      // 创建新的检查点
-      checkpoint = {
-        ...params,
-        lastKlineTime: params.startTime,
-        totalKlines: 0,
-        lastUpdateTime: Date.now(),
-      };
+    // 获取当前时间作为结束时间
+    const currentTime = Date.now();
+
+    // 按时间范围存储数据
+    const timeRanges = this.splitTimeRange(
+      params.startTime,
+      currentTime,
+      24 * 60 * 60 * 1000 // 按天分割
+    );
+
+    // 获取并合并现有数据
+    const existingData = await this.getExistingKlineData(
+      dataKeyPrefix,
+      timeRanges
+    );
+
+    // 如果检查点存在，检查是否需要更新
+    if (checkpoint) {
+      // 检查现有数据是否覆盖了请求的时间范围
+      const hasCompleteData =
+        existingData.length > 0 &&
+        existingData[0][0] <= params.startTime &&
+        existingData[existingData.length - 1][0] >= currentTime;
+
+      if (hasCompleteData) {
+        console.log(
+          "Using existing data as it already covers the requested time range"
+        );
+        return {
+          klines: existingData,
+          checkpoint: checkpoint,
+        };
+      }
     }
+
+    // 确定需要获取数据的时间范围
+    let startTimeToFetch = params.startTime;
+    let endTimeToFetch = currentTime;
+
+    if (existingData.length > 0) {
+      // 检查是否需要获取更早的数据
+      if (params.startTime < existingData[0][0]) {
+        // 需要获取更早的数据
+        endTimeToFetch = existingData[0][0] - 1;
+        startTimeToFetch = params.startTime;
+      } else {
+        // 从最后一条数据的时间开始获取
+        startTimeToFetch = existingData[existingData.length - 1][0] + 1;
+      }
+    }
+
+    // 创建或更新检查点
+    checkpoint = {
+      ...params,
+      lastKlineTime: startTimeToFetch,
+      totalKlines: existingData.length,
+      lastUpdateTime: Date.now(),
+    };
 
     try {
       const result = await this.getKlinesWithPagination(
         params.symbol,
         params.interval,
         {
-          startTime: checkpoint.lastKlineTime,
-          endTime: params.endTime,
+          startTime: startTimeToFetch,
+          endTime: endTimeToFetch,
           isFutures: params.isFutures,
           limit: params.limit,
-          onProgress: (progress) => {
+          onProgress: async (progress) => {
             // 更新检查点
             checkpoint = {
               ...checkpoint!,
               lastKlineTime: progress.currentTime,
-              totalKlines: progress.totalKlines,
+              totalKlines: progress.totalKlines + existingData.length,
               lastUpdateTime: Date.now(),
             };
 
             // 保存检查点
-            this.kvdb.put(checkpointKey, checkpoint);
+            await this.kvdb.put(checkpointKey, checkpoint);
 
             // 调用进度回调
             if (onProgress) {
@@ -1161,22 +1203,29 @@ export class BinanceAPIHelper {
         }
       );
 
+      // 合并新数据，避免重复
+      const mergedKlines = this.mergeKlines(existingData, result.klines);
+
+      // 按时间范围保存数据
+      await this.saveKlineDataByTimeRange(
+        dataKeyPrefix,
+        timeRanges,
+        mergedKlines
+      );
+
       // 更新最终检查点
       const finalCheckpoint: KlineUpdateCheckpoint = {
         ...checkpoint,
         lastKlineTime: result.checkpoint.lastKlineTime,
-        totalKlines: result.checkpoint.totalKlines,
+        totalKlines: mergedKlines.length,
         lastUpdateTime: Date.now(),
       };
 
-      // 保存最终检查点和K线数据
-      await Promise.all([
-        this.kvdb.put(checkpointKey, finalCheckpoint),
-        this.kvdb.put(dataKey, result.klines),
-      ]);
+      // 保存最终检查点
+      await this.kvdb.put(checkpointKey, finalCheckpoint);
 
       return {
-        klines: result.klines,
+        klines: mergedKlines,
         checkpoint: finalCheckpoint,
       };
     } catch (error) {
@@ -1189,6 +1238,86 @@ export class BinanceAPIHelper {
       await this.kvdb.put(checkpointKey, errorCheckpoint);
 
       throw error;
+    }
+  }
+
+  /**
+   * 将时间范围分割成多个区间
+   */
+  private splitTimeRange(
+    startTime: number,
+    endTime: number,
+    interval: number
+  ): Array<{ start: number; end: number }> {
+    const ranges: Array<{ start: number; end: number }> = [];
+    let currentStart = startTime;
+
+    while (currentStart < endTime) {
+      const currentEnd = Math.min(currentStart + interval, endTime);
+      ranges.push({ start: currentStart, end: currentEnd });
+      currentStart = currentEnd;
+    }
+
+    return ranges;
+  }
+
+  /**
+   * 获取现有的K线数据
+   */
+  private async getExistingKlineData(
+    dataKeyPrefix: string,
+    timeRanges: Array<{ start: number; end: number }>
+  ): Promise<any[]> {
+    const existingData: any[] = [];
+
+    for (const range of timeRanges) {
+      const dataKey = `${dataKeyPrefix}_${range.start}`;
+      const data = await this.kvdb.get(dataKey);
+      if (data) {
+        existingData.push(...data);
+      }
+    }
+
+    return existingData;
+  }
+
+  /**
+   * 合并K线数据，避免重复
+   */
+  private mergeKlines(existingData: any[], newData: any[]): any[] {
+    const mergedMap = new Map<number, any>();
+
+    // 添加现有数据
+    existingData.forEach((kline) => {
+      mergedMap.set(kline[0], kline);
+    });
+
+    // 添加或更新新数据
+    newData.forEach((kline) => {
+      mergedMap.set(kline[0], kline);
+    });
+
+    // 转换为数组并按时间排序
+    return Array.from(mergedMap.values()).sort((a, b) => a[0] - b[0]);
+  }
+
+  /**
+   * 按时间范围保存K线数据
+   */
+  private async saveKlineDataByTimeRange(
+    dataKeyPrefix: string,
+    timeRanges: Array<{ start: number; end: number }>,
+    klines: any[]
+  ): Promise<void> {
+    for (const range of timeRanges) {
+      const dataKey = `${dataKeyPrefix}_${range.start}`;
+      const rangeKlines = klines.filter(
+        (kline) => kline[0] >= range.start && kline[0] < range.end
+      );
+
+      if (rangeKlines.length > 0) {
+        await this.kvdb.put(dataKey, rangeKlines);
+      }
     }
   }
 
@@ -1278,6 +1407,123 @@ export class BinanceAPIHelper {
 
     // 保存到缓存
     await this.kvdb.put(dataKey, result.klines);
+
+    return result.klines;
+  }
+
+  /**
+   * 格式化并打印K线数据
+   * @param klines K线数据数组
+   * @param interval K线周期（如 '1m', '5m', '1h', '1d' 等）
+   */
+  private formatAndLogKlines(klines: any[], interval: string): void {
+    console.log("\n=== K线数据详情 ===");
+    console.log(`总数据条数: ${klines.length}`);
+    console.log("时间范围:", {
+      开始: new Date(klines[0][0]).toLocaleString(),
+      结束: new Date(klines[klines.length - 1][0]).toLocaleString(),
+    });
+    console.log("\n数据详情:");
+
+    klines.forEach((kline, index) => {
+      const [
+        openTime,
+        open,
+        high,
+        low,
+        close,
+        volume,
+        closeTime,
+        quoteVolume,
+        trades,
+        takerBuyBaseVolume,
+        takerBuyQuoteVolume,
+        ignore,
+      ] = kline;
+
+      console.log(`\n第 ${index + 1} 条数据:`);
+      console.log("时间:", new Date(openTime).toLocaleString());
+      console.log("开盘价:", open);
+      console.log("最高价:", high);
+      console.log("最低价:", low);
+      console.log("收盘价:", close);
+      console.log("成交量:", volume);
+      console.log("成交额:", quoteVolume);
+      console.log("成交笔数:", trades);
+      console.log("主动买入成交量:", takerBuyBaseVolume);
+      console.log("主动买入成交额:", takerBuyQuoteVolume);
+    });
+  }
+
+  /**
+   * 根据参数获取K线数据，优先使用缓存数据
+   * @param params 更新参数
+   * @param days 获取最近几天的数据，默认为7天
+   * @param shouldLog 是否打印格式化后的数据，默认为false
+   * @returns K线数据数组
+   */
+  async getKlinesByParams(
+    params: KlineUpdateParams,
+    days: number = 7,
+    shouldLog: boolean = false
+  ): Promise<any[]> {
+    if (!this.kvdb) {
+      throw new Error("KVDB is required for getting Kline data");
+    }
+
+    // 计算时间范围
+    const endTime = params.endTime || Date.now();
+    const startTime = Math.max(
+      params.startTime,
+      endTime - days * 24 * 60 * 60 * 1000
+    );
+
+    // 获取检查点信息
+    const checkpoint = await this.getKlineCheckpoint(
+      params.symbol,
+      params.interval,
+      params.isFutures
+    );
+
+    // 如果检查点存在且数据足够新，优先使用检查点数据
+    if (checkpoint && checkpoint.lastKlineTime >= startTime) {
+      const dataKeyPrefix = `kline_data_${params.symbol}_${params.interval}_${
+        params.isFutures ? "futures" : "spot"
+      }`;
+
+      // 只获取需要的时间范围
+      const timeRanges = this.splitTimeRange(
+        startTime,
+        Math.min(endTime, checkpoint.lastKlineTime),
+        24 * 60 * 60 * 1000
+      );
+
+      const existingData = await this.getExistingKlineData(
+        dataKeyPrefix,
+        timeRanges
+      );
+
+      if (existingData.length > 0) {
+        // 如果数据完整，直接返回
+        if (
+          existingData[0][0] <= startTime &&
+          existingData[existingData.length - 1][0] >= endTime
+        ) {
+          return existingData;
+        }
+      }
+    }
+
+    // 如果没有足够的数据，则更新并获取新数据
+    const result = await this.updateKlines({
+      ...params,
+      startTime,
+      endTime,
+    });
+
+    if (shouldLog) {
+      this.formatAndLogKlines(result.klines, params.interval);
+    }
 
     return result.klines;
   }

@@ -20,6 +20,7 @@ export interface UnifiedPosition {
   markPrice: number; // 标记价格
   unrealizedProfit: number; // 未实现盈亏
   leverage: number; // 实际杠杆率
+  updateTime: number; // 更新时间
   // 健康状态
   healthStatus: {
     riskRatio: number; // 风险率

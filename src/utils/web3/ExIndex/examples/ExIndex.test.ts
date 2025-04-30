@@ -1,6 +1,7 @@
 import { ExIndex, ExchangeName, TradeStatisticsPeriod } from "../ExIndex";
 import { BinanceAPIHelper } from "../../binance/BinanceAPIHelper";
-
+import { KVDatabase } from "../../../dbUtils/SqliteKVDB";
+const kvdb = new KVDatabase("./db/binance.db", "test");
 const config = {
   apiKey: "MNEgG5dZoGIOIEgeJuJMKizeI9626hnnfE0U82iNDMxfP4UHCyighdLEiZ59hT0h",
   apiSecret: "7D9xutK53HabPcngC9nfTZ6p7fv3bANDSPU2oFpi6Et1In8cL5EDbrtBZbsar0mi",
@@ -23,11 +24,15 @@ const exIndex = new ExIndex([
 ]);
 
 async function main() {
-  // const accountInfo = await exIndex.getUnifiedPositions();
-  // console.log(accountInfo);
-  const history = await exIndex.getFuturesTradingHistory(ExchangeName.BINANCE);
+  const accountInfo = await exIndex.getUnifiedPositions();
+  console.log(accountInfo);
+  const accountInfowithPriceChange =
+    await exIndex.getUnifiedPositionsWithPriceHistory(accountInfo, kvdb);
+  console.log(accountInfowithPriceChange);
 
-  console.log(history);
+  // const history = await exIndex.getFuturesTradingHistory(ExchangeName.BINANCE);
+
+  // console.log(history);
   // const stateChange = await exIndex.getFuturesAccountStateChanges(
   //   ExchangeName.BINANCE,
   //   60 * 24

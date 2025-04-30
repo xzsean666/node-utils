@@ -1,6 +1,6 @@
 export interface BinanceConfig {
-  apiKey: string;
-  apiSecret: string;
+  apiKey?: string;
+  apiSecret?: string;
   isTestnet?: boolean;
 }
 

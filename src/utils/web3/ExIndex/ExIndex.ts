@@ -1,3 +1,4 @@
+import { error } from "console";
 import {
   BinanceAPIHelper,
   FormattedPosition,
@@ -95,6 +96,7 @@ export class ExIndex {
       markPrice: markPrice,
       unrealizedProfit: safeUnrealizedProfit,
       leverage, // Use pre-calculated leverage
+      updateTime: position.updateTime, // Add updateTime
       healthStatus: {
         riskRatio, // Use pre-calculated riskRatio
         marginRatio, // Use pre-calculated marginRatio
@@ -255,6 +257,71 @@ export class ExIndex {
     // }
 
     return positions;
+  }
+  async getUnifiedPositionsWithPriceHistory(
+    positions: UnifiedPosition[],
+    kvdb?: any
+  ): Promise<UnifiedPosition[]> {
+    const positionsWithPriceHistory: UnifiedPosition[] = [];
+    const date = new Date("2025-01-01");
+    const binanceAPIHelper = new BinanceAPIHelper({}, kvdb);
+
+    for (const position of positions) {
+      const params = {
+        symbol: position.symbol,
+        interval: "1d",
+        startTime: date.getTime(),
+        isFutures: true,
+      };
+
+      await binanceAPIHelper.updateKlines(params, (progress) => {
+        console.log(`Progress: ${progress.currentTime} / ${progress.endTime}`);
+      });
+      const klines7Days = await binanceAPIHelper.getKlinesByParams(params, 7);
+
+      // Calculate price history data
+      const priceHistory = klines7Days.map((kline) => ({
+        timestamp: kline[0],
+        open: parseFloat(kline[1]),
+        high: parseFloat(kline[2]),
+        low: parseFloat(kline[3]),
+        close: parseFloat(kline[4]),
+        volume: parseFloat(kline[5]),
+        average: (parseFloat(kline[2]) + parseFloat(kline[3])) / 2, // Add average price
+      }));
+
+      // Calculate unrealized profit changes
+      const unrealizedProfitChanges = klines7Days.map((kline) => {
+        const currentPrice = parseFloat(kline[4]); // Use close price
+        const averagePrice = (parseFloat(kline[2]) + parseFloat(kline[3])) / 2; // Calculate average price
+        const positionAmt = parseFloat(position.positionAmt.toString());
+        const entryPrice = parseFloat(position.entryPrice.toString());
+
+        // Calculate unrealized profit for both close and average prices
+        const unrealizedProfit = positionAmt * (currentPrice - entryPrice);
+        const unrealizedProfitAverage =
+          positionAmt * (averagePrice - entryPrice);
+
+        return {
+          timestamp: kline[0],
+          unrealizedProfit,
+          unrealizedProfitAverage,
+          price: currentPrice,
+          averagePrice,
+        };
+      });
+
+      // Create new position object with additional data
+      const positionWithHistory = {
+        ...position,
+        priceHistory,
+        unrealizedProfitChanges,
+      };
+
+      positionsWithPriceHistory.push(positionWithHistory);
+    }
+
+    return positionsWithPriceHistory;
   }
 
   /**

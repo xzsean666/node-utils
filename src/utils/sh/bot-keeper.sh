@@ -8,6 +8,10 @@ if [ $# -lt 1 ]; then
     exit 1
 fi
 
+# Get current directory information for process identification
+CURRENT_DIR=$(pwd)
+DIR_NAME=$(basename "$CURRENT_DIR")
+
 ACTION=$1
 shift  # Remove the first argument and keep the rest as COMMAND
 
@@ -26,10 +30,15 @@ if [ ! -d "$LOG_DIR" ]; then
     mkdir -p "$LOG_DIR"
 fi
 
-# Create a safe log file name by replacing spaces and special characters
-SAFE_COMMAND=$(echo "$COMMAND" | tr -c '[:alnum:]' '_')
-BACKUP_DATE=$(date '+%Y%m%d_%H%M%S')
-LOG_FILE="$LOG_DIR/${SAFE_COMMAND}_${BACKUP_DATE}.log"
+# Create a fixed log file name
+LOG_FILE="$LOG_DIR/app.log"
+
+# Backup existing log file if it exists
+if [ -f "$LOG_FILE" ]; then
+    BACKUP_DATE=$(date '+%Y%m%d_%H%M%S')
+    mv "$LOG_FILE" "$LOG_DIR/app_${BACKUP_DATE}.log"
+    echo "已将原有日志文件备份为 $LOG_DIR/app_${BACKUP_DATE}.log"
+fi
 
 echo "$(date): 开始执行 $COMMAND 脚本" >> $LOG_FILE
 
@@ -45,10 +54,14 @@ function keeper_operations() {
 
 # Function to monitor and restart the process if it stops
 function monitor_process() {
+    local APP_PID="$1"
+    local DIR_INFO="$2"
+    
     while true; do
-        if ! ps -p $1 > /dev/null; then
+        if ! ps -p $APP_PID > /dev/null; then
             echo "$(date): 检测到应用停止运行，正在重新启动..." >> $LOG_FILE
-            nohup $NODE_PATH $COMMAND >> $LOG_FILE 2>&1 &
+            # Add directory info to command for identification in ps output
+            nohup $NODE_PATH $COMMAND --app-dir="$DIR_INFO" >> $LOG_FILE 2>&1 &
             NEW_PID=$!
             if [ -z "$NEW_PID" ]; then
                 echo "$(date): 重新启动失败" >> $LOG_FILE
@@ -74,7 +87,8 @@ function start_application() {
     fi
 
     # Start the process and monitor it
-    nohup $NODE_PATH $COMMAND >> $LOG_FILE 2>&1 &
+    # Add directory info as a parameter to make it visible in ps output
+    nohup $NODE_PATH $COMMAND --app-dir="$DIR_NAME:$CURRENT_DIR" >> $LOG_FILE 2>&1 &
     PID=$!
     if [ -z "$PID" ]; then
         echo "$(date): 启动失败" >> $LOG_FILE
@@ -85,7 +99,7 @@ function start_application() {
     fi
 
     # Start the monitor in the background and record its PID
-    nohup bash -c "$(declare -f monitor_process); monitor_process $PID" >> $LOG_FILE 2>&1 &
+    nohup bash -c "$(declare -f monitor_process); monitor_process $PID \"$DIR_NAME:$CURRENT_DIR\"" >> $LOG_FILE 2>&1 &
     KEEPER_PID=$!
     echo $KEEPER_PID > keeper.pid
     echo "$(date): 监控进程已启动，进程ID为 $KEEPER_PID" >> $LOG_FILE

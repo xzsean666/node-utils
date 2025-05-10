@@ -1,4 +1,4 @@
-import { MongoClient, Collection, Document } from "mongodb";
+import { MongoClient, Collection } from "mongodb";
 
 export class MongoKVDB {
   private client: MongoClient;
@@ -71,7 +71,11 @@ export class MongoKVDB {
     return result.acknowledged;
   }
 
-  async get<T = any>(key: string, expire?: number): Promise<T | null> {
+  async get<T = any>(
+    key: string,
+    expire?: number,
+    deleteExpired: boolean = true
+  ): Promise<T | null> {
     await this.ensureInitialized();
     const record = await this.collection.findOne({ key });
 
@@ -81,7 +85,9 @@ export class MongoKVDB {
       const currentTime = Math.floor(Date.now() / 1000);
       const createdTime = Math.floor(record.created_at.getTime() / 1000);
       if (currentTime - createdTime > expire) {
-        await this.delete(key);
+        if (deleteExpired) {
+          await this.delete(key);
+        }
         return null;
       }
     }

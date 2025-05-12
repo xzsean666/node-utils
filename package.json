@@ -19,7 +19,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "prepare": "husky install",
-    "publish-version": "node scripts/version-bump.js && yarn build && npm publish"
+    "publish-version": "node scripts/version-bump.js && yarn build && npm publish",
+    "format": "eslint --fix \"src/**/*.{js,ts,jsx,tsx}\""
   },
   "dependencies": {
     "@chainlink/ccip-js": "^0.2.1",

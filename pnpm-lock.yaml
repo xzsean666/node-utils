@@ -10,7 +10,7 @@ importers:
     dependencies:
       '@chainlink/ccip-js':
         specifier: ^0.2.1
-        version: 0.2.2(d09b0951d689c3ad58111f4cf5c07fc2)
+        version: 0.2.2(fe0553f7fee8e5f3e4a5f9ba66b5412d)
       '@metamask/detect-provider':
         specifier: ^2.0.0
         version: 2.0.0
@@ -79,7 +79,7 @@ importers:
         version: 8.0.4
       node-utils-sean:
         specifier: ^1.0.19
-        version: 1.1.54(aa221a893d04a83296e70498270d80c2)
+        version: 1.1.54(51e4b2ea12c32e360c6d16ac02589eea)
       otplib:
         specifier: ^12.0.1
         version: 12.0.1
@@ -4211,6 +4211,9 @@ packages:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
 
+  zod@3.24.4:
+    resolution: {integrity: sha512-OdqJE9UDRPwWsrHjLN2F8bPxvwJBK22EHLWtanu0LSYr5YqzsaaW3RMgmjwr8Rypg5k+meEJdSPXJZXE/yqOMg==}
+
 snapshots:
 
   '@adraffy/ens-normalize@1.10.1': {}
@@ -4409,19 +4412,19 @@ snapshots:
 
   '@bcoe/v8-coverage@0.2.3': {}
 
-  '@chainlink/ccip-js@0.2.2(d09b0951d689c3ad58111f4cf5c07fc2)':
+  '@chainlink/ccip-js@0.2.2(fe0553f7fee8e5f3e4a5f9ba66b5412d)':
     dependencies:
       '@nomicfoundation/hardhat-chai-matchers': 2.0.8(@nomicfoundation/hardhat-ethers@3.0.8(ethers@6.13.5)(hardhat@2.22.19(ts-node@10.9.2(@types/node@22.13.5)(typescript@5.7.3))(typescript@5.7.3)))(chai@4.5.0)(ethers@6.13.4)(hardhat@2.22.19(ts-node@10.9.2(@types/node@22.13.5)(typescript@5.7.3))(typescript@5.7.3))
       '@nomicfoundation/hardhat-ethers': 3.0.8(ethers@6.13.4)(hardhat@2.22.19(ts-node@10.9.2(@types/node@22.13.5)(typescript@5.7.3))(typescript@5.7.3))
       '@nomicfoundation/hardhat-toolbox': 5.0.0(4a6a4e106fb666716e3fec3686fb283e)
-      '@nomicfoundation/hardhat-viem': 2.0.6(hardhat@2.22.19(ts-node@10.9.2(@types/node@22.13.5)(typescript@5.7.3))(typescript@5.7.3))(typescript@5.7.3)(viem@2.21.25(typescript@5.7.3))
+      '@nomicfoundation/hardhat-viem': 2.0.6(hardhat@2.22.19(ts-node@10.9.2(@types/node@22.13.5)(typescript@5.7.3))(typescript@5.7.3))(typescript@5.7.3)(viem@2.21.25(typescript@5.7.3)(zod@3.24.4))(zod@3.24.4)
       '@openzeppelin/contracts': 5.2.0
       chai: 4.5.0
       ethers: 6.13.4
       mocha: 10.8.2
       ts-jest: 29.2.6(@babel/core@7.26.9)(@jest/transform@29.7.0)(@jest/types@29.6.3)(babel-jest@29.7.0(@babel/core@7.26.9))(jest@29.7.0(@types/node@22.13.5)(ts-node@10.9.2(@types/node@22.13.5)(typescript@5.7.3)))(typescript@5.7.3)
       typescript: 5.7.3
-      viem: 2.21.25(typescript@5.7.3)
+      viem: 2.21.25(typescript@5.7.3)(zod@3.24.4)
     transitivePeerDependencies:
       - '@babel/core'
       - '@jest/transform'
@@ -5155,12 +5158,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@nomicfoundation/hardhat-viem@2.0.6(hardhat@2.22.19(ts-node@10.9.2(@types/node@22.13.5)(typescript@5.7.3))(typescript@5.7.3))(typescript@5.7.3)(viem@2.21.25(typescript@5.7.3))':
+  '@nomicfoundation/hardhat-viem@2.0.6(hardhat@2.22.19(ts-node@10.9.2(@types/node@22.13.5)(typescript@5.7.3))(typescript@5.7.3))(typescript@5.7.3)(viem@2.21.25(typescript@5.7.3)(zod@3.24.4))(zod@3.24.4)':
     dependencies:
-      abitype: 0.9.10(typescript@5.7.3)
+      abitype: 0.9.10(typescript@5.7.3)(zod@3.24.4)
       hardhat: 2.22.19(ts-node@10.9.2(@types/node@22.13.5)(typescript@5.7.3))(typescript@5.7.3)
       lodash.memoize: 4.1.2
-      viem: 2.21.25(typescript@5.7.3)
+      viem: 2.21.25(typescript@5.7.3)(zod@3.24.4)
     transitivePeerDependencies:
       - typescript
       - zod
@@ -5693,13 +5696,15 @@ snapshots:
 
   abbrev@1.1.1: {}
 
-  abitype@0.9.10(typescript@5.7.3):
+  abitype@0.9.10(typescript@5.7.3)(zod@3.24.4):
     optionalDependencies:
       typescript: 5.7.3
+      zod: 3.24.4
 
-  abitype@1.0.6(typescript@5.7.3):
+  abitype@1.0.6(typescript@5.7.3)(zod@3.24.4):
     optionalDependencies:
       typescript: 5.7.3
+      zod: 3.24.4
 
   abort-controller@3.0.0:
     dependencies:
@@ -8000,9 +8005,9 @@ snapshots:
 
   node-releases@2.0.19: {}
 
-  node-utils-sean@1.1.54(aa221a893d04a83296e70498270d80c2):
+  node-utils-sean@1.1.54(51e4b2ea12c32e360c6d16ac02589eea):
     dependencies:
-      '@chainlink/ccip-js': 0.2.2(d09b0951d689c3ad58111f4cf5c07fc2)
+      '@chainlink/ccip-js': 0.2.2(fe0553f7fee8e5f3e4a5f9ba66b5412d)
       '@metamask/detect-provider': 2.0.0
       '@types/crypto-js': 4.2.2
       '@types/fluent-ffmpeg': 2.1.27
@@ -9100,14 +9105,14 @@ snapshots:
       '@types/istanbul-lib-coverage': 2.0.6
       convert-source-map: 2.0.0
 
-  viem@2.21.25(typescript@5.7.3):
+  viem@2.21.25(typescript@5.7.3)(zod@3.24.4):
     dependencies:
       '@adraffy/ens-normalize': 1.11.0
       '@noble/curves': 1.6.0
       '@noble/hashes': 1.5.0
       '@scure/bip32': 1.5.0
       '@scure/bip39': 1.4.0
-      abitype: 1.0.6(typescript@5.7.3)
+      abitype: 1.0.6(typescript@5.7.3)(zod@3.24.4)
       isows: 1.0.6(ws@8.18.0)
       webauthn-p256: 0.0.10
       ws: 8.18.0
@@ -9294,3 +9299,6 @@ snapshots:
   yn@3.1.1: {}
 
   yocto-queue@0.1.0: {}
+
+  zod@3.24.4:
+    optional: true

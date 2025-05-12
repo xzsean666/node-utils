@@ -1,6 +1,5 @@
-import * as tls from 'tls';
-import { URL } from 'url';
-
+import * as tls from "tls";
+import { URL } from "url";
 export async function checkSSLExpiry(website: string): Promise<number | null> {
   try {
     const url = new URL(website);
@@ -12,9 +11,9 @@ export async function checkSSLExpiry(website: string): Promise<number | null> {
           host: hostname,
           port: 443,
           rejectUnauthorized: false,
-          minVersion: 'TLSv1.2',
-          maxVersion: 'TLSv1.3',
-          ciphers: 'HIGH:!aNULL:!MD5:!RC4',
+          minVersion: "TLSv1.2",
+          maxVersion: "TLSv1.3",
+          ciphers: "HIGH:!aNULL:!MD5:!RC4",
           servername: hostname,
         },
         () => {
@@ -30,14 +29,14 @@ export async function checkSSLExpiry(website: string): Promise<number | null> {
           const expiryDate = new Date(cert.valid_to);
           const today = new Date();
           const daysRemaining = Math.ceil(
-            (expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+            (expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
           );
 
           resolve(daysRemaining);
-        },
+        }
       );
 
-      socket.on('error', (error) => {
+      socket.on("error", (error) => {
         console.error(`检查 SSL 证书失败: ${error.message}`);
         resolve(null);
       });
@@ -46,7 +45,7 @@ export async function checkSSLExpiry(website: string): Promise<number | null> {
     if (error instanceof Error) {
       console.error(`检查 SSL 证书失败: ${error.message}`);
     } else {
-      console.error('检查 SSL 证书时发生未知错误');
+      console.error("检查 SSL 证书时发生未知错误");
     }
     return null;
   }

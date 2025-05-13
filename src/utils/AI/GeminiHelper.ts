@@ -1,22 +1,53 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import fetch from 'node-fetch';
 
 interface ChatMessage {
-  role: "user" | "model";
+  role: 'user' | 'model';
   text: string;
 }
+
+interface GeminiConfig {
+  systemInstruction?: string | { parts: { text: string }[] };
+  model?: ModelType;
+  proxyUrl?: string;
+}
+
+type ModelType =
+  | 'gemini-2.0-flash'
+  | 'gemini-2.5-pro-exp-03-25'
+  | 'gemini-2.0-flash-lite';
 
 export class GeminiHelper {
   private genAI: GoogleGenerativeAI;
   private model: any;
   private chat: any;
   private history: ChatMessage[] = [];
+  private systemInstruction?: string | { parts: { text: string }[] };
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, config: GeminiConfig = {}) {
+    const {
+      systemInstruction,
+      model = 'gemini-2.0-flash-lite',
+      proxyUrl,
+    } = config;
+
+    // 设置全局 fetch 代理
+
+    if (proxyUrl) {
+      const proxyAgent = new HttpsProxyAgent(proxyUrl);
+      global.fetch = (url, options) =>
+        fetch(url as string, { ...options, agent: proxyAgent });
+    }
+
     this.genAI = new GoogleGenerativeAI(apiKey);
-    const model2 = "gemini-2.0-flash";
-    const model25 = "gemini-2.5-pro-exp-03-25";
-
-    this.model = this.genAI.getGenerativeModel({ model: model25 });
+    this.model = this.genAI.getGenerativeModel({ model });
+    if (systemInstruction) {
+      this.systemInstruction =
+        typeof systemInstruction === 'string'
+          ? { parts: [{ text: systemInstruction }] }
+          : systemInstruction;
+    }
     this.initializeChat();
   }
 
@@ -31,6 +62,11 @@ export class GeminiHelper {
       }));
     }
 
+    // 添加 systemInstruction
+    if (this.systemInstruction) {
+      chatOptions.systemInstruction = this.systemInstruction;
+    }
+
     this.chat = this.model.startChat(chatOptions);
   }
 
@@ -42,19 +78,19 @@ export class GeminiHelper {
   async sendMessage(message: string): Promise<string> {
     try {
       // 添加用户消息到历史记录
-      this.history.push({ role: "user", text: message });
+      this.history.push({ role: 'user', text: message });
 
       const result = await this.chat.sendMessage(message);
       const response = await result.response;
       const responseText = response.text();
 
       // 添加AI回复到历史记录
-      this.history.push({ role: "model", text: responseText });
+      this.history.push({ role: 'model', text: responseText });
 
       return responseText;
     } catch (error) {
-      console.error("Gemini Chat Error:", error);
-      throw new Error("Error processing chat request");
+      console.error('Gemini Chat Error:', error);
+      throw new Error('Error processing chat request');
     }
   }
 
@@ -65,14 +101,14 @@ export class GeminiHelper {
    */
   async sendMessageStream(
     message: string,
-    onChunk: (text: string) => void
+    onChunk: (text: string) => void,
   ): Promise<void> {
     try {
       // 添加用户消息到历史记录
-      this.history.push({ role: "user", text: message });
+      this.history.push({ role: 'user', text: message });
 
       const result = await this.chat.sendMessageStream(message);
-      let fullResponse = "";
+      let fullResponse = '';
 
       for await (const chunk of result.stream) {
         const text = chunk.text();
@@ -83,10 +119,10 @@ export class GeminiHelper {
       }
 
       // 添加完整的AI回复到历史记录
-      this.history.push({ role: "model", text: fullResponse });
+      this.history.push({ role: 'model', text: fullResponse });
     } catch (error) {
-      console.error("Gemini Chat Error:", error);
-      throw new Error("Error processing chat request");
+      console.error('Gemini Chat Error:', error);
+      throw new Error('Error processing chat request');
     }
   }
 

@@ -35,12 +35,28 @@ export class GeminiHelper {
     // Configure global fetch
     if (proxyUrl) {
       const proxyAgent = new HttpsProxyAgent(proxyUrl);
-      global.fetch = async (url: string, init?: RequestInit) => {
+      global.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        let url: string;
+        let requestInit: RequestInit = { ...init };
+
+        if (typeof input === 'string' || input instanceof URL) {
+          url = input.toString();
+        } else {
+          // input is a Request object
+          url = input.url;
+          requestInit = {
+            method: input.method,
+            headers: input.headers as any,
+            body: input.body,
+            ...init,
+          };
+        }
+
         const response = await axios({
           url,
-          method: init?.method || 'GET',
-          headers: init?.headers as any,
-          data: init?.body,
+          method: requestInit.method || 'GET',
+          headers: requestInit.headers as any,
+          data: requestInit.body,
           responseType: 'arraybuffer',
           httpsAgent: proxyAgent,
         });

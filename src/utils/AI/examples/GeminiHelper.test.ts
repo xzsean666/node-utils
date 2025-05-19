@@ -73,16 +73,12 @@ async function main() {
   const config = {
     proxyUrl,
     systemInstruction:
-<<<<<<< Updated upstream
       'You are a helpful assistant that creates sentences using provided English words. Create ONE sentence and present it in three different formats. Return the result in JSON format with the following structure:\n' +
       '{\n' +
       '  "mixedLanguage": "The sentence with English words kept as-is while the rest is in Chinese",\n' +
       '  "englishOnly": "The exact same sentence fully in English",\n' +
       '  "fillInBlanks": "The exact same sentence in English but with the given English words replaced by ???"\n' +
       '}',
-=======
-      'You are a helpful assistant that creates one sentences using provided English words. When using the words in the sentences, keep them in English while the rest of the text should be in Chinese. Focus on creating sentences related to technology and automotive topics.',
->>>>>>> Stashed changes
   };
   const helper = new GeminiHelper(apikey, config);
 
@@ -106,15 +102,10 @@ async function main() {
     selectedWordsStr + config.systemInstruction,
   );
 
-<<<<<<< Updated upstream
   const result = await helper.sendMessage(`${selectedWordsStr}`);
   console.log('selectedWords:', selectedWords);
   console.log('systemInstruction:', config.systemInstruction);
   console.log('hash:', hash);
   console.log('result:', result);
-=======
-  const result = await helper.sendMessage(`${selectedWords2.join(', ')}`);
-  console.log(result);
->>>>>>> Stashed changes
 }
 main();

@@ -21,7 +21,7 @@ function bigintHandler(key: string, val: any) {
   return val;
 }
 
-export class KVDatabase {
+export class SqliteKVDatabase {
   private db: Repository<KVEntity>;
   private dataSource: DataSource;
   private initialized = false;

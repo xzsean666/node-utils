@@ -15,7 +15,7 @@ interface KVEntity {
   updated_at: Date;
 }
 
-export class KVDatabase {
+export class PGKVDatabase {
   private db: Repository<KVEntity>;
   private dataSource: DataSource;
   private initialized = false;
@@ -112,35 +112,36 @@ export class KVDatabase {
             console.warn(`创建索引失败，可能已存在: ${err}`);
           }
         }
+
+        // 创建 jsonb_deep_merge 函数
+        await queryRunner.query(`
+          DROP FUNCTION IF EXISTS jsonb_deep_merge(jsonb, jsonb);
+          
+          CREATE OR REPLACE FUNCTION jsonb_deep_merge(a jsonb, b jsonb)
+          RETURNS jsonb AS $$
+          DECLARE
+            result jsonb;
+            key text;
+            value jsonb;
+          BEGIN
+            result := a;
+            FOR key, value IN SELECT * FROM jsonb_each(b)
+            LOOP
+              IF jsonb_typeof(result->key) = 'object' AND jsonb_typeof(value) = 'object' THEN
+                result := jsonb_set(result, array[key], jsonb_deep_merge(result->key, value));
+              ELSE
+                result := jsonb_set(result, array[key], value);
+              END IF;
+            END LOOP;
+            RETURN result;
+          END;
+          $$ LANGUAGE plpgsql;
+        `);
       } finally {
         await queryRunner.release();
       }
 
       this.initialized = true;
-    }
-  }
-
-  private async ensureJsonbDeepMergeFunction(): Promise<void> {
-    const queryRunner = this.dataSource.createQueryRunner();
-    try {
-      await queryRunner.query(`
-        CREATE OR REPLACE FUNCTION jsonb_deep_merge(orig jsonb, delta jsonb)
-        RETURNS jsonb LANGUAGE sql AS $$
-          SELECT 
-            jsonb_object_agg(
-              COALESCE(k1, k2),
-              CASE
-                WHEN (v1 ? 'type' AND v1->>'type' = 'object') AND (v2 ? 'type' AND v2->>'type' = 'object')
-                THEN jsonb_deep_merge(v1, v2)
-                ELSE COALESCE(v2, v1)
-              END
-            )
-          FROM jsonb_each(orig) e1(k1, v1)
-          FULL OUTER JOIN jsonb_each(delta) e2(k2, v2) ON k1 = k2;
-        $$;
-      `);
-    } finally {
-      await queryRunner.release();
     }
   }
 
@@ -160,7 +161,7 @@ export class KVDatabase {
       ON CONFLICT (key) DO UPDATE
       SET value = CASE
         WHEN "${this.tableName}".value IS NULL THEN $2::jsonb
-        ELSE "${this.tableName}".value || $2::jsonb
+        ELSE jsonb_deep_merge("${this.tableName}".value, $2::jsonb)
       END,
       updated_at = NOW()
       RETURNING value
@@ -190,15 +191,6 @@ export class KVDatabase {
       }
     }
     return record.value;
-  }
-  async getValue(value: any): Promise<any> {
-    await this.ensureInitialized();
-    // Use proper JSONB comparison with query builder
-    const existing = await this.db
-      .createQueryBuilder()
-      .where('value = :value::jsonb', { value: JSON.stringify(value) })
-      .getOne();
-    return existing;
   }
   async isValueExists(value: any): Promise<boolean> {
     await this.ensureInitialized();

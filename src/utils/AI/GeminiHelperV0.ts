@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import axios from 'axios';
+import fetch, { Response as NodeFetchResponse } from 'node-fetch';
 
 interface ChatMessage {
   role: 'user' | 'model';
@@ -32,24 +32,16 @@ export class GeminiHelper {
       proxyUrl,
     } = config;
 
-    // Configure global fetch
+    // 设置代理
     if (proxyUrl) {
       const proxyAgent = new HttpsProxyAgent(proxyUrl);
-      global.fetch = async (url: string, init?: RequestInit) => {
-        const response = await axios({
-          url,
-          method: init?.method || 'GET',
-          headers: init?.headers as any,
-          data: init?.body,
-          responseType: 'arraybuffer',
-          httpsAgent: proxyAgent,
+      const originalFetch = global.fetch;
+      global.fetch = async (url, options) => {
+        const response = await fetch(url as string, {
+          ...options,
+          agent: proxyAgent,
         });
-
-        return new Response(response.data, {
-          status: response.status,
-          statusText: response.statusText,
-          headers: new Headers(response.headers as any),
-        });
+        return response as unknown as Response;
       };
     }
 

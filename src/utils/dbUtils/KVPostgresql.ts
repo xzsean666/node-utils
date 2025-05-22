@@ -901,9 +901,14 @@ export class PGKVDatabase {
    * Retrieves the most recent items from a saved array
    * @param key The base key for the array
    * @param count Number of recent items to retrieve
+   * @param offset Number of items to skip from the end (default: 0)
    * @returns The most recent items from the array
    */
-  async getRecentArray<T = any>(key: string, count: number): Promise<T[]> {
+  async getRecentArray<T = any>(
+    key: string,
+    count: number,
+    offset: number = 0,
+  ): Promise<T[]> {
     await this.ensureInitialized();
 
     // Get metadata
@@ -914,16 +919,28 @@ export class PGKVDatabase {
       return [];
     }
 
-    // If count is greater than total items, return all items
-    if (count >= meta.totalItems) {
-      return this.getAllArray<T>(key);
+    // If count + offset is greater than total items, adjust offset
+    if (offset >= meta.totalItems) {
+      return [];
     }
 
     // Get batch size from metadata or use default for backward compatibility
     const batchSize = meta.batchSize || 1000;
 
+    // Calculate total items to fetch (count + offset)
+    const totalNeeded = count + offset;
+
+    // If total needed is greater than total items, fetch all and handle offset in memory
+    if (totalNeeded >= meta.totalItems) {
+      const allItems = await this.getAllArray<T>(key);
+      return allItems.slice(
+        Math.max(0, allItems.length - totalNeeded),
+        allItems.length - offset,
+      );
+    }
+
     // Calculate which batches we need
-    let itemsNeeded = count;
+    let itemsNeeded = totalNeeded;
     let startBatch = meta.batchCount - 1;
 
     // Calculate how many batches we need to fetch from the end
@@ -944,28 +961,28 @@ export class PGKVDatabase {
     });
 
     // Process results
-    const recentItems: T[] = [];
-    let remainingCount = count;
+    const allRecentItems: T[] = [];
+    let remainingCount = totalNeeded;
 
     for (const record of records) {
       const batch = record.value || [];
 
       if (batch.length <= remainingCount) {
-        recentItems.unshift(...batch);
+        allRecentItems.unshift(...batch);
         remainingCount -= batch.length;
       } else {
         const startIndex = batch.length - remainingCount;
         const recentFromBatch = batch.slice(startIndex);
-        recentItems.unshift(...recentFromBatch);
+        allRecentItems.unshift(...recentFromBatch);
         remainingCount = 0;
       }
 
       if (remainingCount <= 0) break;
     }
 
-    return recentItems;
+    // Apply offset and return the requested count
+    return allRecentItems.slice(0, Math.max(0, allRecentItems.length - offset));
   }
-
   /**
    * Retrieves items from a saved array based on index range
    * @param key The base key for the array

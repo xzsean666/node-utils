@@ -94,8 +94,8 @@ export interface UploadResult {
 // 文件信息接口
 export interface FileInfo {
   name: string;
-  size: number;
-  lastModified: Date;
+  size?: number;
+  lastModified?: Date;
   etag: string;
   contentType?: string;
   metadata?: Record<string, string>;
@@ -253,6 +253,11 @@ export class S3Helper {
     return bucketName;
   }
 
+  // 标准化 ETag 格式（移除双引号）
+  private normalizeETag(etag: string): string {
+    return etag.replace(/^"|"$/g, '');
+  }
+
   // 检查文件是否已经上传过
   private async checkDuplicate(etag: string): Promise<string | null> {
     if (!this.kvdb) {
@@ -350,7 +355,7 @@ export class S3Helper {
     filePath: string,
     bucket?: string,
     options?: UploadOptions,
-  ): Promise<string> {
+  ): Promise<FileInfo> {
     try {
       // 如果不是强制上传，先检查是否已存在
       if (!options?.forceUpload) {
@@ -358,9 +363,9 @@ export class S3Helper {
         const existingObjectName = await this.checkDuplicate(fileMD5);
         if (existingObjectName) {
           // 验证文件是否仍然存在于S3中
-          const exists = await this.fileExists(existingObjectName, bucket);
-          if (exists) {
-            return fileMD5; // 返回文件MD5作为ETag
+          const info = await this.getFileInfo(existingObjectName, bucket);
+          if (this.normalizeETag(info.etag) === fileMD5) {
+            return info; // 返回已存在的文件信息
           }
         }
       }
@@ -368,7 +373,7 @@ export class S3Helper {
       const fileStream = fs.createReadStream(filePath);
       const stats = await fs.promises.stat(filePath);
 
-      const etag = await this.uploadStream(
+      const uploadResult = await this.uploadStream(
         objectName,
         fileStream,
         stats.size,
@@ -382,7 +387,15 @@ export class S3Helper {
         await this.storeDuplicate(fileMD5, objectName);
       }
 
-      return etag;
+      // 直接返回文件信息，包含已知的本地文件信息
+      return {
+        name: objectName,
+        size: stats.size,
+        lastModified: stats.mtime,
+        etag: uploadResult.etag,
+        contentType: options?.contentType,
+        metadata: options?.metadata,
+      };
     } catch (error: any) {
       throw new Error(`上传文件失败: ${error.message}`);
     }
@@ -393,17 +406,25 @@ export class S3Helper {
     buffer: Buffer,
     bucket?: string,
     options?: UploadOptions,
-  ): Promise<string> {
+  ): Promise<FileInfo> {
     try {
       // 如果不是强制上传，先检查是否已存在
       if (!options?.forceUpload) {
         const bufferMD5 = await this.calculateBufferMD5(buffer);
         const existingObjectName = await this.checkDuplicate(bufferMD5);
+        console.log('existingObjectName', existingObjectName);
         if (existingObjectName) {
           // 验证文件是否仍然存在于S3中
-          const exists = await this.fileExists(existingObjectName, bucket);
-          if (exists) {
-            return bufferMD5; // 返回buffer MD5作为ETag
+          const info = await this.getFileInfo(existingObjectName, bucket);
+          const normalizedETag = this.normalizeETag(info.etag);
+          console.log('Comparing ETags:', {
+            normalizedETag,
+            bufferMD5,
+            matches: normalizedETag === bufferMD5,
+          });
+          if (normalizedETag === bufferMD5) {
+            console.log('File already exists, returning cached info');
+            return info; // 返回已存在的文件信息
           }
         }
       }
@@ -429,7 +450,6 @@ export class S3Helper {
 
       const command = new PutObjectCommand(putObjectInput);
       const response = await this.client.send(command);
-      const etag = response.ETag || '';
 
       // 存储ETag和objectName的映射
       if (!options?.forceUpload) {
@@ -437,7 +457,15 @@ export class S3Helper {
         await this.storeDuplicate(bufferMD5, objectName);
       }
 
-      return etag;
+      // 直接返回文件信息，使用已知信息
+      return {
+        name: objectName,
+        size: buffer.length,
+        lastModified: new Date(), // Buffer 没有原始修改时间，使用当前时间
+        etag: this.normalizeETag(response.ETag || ''),
+        contentType: options?.contentType,
+        metadata: options?.metadata,
+      };
     } catch (error: any) {
       throw new Error(`上传缓冲区失败: ${error.message}`);
     }
@@ -448,7 +476,7 @@ export class S3Helper {
     buffer: Buffer,
     bucket?: string,
     options?: UploadOptions,
-  ): Promise<string> {
+  ): Promise<FileInfo> {
     try {
       const gzipAsync = promisify(gzip);
       const compressedBuffer = await gzipAsync(buffer);
@@ -486,7 +514,7 @@ export class S3Helper {
     size?: number,
     bucket?: string,
     options?: UploadOptions,
-  ): Promise<string> {
+  ): Promise<FileInfo> {
     try {
       const bucketName = this.getBucketName(bucket);
       const putObjectInput: PutObjectCommandInput = {
@@ -513,7 +541,16 @@ export class S3Helper {
 
       const command = new PutObjectCommand(putObjectInput);
       const response = await this.client.send(command);
-      return response.ETag || '';
+
+      // 直接返回文件信息，使用已知信息
+      return {
+        name: objectName,
+        size: size, // 可能为 undefined，这样就不会填写
+        lastModified: new Date(), // Stream 没有原始修改时间，使用当前时间
+        etag: this.normalizeETag(response.ETag || ''),
+        contentType: options?.contentType,
+        metadata: options?.metadata,
+      };
     } catch (error: any) {
       throw new Error(`上传流失败: ${error.message}`);
     }
@@ -545,13 +582,13 @@ export class S3Helper {
       }
 
       // 实际上传文件
-      const etag = await this.uploadFile(objectName, filePath, bucket, {
+      const fileInfo = await this.uploadFile(objectName, filePath, bucket, {
         ...options,
         forceUpload: true, // 避免重复检查
       });
 
       return {
-        etag,
+        etag: fileInfo.etag,
         objectName,
         wasUploaded: true,
       };
@@ -585,13 +622,13 @@ export class S3Helper {
       }
 
       // 实际上传buffer
-      const etag = await this.uploadBuffer(objectName, buffer, bucket, {
+      const fileInfo = await this.uploadBuffer(objectName, buffer, bucket, {
         ...options,
         forceUpload: true, // 避免重复检查
       });
 
       return {
-        etag,
+        etag: fileInfo.etag,
         objectName,
         wasUploaded: true,
       };
@@ -605,7 +642,7 @@ export class S3Helper {
     filePath: string,
     bucket?: string,
     options?: UploadOptions,
-  ): Promise<string> {
+  ): Promise<FileInfo> {
     try {
       const fileStream = fs.createReadStream(filePath);
       const gzipStream = createGzip();
@@ -758,7 +795,7 @@ export class S3Helper {
         name: objectName,
         size: response.ContentLength || 0,
         lastModified: response.LastModified || new Date(),
-        etag: response.ETag || '',
+        etag: this.normalizeETag(response.ETag || ''),
         contentType: response.ContentType,
         metadata: response.Metadata,
       };
@@ -850,8 +887,14 @@ export class S3Helper {
     options?: UploadOptions,
   ): Promise<string> {
     try {
-      // uploadFile 方法本身就返回了 ETag
-      return await this.uploadFile(objectName, filePath, bucket, options);
+      // uploadFile 方法返回 FileInfo，提取 etag
+      const fileInfo = await this.uploadFile(
+        objectName,
+        filePath,
+        bucket,
+        options,
+      );
+      return fileInfo.etag;
     } catch (error: any) {
       throw new Error(
         `上传文件 ${filePath} 并获取 ETag 失败: ${error.message}`,

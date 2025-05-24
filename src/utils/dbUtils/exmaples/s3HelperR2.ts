@@ -1,9 +1,11 @@
 import { S3Helper, S3Provider } from '../s3Helper';
 import dotenv from 'dotenv';
+import { SqliteKVDatabase } from '../KVSqlite';
 
 dotenv.config();
 
 // AWS SDK v3 版本的 S3Helper 使用示例
+const kvdb = new SqliteKVDatabase('./db/r2test.db');
 
 async function awsSDKExamples() {
   // 2. Cloudflare R2 - 零出站费用
@@ -13,13 +15,14 @@ async function awsSDKExamples() {
     process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY || 'your-secret-key',
     process.env.CLOUDFLARE_ACCOUNT_ID || 'your-account-id',
     'pgbackup',
+    kvdb,
   );
 
   try {
     // 使用 AWS S3 进行演示
     // 上传 JSON 数据
     const jsonData = {
-      message: 'Hello from S3Helper with AWS SDK v3',
+      message: 'Hello from S3Helper with AWS SDK v3 7779',
       features: [
         'Multi-provider support',
         'TypeScript support',
@@ -28,7 +31,7 @@ async function awsSDKExamples() {
       ],
     };
     const res = await awsS3.uploadBufferGzip(
-      'data2.json',
+      'data12.json',
       Buffer.from(JSON.stringify(jsonData, null, 2), 'utf-8'),
     );
     console.log(res);

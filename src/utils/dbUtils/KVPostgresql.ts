@@ -7,6 +7,16 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+// 添加值类型定义
+export type ValueType =
+  | 'jsonb'
+  | 'varchar'
+  | 'text'
+  | 'integer'
+  | 'boolean'
+  | 'float'
+  | 'bytea'; // 添加 bytea 类型用于二进制数据
+
 // 添加接口定义
 interface KVEntity {
   key: string;
@@ -15,22 +25,56 @@ interface KVEntity {
   updated_at: Date;
 }
 
+/**
+ * PostgreSQL Key-Value 数据库类，支持多种值类型
+ *
+ * 使用示例：
+ *
+ * // JSONB 类型 - 支持所有高级功能
+ * const jsonbDB = new PGKVDatabase('postgresql://...', 'json_store', 'jsonb');
+ * await jsonbDB.put('user:1', { name: 'John', age: 30 });
+ * await jsonbDB.merge('user:1', { email: 'john@example.com' });
+ * await jsonbDB.searchJson({ contains: { name: 'John' } });
+ *
+ * // VARCHAR 类型 - 基本字符串操作
+ * const stringDB = new PGKVDatabase('postgresql://...', 'string_store', 'varchar');
+ * await stringDB.put('name:1', 'John Doe');
+ *
+ * // INTEGER 类型 - 数值操作
+ * const intDB = new PGKVDatabase('postgresql://...', 'int_store', 'integer');
+ * await intDB.put('count:1', 42);
+ *
+ * // BOOLEAN 类型 - 布尔值操作
+ * const boolDB = new PGKVDatabase('postgresql://...', 'bool_store', 'boolean');
+ * await boolDB.put('active:1', true);
+ * await boolDB.findBoolValues(true);
+ *
+ * // BYTEA 类型 - 二进制数据操作
+ * const blobDB = new PGKVDatabase('postgresql://...', 'blob_store', 'bytea');
+ * await blobDB.put('file:1', Buffer.from('binary data'));
+ */
 export class PGKVDatabase {
   private db: Repository<KVEntity>;
   private dataSource: DataSource;
   private initialized = false;
   private tableName: string;
+  private valueType: ValueType;
   private CustomKVStore: any;
 
-  constructor(datasourceOrUrl: string, tableName: string = 'kv_store') {
+  constructor(
+    datasourceOrUrl: string,
+    tableName: string = 'kv_store',
+    valueType: ValueType = 'jsonb',
+  ) {
     this.tableName = tableName;
+    this.valueType = valueType;
 
     @Entity(tableName)
     class CustomKVStore implements KVEntity {
       @PrimaryColumn('varchar', { length: 255 })
       key: string;
 
-      @Column('jsonb')
+      @Column(this.getColumnType(valueType))
       value: any;
 
       @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
@@ -63,6 +107,104 @@ export class PGKVDatabase {
     });
   }
 
+  /**
+   * 根据值类型获取 TypeORM 列类型配置
+   */
+  private getColumnType(valueType: ValueType): any {
+    switch (valueType) {
+      case 'jsonb':
+        return 'jsonb';
+      case 'varchar':
+        return { type: 'varchar', length: 255 };
+      case 'text':
+        return 'text';
+      case 'integer':
+        return 'integer';
+      case 'boolean':
+        return 'boolean';
+      case 'float':
+        return 'float';
+      case 'bytea':
+        return 'bytea';
+      default:
+        return 'jsonb';
+    }
+  }
+
+  /**
+   * 根据值类型获取 PostgreSQL 列定义
+   */
+  private getPostgreSQLColumnType(valueType: ValueType): string {
+    switch (valueType) {
+      case 'jsonb':
+        return 'jsonb';
+      case 'varchar':
+        return 'varchar(255)';
+      case 'text':
+        return 'text';
+      case 'integer':
+        return 'integer';
+      case 'boolean':
+        return 'boolean';
+      case 'float':
+        return 'float';
+      case 'bytea':
+        return 'bytea';
+      default:
+        return 'jsonb';
+    }
+  }
+
+  /**
+   * 检查当前操作是否支持指定的值类型
+   */
+  private checkTypeSupport(
+    operation: string,
+    supportedTypes: ValueType[],
+  ): void {
+    if (!supportedTypes.includes(this.valueType)) {
+      throw new Error(
+        `Operation '${operation}' is not supported for value type '${
+          this.valueType
+        }'. Supported types: ${supportedTypes.join(', ')}`,
+      );
+    }
+  }
+
+  /**
+   * 根据值类型处理值的序列化
+   */
+  private serializeValue(value: any): any {
+    if (this.valueType === 'jsonb') {
+      return value; // TypeORM 会自动处理 JSONB
+    } else if (this.valueType === 'bytea') {
+      // 确保二进制数据是 Buffer 类型
+      if (Buffer.isBuffer(value)) {
+        return value;
+      } else if (typeof value === 'string') {
+        // 如果是字符串，转换为 Buffer
+        return Buffer.from(value, 'utf8');
+      } else if (value instanceof Uint8Array) {
+        // 如果是 Uint8Array，转换为 Buffer
+        return Buffer.from(value);
+      } else {
+        // 其他类型尝试 JSON 序列化后转为 Buffer
+        return Buffer.from(JSON.stringify(value), 'utf8');
+      }
+    }
+    return value;
+  }
+
+  /**
+   * 根据值类型处理值的反序列化
+   */
+  private deserializeValue(value: any): any {
+    if (this.valueType === 'bytea' && Buffer.isBuffer(value)) {
+      return value; // 保持 Buffer 类型
+    }
+    return value; // TypeORM 会自动处理类型转换
+  }
+
   private async ensureInitialized(): Promise<void> {
     if (!this.initialized) {
       await this.dataSource.initialize();
@@ -85,7 +227,7 @@ export class PGKVDatabase {
                 },
                 {
                   name: 'value',
-                  type: 'jsonb',
+                  type: this.getPostgreSQLColumnType(this.valueType),
                   isNullable: true,
                 },
                 {
@@ -103,40 +245,53 @@ export class PGKVDatabase {
             true, // ifNotExists: true
           );
 
-          // 创建 GIN 索引
-          try {
-            await queryRunner.query(
-              `CREATE INDEX IF NOT EXISTS "IDX_${this.tableName}_value_gin" ON "${this.tableName}" USING gin (value);`,
-            );
-          } catch (err) {
-            console.warn(`创建索引失败，可能已存在: ${err}`);
+          // 只为 JSONB 类型创建 GIN 索引
+          if (this.valueType === 'jsonb') {
+            try {
+              await queryRunner.query(
+                `CREATE INDEX IF NOT EXISTS "IDX_${this.tableName}_value_gin" ON "${this.tableName}" USING gin (value);`,
+              );
+            } catch (err) {
+              console.warn(`创建索引失败，可能已存在: ${err}`);
+            }
+          } else {
+            // 为其他类型创建 B-tree 索引
+            try {
+              await queryRunner.query(
+                `CREATE INDEX IF NOT EXISTS "IDX_${this.tableName}_value_btree" ON "${this.tableName}" (value);`,
+              );
+            } catch (err) {
+              console.warn(`创建索引失败，可能已存在: ${err}`);
+            }
           }
         }
 
-        // 创建 jsonb_deep_merge 函数
-        await queryRunner.query(`
-          DROP FUNCTION IF EXISTS jsonb_deep_merge(jsonb, jsonb);
-          
-          CREATE OR REPLACE FUNCTION jsonb_deep_merge(a jsonb, b jsonb)
-          RETURNS jsonb AS $$
-          DECLARE
-            result jsonb;
-            key text;
-            value jsonb;
-          BEGIN
-            result := a;
-            FOR key, value IN SELECT * FROM jsonb_each(b)
-            LOOP
-              IF jsonb_typeof(result->key) = 'object' AND jsonb_typeof(value) = 'object' THEN
-                result := jsonb_set(result, array[key], jsonb_deep_merge(result->key, value));
-              ELSE
-                result := jsonb_set(result, array[key], value);
-              END IF;
-            END LOOP;
-            RETURN result;
-          END;
-          $$ LANGUAGE plpgsql;
-        `);
+        // 只为 JSONB 类型创建 jsonb_deep_merge 函数
+        if (this.valueType === 'jsonb') {
+          await queryRunner.query(`
+            DROP FUNCTION IF EXISTS jsonb_deep_merge(jsonb, jsonb);
+            
+            CREATE OR REPLACE FUNCTION jsonb_deep_merge(a jsonb, b jsonb)
+            RETURNS jsonb AS $$
+            DECLARE
+              result jsonb;
+              key text;
+              value jsonb;
+            BEGIN
+              result := a;
+              FOR key, value IN SELECT * FROM jsonb_each(b)
+              LOOP
+                IF jsonb_typeof(result->key) = 'object' AND jsonb_typeof(value) = 'object' THEN
+                  result := jsonb_set(result, array[key], jsonb_deep_merge(result->key, value));
+                ELSE
+                  result := jsonb_set(result, array[key], value);
+                END IF;
+              END LOOP;
+              RETURN result;
+            END;
+            $$ LANGUAGE plpgsql;
+          `);
+        }
       } finally {
         await queryRunner.release();
       }
@@ -149,10 +304,12 @@ export class PGKVDatabase {
     await this.ensureInitialized();
     await this.db.save({
       key,
-      value,
+      value: this.serializeValue(value),
     });
   }
+
   async merge(key: string, partialValue: any): Promise<boolean> {
+    this.checkTypeSupport('merge', ['jsonb']);
     await this.ensureInitialized();
 
     const query = `
@@ -174,6 +331,7 @@ export class PGKVDatabase {
 
     return !!result?.length;
   }
+
   async get<T = any>(key: string, expire?: number): Promise<T | null> {
     await this.ensureInitialized();
     const record = await this.db.findOne({ where: { key } });
@@ -190,24 +348,58 @@ export class PGKVDatabase {
         return null;
       }
     }
-    return record.value;
+    return this.deserializeValue(record.value);
   }
+
   async isValueExists(value: any): Promise<boolean> {
     await this.ensureInitialized();
-    const existing = await this.db
-      .createQueryBuilder()
-      .where('value = :value::jsonb', { value: JSON.stringify(value) })
-      .getOne();
-    return !!existing;
+
+    if (this.valueType === 'jsonb') {
+      const existing = await this.db
+        .createQueryBuilder()
+        .where('value = :value::jsonb', { value: JSON.stringify(value) })
+        .getOne();
+      return !!existing;
+    } else if (this.valueType === 'bytea') {
+      // 对于 bytea 类型，使用二进制比较
+      const serializedValue = this.serializeValue(value);
+      const existing = await this.db.findOne({
+        where: { value: serializedValue },
+      });
+      return !!existing;
+    } else {
+      // 对于非 JSONB 类型，直接比较值
+      const existing = await this.db.findOne({
+        where: { value: this.serializeValue(value) },
+      });
+      return !!existing;
+    }
   }
+
   async getValues(value: any): Promise<any> {
     await this.ensureInitialized();
-    // Use proper JSONB comparison with query builder
-    const existing = await this.db
-      .createQueryBuilder()
-      .where('value = :value::jsonb', { value: JSON.stringify(value) })
-      .getMany();
-    return existing;
+
+    if (this.valueType === 'jsonb') {
+      // Use proper JSONB comparison with query builder
+      const existing = await this.db
+        .createQueryBuilder()
+        .where('value = :value::jsonb', { value: JSON.stringify(value) })
+        .getMany();
+      return existing;
+    } else if (this.valueType === 'bytea') {
+      // 对于 bytea 类型，使用二进制比较
+      const serializedValue = this.serializeValue(value);
+      const existing = await this.db.find({
+        where: { value: serializedValue },
+      });
+      return existing;
+    } else {
+      // 对于非 JSONB 类型，直接比较值
+      const existing = await this.db.find({
+        where: { value: this.serializeValue(value) },
+      });
+      return existing;
+    }
   }
 
   async delete(key: string): Promise<boolean> {
@@ -224,45 +416,97 @@ export class PGKVDatabase {
     }
     await this.db.save({
       key,
-      value,
+      value: this.serializeValue(value),
     });
   }
+
   async addUniquePair(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
 
-    // Use a proper JSONB comparison query
-    const existing = await this.db
-      .createQueryBuilder()
-      .where('key = :key', { key })
-      .andWhere('value = :value::jsonb', { value: JSON.stringify(value) })
-      .getOne();
+    if (this.valueType === 'jsonb') {
+      // Use a proper JSONB comparison query
+      const existing = await this.db
+        .createQueryBuilder()
+        .where('key = :key', { key })
+        .andWhere('value = :value::jsonb', { value: JSON.stringify(value) })
+        .getOne();
 
-    if (existing) {
-      throw new Error(`Key-value pair already exists for key "${key}"`);
+      if (existing) {
+        throw new Error(`Key-value pair already exists for key "${key}"`);
+      }
+    } else if (this.valueType === 'bytea') {
+      // 对于 bytea 类型，使用二进制比较
+      const serializedValue = this.serializeValue(value);
+      const existing = await this.db.findOne({
+        where: {
+          key,
+          value: serializedValue,
+        },
+      });
+
+      if (existing) {
+        throw new Error(`Key-value pair already exists for key "${key}"`);
+      }
+    } else {
+      // 对于非 JSONB 类型，直接比较
+      const existing = await this.db.findOne({
+        where: {
+          key,
+          value: this.serializeValue(value),
+        },
+      });
+
+      if (existing) {
+        throw new Error(`Key-value pair already exists for key "${key}"`);
+      }
     }
 
     await this.db.save({
       key,
-      value,
+      value: this.serializeValue(value),
     });
   }
+
   async addUniqueValue(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
 
-    // Use proper JSONB comparison with query builder
-    const existing = await this.db
-      .createQueryBuilder()
-      .where('value = :value::jsonb', { value: JSON.stringify(value) })
-      .getOne();
+    if (this.valueType === 'jsonb') {
+      // Use proper JSONB comparison with query builder
+      const existing = await this.db
+        .createQueryBuilder()
+        .where('value = :value::jsonb', { value: JSON.stringify(value) })
+        .getOne();
 
-    if (existing) {
-      const existingKey = existing.key;
-      throw new Error(`Value already exists with key "${existingKey}"`);
+      if (existing) {
+        const existingKey = existing.key;
+        throw new Error(`Value already exists with key "${existingKey}"`);
+      }
+    } else if (this.valueType === 'bytea') {
+      // 对于 bytea 类型，使用二进制比较
+      const serializedValue = this.serializeValue(value);
+      const existing = await this.db.findOne({
+        where: { value: serializedValue },
+      });
+
+      if (existing) {
+        const existingKey = existing.key;
+        throw new Error(`Value already exists with key "${existingKey}"`);
+      }
+    } else {
+      // 对于非 JSONB 类型，直接比较值
+      const existing = await this.db.findOne({
+        where: { value: this.serializeValue(value) },
+      });
+
+      if (existing) {
+        const existingKey = existing.key;
+        throw new Error(`Value already exists with key "${existingKey}"`);
+      }
     }
 
     await this.db.save({
       key,
-      value,
+      value: this.serializeValue(value),
     });
   }
 
@@ -324,10 +568,19 @@ export class PGKVDatabase {
       for (let i = 0; i < entries.length; i += batchSize) {
         const batch = entries.slice(i, i + batchSize);
         const values = batch
-          .map(
-            ([key, value]) =>
-              `('${key}', '${JSON.stringify(value)}', NOW(), NOW())`,
-          )
+          .map(([key, value]) => {
+            let serializedValue: string;
+            if (this.valueType === 'jsonb') {
+              serializedValue = `'${JSON.stringify(value)}'`;
+            } else if (this.valueType === 'bytea') {
+              // 对于 bytea 类型，使用 bytea 字面量语法
+              const buffer = this.serializeValue(value);
+              serializedValue = `'\\x${buffer.toString('hex')}'`;
+            } else {
+              serializedValue = `'${String(value)}'`;
+            }
+            return `('${key}', ${serializedValue}, NOW(), NOW())`;
+          })
           .join(',');
 
         await queryRunner.query(`
@@ -369,7 +622,7 @@ export class PGKVDatabase {
   }
 
   /**
-   * 查找布尔值记录
+   * 查找布尔值记录 - 仅支持 boolean 和 jsonb 类型
    * @param boolValue true 或 false
    * @param first 是否只返回第一条记录
    * @param orderBy 排序方式 'ASC' 或 'DESC'
@@ -380,6 +633,7 @@ export class PGKVDatabase {
     first: boolean = true,
     orderBy: 'ASC' | 'DESC' = 'ASC',
   ): Promise<string[] | string | null> {
+    this.checkTypeSupport('findBoolValues', ['boolean', 'jsonb']);
     await this.ensureInitialized();
 
     const queryBuilder = this.db
@@ -388,10 +642,15 @@ export class PGKVDatabase {
         `${this.tableName}.key as "key"`,
         `${this.tableName}.value as "value"`,
       ])
-      .where('value = :value::jsonb', {
-        value: JSON.stringify(boolValue),
-      })
       .orderBy('created_at', orderBy);
+
+    if (this.valueType === 'jsonb') {
+      queryBuilder.where('value = :value::jsonb', {
+        value: JSON.stringify(boolValue),
+      });
+    } else {
+      queryBuilder.where('value = :value', { value: boolValue });
+    }
 
     if (first) {
       const result = await queryBuilder.getRawOne();
@@ -403,7 +662,7 @@ export class PGKVDatabase {
   }
 
   /**
-   * 高级 JSON 搜索
+   * 高级 JSON 搜索 - 仅支持 JSONB 类型
    * @param searchOptions 搜索选项
    */
   async searchJson(searchOptions: {
@@ -419,6 +678,7 @@ export class PGKVDatabase {
     data: any[];
     nextCursor: string | null;
   }> {
+    this.checkTypeSupport('searchJson', ['jsonb']);
     await this.ensureInitialized();
 
     const limit = searchOptions.limit || 100;
@@ -559,7 +819,7 @@ export class PGKVDatabase {
   }
 
   /**
-   * 优化后的 JSON 和时间复合搜索
+   * 优化后的 JSON 和时间复合搜索 - 仅支持 JSONB 类型
    */
   async searchJsonByTime(
     searchOptions: {
@@ -576,6 +836,7 @@ export class PGKVDatabase {
       timeColumn?: 'updated_at' | 'created_at';
     },
   ): Promise<Array<{ key: string; value: any }>> {
+    this.checkTypeSupport('searchJsonByTime', ['jsonb']);
     await this.ensureInitialized();
     const timeColumn = timeOptions.timeColumn || 'updated_at';
     const queryBuilder = this.db
@@ -628,7 +889,7 @@ export class PGKVDatabase {
   }
 
   /**
-   * Saves an array by splitting it into batches
+   * Saves an array by splitting it into batches - 主要支持 JSONB 类型，其他类型提供基本支持
    * If the key already exists, appends the new items to the existing array
    * @param key The base key for the array
    * @param array The array to save
@@ -641,6 +902,12 @@ export class PGKVDatabase {
     batchSize: number = 1000,
     forceUpdateBatchSize: boolean = false,
   ): Promise<void> {
+    // 数组功能主要针对 JSONB 设计，但也支持其他类型的简单数组
+    if (this.valueType !== 'jsonb') {
+      console.warn(
+        `Warning: saveArray is optimized for JSONB type but current type is '${this.valueType}'. Complex array operations may not work as expected.`,
+      );
+    }
     await this.ensureInitialized();
 
     // Cache key construction to avoid string concatenation in loops
@@ -726,7 +993,11 @@ export class PGKVDatabase {
             SET value = $1, updated_at = NOW()
             WHERE key = $2
           `);
-          parameters.push([JSON.stringify(updatedLastBatch), lastBatchKey]);
+          const serializedValue =
+            this.valueType === 'jsonb'
+              ? JSON.stringify(updatedLastBatch)
+              : String(updatedLastBatch);
+          parameters.push([serializedValue, lastBatchKey]);
         }
 
         // Create new batches for remaining items
@@ -745,7 +1016,11 @@ export class PGKVDatabase {
             bulkValues.push(
               `($${paramIndex}, $${paramIndex + 1}, NOW(), NOW())`,
             );
-            bulkParams.push(batchKey, JSON.stringify(batchData));
+            const serializedValue =
+              this.valueType === 'jsonb'
+                ? JSON.stringify(batchData)
+                : String(batchData);
+            bulkParams.push(batchKey, serializedValue);
             paramIndex += 2;
             newBatchesCount++;
           }
@@ -777,7 +1052,11 @@ export class PGKVDatabase {
           SET value = $1, updated_at = NOW()
           WHERE key = $2
         `);
-        parameters.push([JSON.stringify(updatedMeta), metaKey]);
+        const serializedMeta =
+          this.valueType === 'jsonb'
+            ? JSON.stringify(updatedMeta)
+            : String(updatedMeta);
+        parameters.push([serializedMeta, metaKey]);
 
         // Execute all prepared statements
         for (let i = 0; i < statements.length; i++) {
@@ -817,7 +1096,11 @@ export class PGKVDatabase {
 
         // Add metadata entry
         placeholders.push(`($${paramIndex}, $${paramIndex + 1}, NOW(), NOW())`);
-        bulkParams.push(metaKey, JSON.stringify(metaValue));
+        const serializedMeta =
+          this.valueType === 'jsonb'
+            ? JSON.stringify(metaValue)
+            : String(metaValue);
+        bulkParams.push(metaKey, serializedMeta);
         paramIndex += 2;
 
         // Add batch entries
@@ -830,7 +1113,11 @@ export class PGKVDatabase {
           placeholders.push(
             `($${paramIndex}, $${paramIndex + 1}, NOW(), NOW())`,
           );
-          bulkParams.push(batchKey, JSON.stringify(batchData));
+          const serializedBatch =
+            this.valueType === 'jsonb'
+              ? JSON.stringify(batchData)
+              : String(batchData);
+          bulkParams.push(batchKey, serializedBatch);
           paramIndex += 2;
         }
 
@@ -983,6 +1270,7 @@ export class PGKVDatabase {
     // Apply offset and return the requested count
     return allRecentItems.slice(0, Math.max(0, allRecentItems.length - offset));
   }
+
   /**
    * Retrieves items from a saved array based on index range
    * @param key The base key for the array
@@ -1083,5 +1371,42 @@ export class PGKVDatabase {
       .getRawMany();
 
     return results;
+  }
+
+  /**
+   * 获取当前配置的值类型
+   */
+  getValueType(): ValueType {
+    return this.valueType;
+  }
+
+  /**
+   * 获取表名
+   */
+  getTableName(): string {
+    return this.tableName;
+  }
+
+  /**
+   * 检查是否支持指定的操作
+   */
+  isOperationSupported(operation: string): boolean {
+    const operationTypeMap: Record<string, ValueType[]> = {
+      merge: ['jsonb'],
+      searchJson: ['jsonb'],
+      searchJsonByTime: ['jsonb'],
+      findBoolValues: ['boolean', 'jsonb'],
+      saveArray: ['jsonb'], // 主要支持，但其他类型也有基本支持
+      getAllArray: ['jsonb'], // 主要支持，但其他类型也有基本支持
+      getRecentArray: ['jsonb'], // 主要支持，但其他类型也有基本支持
+      getArrayRange: ['jsonb'], // 主要支持，但其他类型也有基本支持
+    };
+
+    const supportedTypes = operationTypeMap[operation];
+    if (!supportedTypes) {
+      return true; // 未列出的操作默认支持所有类型
+    }
+
+    return supportedTypes.includes(this.valueType);
   }
 }

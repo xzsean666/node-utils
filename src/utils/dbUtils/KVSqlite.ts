@@ -7,6 +7,67 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+// 支持的数据类型枚举
+export enum SqliteValueType {
+  JSON = 'json', // 存储为text，序列化JSON
+  TEXT = 'text', // 纯文本
+  BLOB = 'blob', // 二进制数据
+  INTEGER = 'integer', // 整数
+  REAL = 'real', // 浮点数
+  BOOLEAN = 'boolean', // 布尔值（存储为integer）
+}
+
+// 类型处理器接口
+interface TypeHandler {
+  serialize(value: any): any;
+  deserialize(value: any): any;
+  columnType: string;
+}
+
+// 类型处理器实现
+const TYPE_HANDLERS: Record<SqliteValueType, TypeHandler> = {
+  [SqliteValueType.JSON]: {
+    serialize: (value: any) => JSON.stringify(value, bigintHandler),
+    deserialize: (value: any) => JSON.parse(value),
+    columnType: 'text',
+  },
+  [SqliteValueType.TEXT]: {
+    serialize: (value: any) => String(value),
+    deserialize: (value: any) => value,
+    columnType: 'text',
+  },
+  [SqliteValueType.BLOB]: {
+    serialize: (value: any) => {
+      if (value instanceof Buffer) return value;
+      if (value instanceof Uint8Array) return Buffer.from(value);
+      if (typeof value === 'string') return Buffer.from(value, 'utf8');
+      throw new Error('BLOB type requires Buffer, Uint8Array, or string');
+    },
+    deserialize: (value: any) => value,
+    columnType: 'blob',
+  },
+  [SqliteValueType.INTEGER]: {
+    serialize: (value: any) => {
+      const num = Number(value);
+      if (!Number.isInteger(num))
+        throw new Error('INTEGER type requires integer value');
+      return num;
+    },
+    deserialize: (value: any) => Number(value),
+    columnType: 'integer',
+  },
+  [SqliteValueType.REAL]: {
+    serialize: (value: any) => Number(value),
+    deserialize: (value: any) => Number(value),
+    columnType: 'real',
+  },
+  [SqliteValueType.BOOLEAN]: {
+    serialize: (value: any) => (value ? 1 : 0),
+    deserialize: (value: any) => Boolean(value),
+    columnType: 'integer',
+  },
+};
+
 // 添加接口定义
 interface KVEntity {
   key: string;
@@ -14,6 +75,7 @@ interface KVEntity {
   created_at: Date;
   updated_at: Date;
 }
+
 function bigintHandler(key: string, val: any) {
   if (typeof val === 'bigint') {
     return val.toString(); // 将 BigInt 转换为字符串
@@ -27,16 +89,24 @@ export class SqliteKVDatabase {
   private initialized = false;
   private tableName: string;
   private CustomKVStore: any;
+  private valueType: SqliteValueType;
+  private typeHandler: TypeHandler;
 
-  constructor(datasourceOrUrl?: string, tableName: string = 'kv_store') {
+  constructor(
+    datasourceOrUrl?: string,
+    tableName: string = 'kv_store',
+    valueType: SqliteValueType = SqliteValueType.JSON,
+  ) {
     this.tableName = tableName;
+    this.valueType = valueType;
+    this.typeHandler = TYPE_HANDLERS[valueType];
 
     @Entity(tableName)
     class CustomKVStore implements KVEntity {
       @PrimaryColumn('varchar', { length: 255 })
       key: string;
 
-      @Column('text')
+      @Column(this.typeHandler.columnType as any)
       value: any;
 
       @CreateDateColumn({ type: 'datetime' })
@@ -80,7 +150,7 @@ export class SqliteKVDatabase {
                   },
                   {
                     name: 'value',
-                    type: 'text',
+                    type: this.typeHandler.columnType,
                   },
                   {
                     name: 'created_at',
@@ -110,7 +180,7 @@ export class SqliteKVDatabase {
 
     await this.db.save({
       key,
-      value: JSON.stringify(value, bigintHandler),
+      value: this.typeHandler.serialize(value),
     });
   }
 
@@ -138,7 +208,7 @@ export class SqliteKVDatabase {
       }
     }
 
-    return JSON.parse(record.value);
+    return this.typeHandler.deserialize(record.value);
   }
 
   async delete(key: string): Promise<boolean> {
@@ -155,7 +225,7 @@ export class SqliteKVDatabase {
     }
     await this.db.save({
       key,
-      value: JSON.stringify(value, bigintHandler),
+      value: this.typeHandler.serialize(value),
     });
   }
 
@@ -170,25 +240,19 @@ export class SqliteKVDatabase {
   async getAll(): Promise<Record<string, any>> {
     await this.ensureInitialized();
     const records = await this.db.find();
-    return records.reduce(
-      (acc, record: { key: any; value: any }) => {
-        acc[record.key] = JSON.parse(record.value);
-        return acc;
-      },
-      {} as Record<string, any>,
-    );
+    return records.reduce((acc, record: { key: any; value: any }) => {
+      acc[record.key] = this.typeHandler.deserialize(record.value);
+      return acc;
+    }, {} as Record<string, any>);
   }
 
   async getMany(limit: number = 10): Promise<Record<string, any>> {
     await this.ensureInitialized();
     const records = await this.db.find({ take: limit });
-    return records.reduce(
-      (acc, record: { key: any; value: any }) => {
-        acc[record.key] = JSON.parse(record.value);
-        return acc;
-      },
-      {} as Record<string, any>,
-    );
+    return records.reduce((acc, record: { key: any; value: any }) => {
+      acc[record.key] = this.typeHandler.deserialize(record.value);
+      return acc;
+    }, {} as Record<string, any>);
   }
 
   // 获取所有键
@@ -216,7 +280,7 @@ export class SqliteKVDatabase {
       const batch = entries.slice(i, i + batchSize);
       const entities = batch.map(([key, value]) => ({
         key,
-        value: JSON.stringify(value),
+        value: this.typeHandler.serialize(value),
       }));
       await this.db.save(entities);
     }
@@ -253,17 +317,25 @@ export class SqliteKVDatabase {
     let queryBuilder = this.db.createQueryBuilder(this.tableName);
 
     if (exact) {
-      // SQLite 的 JSON 查询语法
+      // 根据数据类型进行精确匹配
       queryBuilder = queryBuilder.where(`value = :value`, {
-        value: JSON.stringify(value),
+        value: this.typeHandler.serialize(value),
       });
     } else {
-      // SQLite 的文本搜索
-      const searchValue =
-        typeof value === 'string' ? value : JSON.stringify(value);
-      queryBuilder = queryBuilder.where(`value LIKE :value`, {
-        value: `%${searchValue}%`,
-      });
+      // 文本搜索（仅适用于文本类型）
+      if (
+        this.valueType === SqliteValueType.TEXT ||
+        this.valueType === SqliteValueType.JSON
+      ) {
+        const searchValue = this.typeHandler.serialize(value);
+        queryBuilder = queryBuilder.where(`value LIKE :value`, {
+          value: `%${searchValue}%`,
+        });
+      } else {
+        throw new Error(
+          `Fuzzy search not supported for ${this.valueType} type`,
+        );
+      }
     }
 
     const results = await queryBuilder.getMany();
@@ -281,11 +353,28 @@ export class SqliteKVDatabase {
     await this.ensureInitialized();
     const allRecords = await this.db.find();
     const matchedRecords = allRecords.filter((record: { value: any }) =>
-      condition(JSON.parse(record.value)),
+      condition(this.typeHandler.deserialize(record.value)),
     );
     return matchedRecords.reduce((acc, record: { key: any; value: any }) => {
-      acc.set(record.key, JSON.parse(record.value));
+      acc.set(record.key, this.typeHandler.deserialize(record.value));
       return acc;
     }, new Map<string, any>());
+  }
+
+  /**
+   * 获取当前使用的值类型
+   */
+  getValueType(): SqliteValueType {
+    return this.valueType;
+  }
+
+  /**
+   * 获取类型处理器信息
+   */
+  getTypeInfo(): { valueType: SqliteValueType; columnType: string } {
+    return {
+      valueType: this.valueType,
+      columnType: this.typeHandler.columnType,
+    };
   }
 }

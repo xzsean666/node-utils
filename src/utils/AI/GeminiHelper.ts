@@ -28,7 +28,9 @@ export class GeminiHelper {
   constructor(apiKey: string, config: GeminiConfig = {}) {
     const {
       systemInstruction,
-      model = 'gemini-2.0-flash-lite',
+      model = Math.random() < 0.5
+        ? 'gemini-2.0-flash'
+        : 'gemini-2.0-flash-lite',
       proxyUrl,
     } = config;
 

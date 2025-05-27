@@ -25,6 +25,12 @@ interface KVEntity {
   updated_at: Date;
 }
 
+interface SaveArrayOptions {
+  batchSize?: number;
+  forceUpdateBatchSize?: boolean;
+  overwrite?: boolean;
+}
+
 /**
  * PostgreSQL Key-Value 数据库类，支持多种值类型
  *
@@ -406,6 +412,27 @@ export class PGKVDatabase {
     await this.ensureInitialized();
     const result = await this.db.delete({ key });
     return !!result.affected && result.affected > 0;
+  }
+
+  /**
+   * 获取多个键的值
+   * @param keys 键数组
+   * @returns 键值对数组
+   */
+  async getMany<T = any>(
+    keys: string[],
+  ): Promise<Array<{ key: string; value: T }>> {
+    if (!keys || keys.length === 0) {
+      return [];
+    }
+    await this.ensureInitialized();
+    const records = await this.db.findBy({ key: In(keys) });
+
+    // Deserialize values if necessary
+    return records.map((record) => ({
+      key: record.key,
+      value: this.deserializeValue(record.value),
+    }));
   }
 
   async add(key: string, value: any): Promise<void> {
@@ -890,54 +917,54 @@ export class PGKVDatabase {
 
   /**
    * Saves an array by splitting it into batches - 主要支持 JSONB 类型，其他类型提供基本支持
-   * If the key already exists, appends the new items to the existing array
+   * If the key already exists, appends the new items to the existing array unless overwrite is true
    * @param key The base key for the array
    * @param array The array to save
-   * @param batchSize Maximum items per batch (default: 1000)
-   * @param forceUpdateBatchSize If true, will update the batch size even if already initialized
+   * @param options Optional configuration including batchSize, forceUpdateBatchSize, and overwrite
    */
   async saveArray(
     key: string,
     array: any[],
-    batchSize: number = 1000,
-    forceUpdateBatchSize: boolean = false,
+    options?: SaveArrayOptions,
   ): Promise<void> {
+    let { batchSize = 1000 } = options || {};
+    const { forceUpdateBatchSize = false, overwrite = false } = options || {};
+
     // 数组功能主要针对 JSONB 设计，但也支持其他类型的简单数组
     if (this.valueType !== 'jsonb') {
       console.warn(
         `Warning: saveArray is optimized for JSONB type but current type is '${this.valueType}'. Complex array operations may not work as expected.`,
       );
     }
+
     await this.ensureInitialized();
 
     // Cache key construction to avoid string concatenation in loops
     const metaKey = `${key}_meta`;
     const existingMeta = await this.get(metaKey);
 
-    // If key exists, append the new items to existing array
-    if (existingMeta && existingMeta.batchCount > 0) {
+    // If key exists, append the new items to existing array, unless overwrite is true
+    if (existingMeta && existingMeta.batchCount > 0 && !overwrite) {
       const existingBatchCount = existingMeta.batchCount;
       const existingTotalItems = existingMeta.totalItems;
 
       // Get stored batch size or use default if not found (for backward compatibility)
-      const storedBatchSize = existingMeta.batchSize || batchSize;
+      const storedBatchSize = existingMeta.batchSize || 1000;
 
       // Determine which batch size to use
       let activeBatchSize = storedBatchSize;
 
       // Handle batch size change if requested
-      if (forceUpdateBatchSize && batchSize !== storedBatchSize) {
-        console.log(
-          `Updating batch size from ${storedBatchSize} to ${batchSize}`,
-        );
-        activeBatchSize = batchSize;
+      if (forceUpdateBatchSize && 1000 !== storedBatchSize) {
+        console.log(`Updating batch size from ${storedBatchSize} to 1000`);
+        activeBatchSize = 1000;
 
         // We need to rebalance all batches if the batch size changes
         // This will require a full rebuild - we'll need to get all data,
         // rebatch it, and save it back with the new batch size
         if (existingTotalItems > 0) {
           // Get all existing data
-          const allData = await this.getAllArray(key);
+          const allData = await this.getAllArray<any>(key);
 
           // Delete all existing batch records and metadata
           const keysToDelete = [metaKey];
@@ -951,11 +978,14 @@ export class PGKVDatabase {
 
           // Continue to the "else" branch which will create a new array
           // with the new batch size
-          return this.saveArray(key, array, batchSize);
+          return this.saveArray(key, array, {
+            batchSize: 1000,
+            overwrite: true,
+          }); // Recursively call with overwrite true for rebatching
         }
-      } else if (batchSize !== storedBatchSize) {
+      } else if (1000 !== storedBatchSize) {
         console.warn(
-          `Warning: Provided batchSize (${batchSize}) differs from originally stored batchSize (${storedBatchSize}). Using stored value. Set forceUpdateBatchSize=true to change batch size.`,
+          `Warning: Provided batchSize (${1000}) differs from originally stored batchSize (${storedBatchSize}). Using stored value. Set forceUpdateBatchSize=true to change batch size.`,
         );
       }
 
@@ -1046,94 +1076,116 @@ export class PGKVDatabase {
           batchSize: batchSize, // Store batch size in metadata
           lastUpdated: new Date().toISOString(),
         };
-
-        statements.push(`
-          UPDATE "${this.tableName}" 
-          SET value = $1, updated_at = NOW()
-          WHERE key = $2
-        `);
         const serializedMeta =
           this.valueType === 'jsonb'
             ? JSON.stringify(updatedMeta)
-            : String(updatedMeta);
-        parameters.push([serializedMeta, metaKey]);
+            : // For non-jsonb/bytea types, ensure the value is stringifiable, or throw error
+              // If valueType is not jsonb and the value is an object, serialize it as JSON string
+              typeof updatedMeta === 'object'
+              ? JSON.stringify(updatedMeta)
+              : String(updatedMeta); // Stringify primitive types for other types
 
-        // Execute all prepared statements
+        statements.push(`
+          INSERT INTO "${this.tableName}" (key, value, created_at, updated_at)
+          VALUES ($1, $2, NOW(), NOW())
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+        `);
+        parameters.push([metaKey, serializedMeta]);
+
+        // Execute all statements in a single transaction
         for (let i = 0; i < statements.length; i++) {
           await queryRunner.query(statements[i], parameters[i]);
         }
 
         await queryRunner.commitTransaction();
-      } catch (error) {
+      } catch (err) {
         await queryRunner.rollbackTransaction();
-        throw error;
+        console.error('Failed to save array with key:', key, err);
+        throw err;
       } finally {
         await queryRunner.release();
       }
-    }
-    // Key doesn't exist, create new array storage
-    else {
-      // Calculate batch count
-      const batchCount = Math.ceil(array.length / batchSize);
-
-      // Create metadata record
-      const metaValue = {
-        batchCount,
-        totalItems: array.length,
-        batchSize: batchSize, // Store batch size in metadata
-        lastUpdated: new Date().toISOString(),
-      };
-
+    } else {
+      // If key does not exist or overwrite is true, create a new array
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
       await queryRunner.startTransaction();
 
       try {
-        // Prepare bulk insert using parameterized queries instead of string concatenation
+        // Delete all existing batch records and metadata if overwrite is true
+        if (overwrite) {
+          const keysToDelete = [metaKey];
+          if (existingMeta && existingMeta.batchCount > 0) {
+            for (let i = 0; i < existingMeta.batchCount; i++) {
+              keysToDelete.push(`${key}_${i}`);
+            }
+          }
+          if (keysToDelete.length > 0) {
+            await this.deleteMany(keysToDelete);
+          }
+        }
+
+        // Create new batches for the array
+        const bulkValues: string[] = [];
         const bulkParams: any[] = [];
-        const placeholders: string[] = [];
         let paramIndex = 1;
+        let batchCount = 0;
 
-        // Add metadata entry
-        placeholders.push(`($${paramIndex}, $${paramIndex + 1}, NOW(), NOW())`);
-        const serializedMeta =
-          this.valueType === 'jsonb'
-            ? JSON.stringify(metaValue)
-            : String(metaValue);
-        bulkParams.push(metaKey, serializedMeta);
-        paramIndex += 2;
+        for (let i = 0; i < array.length; i += batchSize) {
+          const batchData = array.slice(i, i + batchSize);
+          const batchKey = `${key}_${batchCount}`;
 
-        // Add batch entries
-        for (let i = 0; i < batchCount; i++) {
-          const start = i * batchSize;
-          const end = Math.min(start + batchSize, array.length);
-          const batchData = array.slice(start, end);
-          const batchKey = `${key}_${i}`;
-
-          placeholders.push(
-            `($${paramIndex}, $${paramIndex + 1}, NOW(), NOW())`,
-          );
-          const serializedBatch =
+          bulkValues.push(`($${paramIndex}, $${paramIndex + 1}, NOW(), NOW())`);
+          const serializedValue =
             this.valueType === 'jsonb'
               ? JSON.stringify(batchData)
               : String(batchData);
-          bulkParams.push(batchKey, serializedBatch);
+          bulkParams.push(batchKey, serializedValue);
           paramIndex += 2;
+          batchCount++;
         }
 
-        // Single query for all inserts
+        if (bulkValues.length > 0) {
+          await queryRunner.query(
+            `
+            INSERT INTO "${this.tableName}" (key, value, created_at, updated_at)
+            VALUES ${bulkValues.join(',')}
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+          `,
+            bulkParams,
+          );
+        }
+
+        // Save metadata
+        const metaData = {
+          batchCount: batchCount,
+          totalItems: array.length,
+          batchSize: batchSize, // Store batch size in metadata
+          lastUpdated: new Date().toISOString(),
+        };
+        const serializedMeta =
+          this.valueType === 'jsonb'
+            ? JSON.stringify(metaData)
+            : // For non-jsonb/bytea types, ensure the value is stringifiable, or throw error
+              // If valueType is not jsonb and the value is an object, serialize it as JSON string
+              typeof metaData === 'object'
+              ? JSON.stringify(metaData)
+              : String(metaData); // Stringify primitive types for other types
+
         await queryRunner.query(
           `
           INSERT INTO "${this.tableName}" (key, value, created_at, updated_at)
-          VALUES ${placeholders.join(',')}
+          VALUES ($1, $2, NOW(), NOW())
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
         `,
-          bulkParams,
+          [metaKey, serializedMeta],
         );
 
         await queryRunner.commitTransaction();
-      } catch (error) {
+      } catch (err) {
         await queryRunner.rollbackTransaction();
-        throw error;
+        console.error('Failed to save array with key:', key, err);
+        throw err;
       } finally {
         await queryRunner.release();
       }
@@ -1141,9 +1193,9 @@ export class PGKVDatabase {
   }
 
   /**
-   * Retrieves all batches of a saved array and combines them
-   * @param key The base key for the array
-   * @returns The complete array
+   * Gets the complete array stored under a given key by fetching all its batches.
+   * @param key The base key for the array.
+   * @returns A promise that resolves to the complete array.
    */
   async getAllArray<T = any>(key: string): Promise<T[]> {
     await this.ensureInitialized();

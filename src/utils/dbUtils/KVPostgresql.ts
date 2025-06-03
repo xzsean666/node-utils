@@ -58,6 +58,68 @@ interface SaveArrayOptions {
  * // BYTEA 类型 - 二进制数据操作
  * const blobDB = new PGKVDatabase('postgresql://...', 'blob_store', 'bytea');
  * await blobDB.put('file:1', Buffer.from('binary data'));
+ *
+ * // 新增：时间戳功能使用示例
+ *
+ * // 1. 获取单个值时包含时间戳
+ * const resultWithTimestamp = await jsonbDB.get('user:1', { includeTimestamps: true });
+ * // 返回: { value: { name: 'John', age: 30 }, created_at: Date, updated_at: Date }
+ *
+ * // 2. 兼容旧的 expire 参数
+ * const result = await jsonbDB.get('user:1', 3600); // 3600秒过期时间
+ *
+ * // 3. 同时使用过期时间和时间戳选项
+ * const resultFull = await jsonbDB.get('user:1', {
+ *   expire: 3600,
+ *   includeTimestamps: true
+ * });
+ *
+ * // 4. 前缀查询时包含时间戳
+ * const usersWithTimestamp = await jsonbDB.getWithPrefix('user:', {
+ *   includeTimestamps: true,
+ *   limit: 10
+ * });
+ * // 返回: [{ key: 'user:1', value: {...}, created_at: Date, updated_at: Date }]
+ *
+ * // 5. 包含查询时包含时间戳
+ * const containsResults = await jsonbDB.getWithContains('user', {
+ *   includeTimestamps: true,
+ *   limit: 5
+ * });
+ *
+ * // 6. 后缀查询时包含时间戳
+ * const suffixResults = await jsonbDB.getWithSuffix(':1', {
+ *   includeTimestamps: true
+ * });
+ *
+ * // 7. 批量获取时包含时间戳
+ * const manyResults = await jsonbDB.getMany(['user:1', 'user:2'], {
+ *   includeTimestamps: true
+ * });
+ *
+ * // 8. 随机数据时包含时间戳
+ * const randomResults = await jsonbDB.getRandomData(3, {
+ *   includeTimestamps: true
+ * });
+ *
+ * // 9. 时间搜索时包含时间戳
+ * const timeResults = await jsonbDB.searchByTime({
+ *   timestamp: Date.now() - 24 * 60 * 60 * 1000, // 24小时前
+ *   type: 'after',
+ *   includeTimestamps: true,
+ *   take: 10
+ * });
+ *
+ * // 10. JSON和时间复合搜索时包含时间戳 (仅JSONB类型)
+ * const jsonTimeResults = await jsonbDB.searchJsonByTime(
+ *   { contains: { status: 'active' } },
+ *   {
+ *     timestamp: Date.now() - 7 * 24 * 60 * 60 * 1000, // 7天前
+ *     type: 'after',
+ *     includeTimestamps: true,
+ *     take: 20
+ *   }
+ * );
  */
 export class PGKVDatabase {
   private db: Repository<KVEntity>;
@@ -338,11 +400,39 @@ export class PGKVDatabase {
     return !!result?.length;
   }
 
-  async get<T = any>(key: string, expire?: number): Promise<T | null> {
+  // 方法重载以保持向后兼容性
+  async get<T = any>(key: string, expire?: number): Promise<T | null>;
+  async get<T = any>(
+    key: string,
+    options?: {
+      expire?: number;
+      includeTimestamps?: boolean;
+    },
+  ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null>;
+  async get<T = any>(
+    key: string,
+    optionsOrExpire?:
+      | number
+      | {
+          expire?: number;
+          includeTimestamps?: boolean;
+        },
+  ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null> {
     await this.ensureInitialized();
     const record = await this.db.findOne({ where: { key } });
 
     if (!record) return null;
+
+    // 处理参数类型 - 兼容旧的expire参数和新的options对象
+    let expire: number | undefined;
+    let includeTimestamps = false;
+
+    if (typeof optionsOrExpire === 'number') {
+      expire = optionsOrExpire;
+    } else if (optionsOrExpire && typeof optionsOrExpire === 'object') {
+      expire = optionsOrExpire.expire;
+      includeTimestamps = optionsOrExpire.includeTimestamps || false;
+    }
 
     // 如果设置了过期时间，检查是否过期
     if (expire !== undefined) {
@@ -354,7 +444,347 @@ export class PGKVDatabase {
         return null;
       }
     }
-    return this.deserializeValue(record.value);
+
+    const deserializedValue = this.deserializeValue(record.value);
+
+    // 如果需要包含时间戳，返回包含时间戳的对象
+    if (includeTimestamps) {
+      return {
+        value: deserializedValue,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+      };
+    }
+
+    return deserializedValue;
+  }
+
+  /**
+   * 高效获取指定前缀的所有键值对
+   * 使用范围查询充分利用主键索引性能
+   * @param prefix 键前缀
+   * @param options 查询选项
+   * @returns 匹配前缀的键值对数组
+   */
+  async getWithPrefix<T = any>(
+    prefix: string,
+    options?: {
+      limit?: number;
+      offset?: number;
+      orderBy?: 'ASC' | 'DESC';
+      includeTimestamps?: boolean;
+    },
+  ): Promise<
+    Array<{
+      key: string;
+      value: T;
+      created_at?: Date;
+      updated_at?: Date;
+    }>
+  > {
+    await this.ensureInitialized();
+
+    if (!prefix) {
+      throw new Error('Prefix cannot be empty');
+    }
+
+    const {
+      limit,
+      offset,
+      orderBy = 'ASC',
+      includeTimestamps = false,
+    } = options || {};
+
+    // 根据是否需要时间戳选择字段
+    const selectFields = [
+      `${this.tableName}.key as "key"`,
+      `${this.tableName}.value as "value"`,
+    ];
+
+    if (includeTimestamps) {
+      selectFields.push(
+        `${this.tableName}.created_at as "created_at"`,
+        `${this.tableName}.updated_at as "updated_at"`,
+      );
+    }
+
+    // 使用范围查询 - 这是最高效的前缀搜索方式
+    // key >= 'prefix' AND key < 'prefix' + '\xFF'
+    // 这样可以充分利用主键的 B-tree 索引
+    const queryBuilder = this.db
+      .createQueryBuilder(this.tableName)
+      .select(selectFields)
+      .where(`${this.tableName}.key >= :startPrefix`, { startPrefix: prefix })
+      .andWhere(`${this.tableName}.key < :endPrefix`, {
+        endPrefix: prefix + '\xFF', // 使用 \xFF 作为范围上限
+      })
+      .orderBy(`${this.tableName}.key`, orderBy);
+
+    if (limit !== undefined) {
+      queryBuilder.limit(limit);
+    }
+
+    if (offset !== undefined) {
+      queryBuilder.offset(offset);
+    }
+
+    try {
+      const results = await queryBuilder.getRawMany();
+
+      // 反序列化值并根据选项返回时间戳
+      return results.map((record) => {
+        const result: any = {
+          key: record.key,
+          value: this.deserializeValue(record.value),
+        };
+
+        if (includeTimestamps) {
+          result.created_at = record.created_at;
+          result.updated_at = record.updated_at;
+        }
+
+        return result;
+      });
+    } catch (error) {
+      console.error('getWithPrefix query error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取键包含指定子串的所有键值对
+   * 注意：此方法性能较差，建议优先使用 getWithPrefix
+   * @param substring 键中包含的子串
+   * @param options 查询选项
+   * @returns 匹配的键值对数组
+   */
+  async getWithContains<T = any>(
+    substring: string,
+    options?: {
+      limit?: number;
+      offset?: number;
+      orderBy?: 'ASC' | 'DESC';
+      caseSensitive?: boolean;
+      includeTimestamps?: boolean;
+    },
+  ): Promise<
+    Array<{
+      key: string;
+      value: T;
+      created_at?: Date;
+      updated_at?: Date;
+    }>
+  > {
+    await this.ensureInitialized();
+
+    if (!substring) {
+      throw new Error('Substring cannot be empty');
+    }
+
+    const {
+      limit,
+      offset,
+      orderBy = 'ASC',
+      caseSensitive = true,
+      includeTimestamps = false,
+    } = options || {};
+
+    // 警告：这种查询无法利用主键索引，性能较差
+    console.warn(
+      `Performance Warning: getWithContains('${substring}') will scan all records. Consider using getWithPrefix() if possible.`,
+    );
+
+    // 根据是否需要时间戳选择字段
+    const selectFields = [
+      `${this.tableName}.key as "key"`,
+      `${this.tableName}.value as "value"`,
+    ];
+
+    if (includeTimestamps) {
+      selectFields.push(
+        `${this.tableName}.created_at as "created_at"`,
+        `${this.tableName}.updated_at as "updated_at"`,
+      );
+    }
+
+    const likeOperator = caseSensitive ? 'LIKE' : 'ILIKE';
+    const queryBuilder = this.db
+      .createQueryBuilder(this.tableName)
+      .select(selectFields)
+      .where(`${this.tableName}.key ${likeOperator} :pattern`, {
+        pattern: `%${substring}%`,
+      })
+      .orderBy(`${this.tableName}.key`, orderBy);
+
+    if (limit !== undefined) {
+      queryBuilder.limit(limit);
+    }
+
+    if (offset !== undefined) {
+      queryBuilder.offset(offset);
+    }
+
+    try {
+      const results = await queryBuilder.getRawMany();
+
+      return results.map((record) => {
+        const result: any = {
+          key: record.key,
+          value: this.deserializeValue(record.value),
+        };
+
+        if (includeTimestamps) {
+          result.created_at = record.created_at;
+          result.updated_at = record.updated_at;
+        }
+
+        return result;
+      });
+    } catch (error) {
+      console.error('getWithContains query error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取键以指定后缀结尾的所有键值对
+   * 注意：此方法性能很差，因为无法利用标准B-tree索引
+   * @param suffix 键的后缀
+   * @param options 查询选项
+   * @returns 匹配的键值对数组
+   */
+  async getWithSuffix<T = any>(
+    suffix: string,
+    options?: {
+      limit?: number;
+      offset?: number;
+      orderBy?: 'ASC' | 'DESC';
+      caseSensitive?: boolean;
+      includeTimestamps?: boolean;
+    },
+  ): Promise<
+    Array<{
+      key: string;
+      value: T;
+      created_at?: Date;
+      updated_at?: Date;
+    }>
+  > {
+    await this.ensureInitialized();
+
+    if (!suffix) {
+      throw new Error('Suffix cannot be empty');
+    }
+
+    const {
+      limit,
+      offset,
+      orderBy = 'ASC',
+      caseSensitive = true,
+      includeTimestamps = false,
+    } = options || {};
+
+    // 警告：后缀查询性能最差，无法利用B-tree索引
+    console.warn(
+      `Performance Warning: getWithSuffix('${suffix}') requires full table scan. Consider using reverse index or redesigning key structure.`,
+    );
+
+    // 根据是否需要时间戳选择字段
+    const selectFields = [
+      `${this.tableName}.key as "key"`,
+      `${this.tableName}.value as "value"`,
+    ];
+
+    if (includeTimestamps) {
+      selectFields.push(
+        `${this.tableName}.created_at as "created_at"`,
+        `${this.tableName}.updated_at as "updated_at"`,
+      );
+    }
+
+    const likeOperator = caseSensitive ? 'LIKE' : 'ILIKE';
+    const queryBuilder = this.db
+      .createQueryBuilder(this.tableName)
+      .select(selectFields)
+      .where(`${this.tableName}.key ${likeOperator} :pattern`, {
+        pattern: `%${suffix}`,
+      })
+      .orderBy(`${this.tableName}.key`, orderBy);
+
+    if (limit !== undefined) {
+      queryBuilder.limit(limit);
+    }
+
+    if (offset !== undefined) {
+      queryBuilder.offset(offset);
+    }
+
+    try {
+      const results = await queryBuilder.getRawMany();
+
+      return results.map((record) => {
+        const result: any = {
+          key: record.key,
+          value: this.deserializeValue(record.value),
+        };
+
+        if (includeTimestamps) {
+          result.created_at = record.created_at;
+          result.updated_at = record.updated_at;
+        }
+
+        return result;
+      });
+    } catch (error) {
+      console.error('getWithSuffix query error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 高性能后缀查询的替代方案 - 使用反向键查询
+   * 需要在存储时同时存储反向键，空间换时间
+   * @param suffix 后缀
+   * @param options 查询选项
+   * @returns 匹配的键值对数组
+   */
+  async getWithSuffixOptimized<T = any>(
+    suffix: string,
+    options?: {
+      limit?: number;
+      offset?: number;
+      orderBy?: 'ASC' | 'DESC';
+    },
+  ): Promise<Array<{ key: string; value: T }>> {
+    await this.ensureInitialized();
+
+    if (!suffix) {
+      throw new Error('Suffix cannot be empty');
+    }
+
+    // 反向后缀变成前缀查询
+    const reversedSuffix = suffix.split('').reverse().join('');
+    const reversePrefix = `reverse:${reversedSuffix}`;
+
+    console.log(
+      `Using optimized suffix query with reverse index prefix: ${reversePrefix}`,
+    );
+
+    // 使用前缀查询查找反向键
+    const reverseResults = await this.getWithPrefix<{
+      originalKey: string;
+      value: T;
+    }>(reversePrefix, options);
+
+    // 根据反向键结果获取原始数据
+    if (reverseResults.length === 0) {
+      return [];
+    }
+
+    const originalKeys = reverseResults.map((r) => r.value.originalKey);
+    const originalData = await this.getMany<T>(originalKeys);
+
+    return originalData;
   }
 
   async isValueExists(value: any): Promise<boolean> {
@@ -417,22 +847,53 @@ export class PGKVDatabase {
   /**
    * 获取多个键的值
    * @param keys 键数组
+   * @param options 查询选项
    * @returns 键值对数组
    */
   async getMany<T = any>(
     keys: string[],
-  ): Promise<Array<{ key: string; value: T }>> {
+    options?: {
+      includeTimestamps?: boolean;
+    },
+  ): Promise<
+    Array<{
+      key: string;
+      value: T;
+      created_at?: Date;
+      updated_at?: Date;
+    }>
+  > {
     if (!keys || keys.length === 0) {
       return [];
     }
     await this.ensureInitialized();
-    const records = await this.db.findBy({ key: In(keys) });
+
+    const { includeTimestamps = false } = options || {};
+
+    // 根据是否需要时间戳选择要查询的字段
+    const selectFields: (keyof KVEntity)[] = ['key', 'value'];
+    if (includeTimestamps) {
+      selectFields.push('created_at', 'updated_at');
+    }
+
+    const records = await this.db.findBy({
+      key: In(keys),
+    });
 
     // Deserialize values if necessary
-    return records.map((record) => ({
-      key: record.key,
-      value: this.deserializeValue(record.value),
-    }));
+    return records.map((record) => {
+      const result: any = {
+        key: record.key,
+        value: this.deserializeValue(record.value),
+      };
+
+      if (includeTimestamps) {
+        result.created_at = record.created_at;
+        result.updated_at = record.updated_at;
+      }
+
+      return result;
+    });
   }
 
   async add(key: string, value: any): Promise<void> {
@@ -811,15 +1272,35 @@ export class PGKVDatabase {
     type?: 'before' | 'after';
     orderBy?: 'ASC' | 'DESC';
     timeColumn?: 'updated_at' | 'created_at';
-  }): Promise<Array<{ key: string; value: any }>> {
+    includeTimestamps?: boolean;
+  }): Promise<
+    Array<{
+      key: string;
+      value: any;
+      created_at?: Date;
+      updated_at?: Date;
+    }>
+  > {
     await this.ensureInitialized();
     const timeColumn = params.timeColumn || 'updated_at';
+    const includeTimestamps = params.includeTimestamps || false;
+
+    // 根据是否需要时间戳选择字段
+    const selectFields = [
+      `${this.tableName}.key as "key"`,
+      `${this.tableName}.value as "value"`,
+    ];
+
+    if (includeTimestamps) {
+      selectFields.push(
+        `${this.tableName}.created_at as "created_at"`,
+        `${this.tableName}.updated_at as "updated_at"`,
+      );
+    }
+
     const queryBuilder = this.db
       .createQueryBuilder()
-      .select([
-        `${this.tableName}.key as "key"`,
-        `${this.tableName}.value as "value"`,
-      ])
+      .select(selectFields)
       .from(this.tableName, this.tableName);
 
     const operator = (params.type || 'after') === 'before' ? '<' : '>';
@@ -837,7 +1318,19 @@ export class PGKVDatabase {
     queryBuilder.limit(params.take || 1);
     try {
       const results = await queryBuilder.getRawMany();
-      return results;
+      return results.map((record) => {
+        const result: any = {
+          key: record.key,
+          value: this.deserializeValue(record.value),
+        };
+
+        if (includeTimestamps) {
+          result.created_at = record.created_at;
+          result.updated_at = record.updated_at;
+        }
+
+        return result;
+      });
     } catch (error) {
       console.error('查询错误:', queryBuilder.getSql());
       console.error('查询参数:', queryBuilder.getParameters());
@@ -861,17 +1354,37 @@ export class PGKVDatabase {
       type?: 'before' | 'after';
       orderBy?: 'ASC' | 'DESC';
       timeColumn?: 'updated_at' | 'created_at';
+      includeTimestamps?: boolean;
     },
-  ): Promise<Array<{ key: string; value: any }>> {
+  ): Promise<
+    Array<{
+      key: string;
+      value: any;
+      created_at?: Date;
+      updated_at?: Date;
+    }>
+  > {
     this.checkTypeSupport('searchJsonByTime', ['jsonb']);
     await this.ensureInitialized();
     const timeColumn = timeOptions.timeColumn || 'updated_at';
+    const includeTimestamps = timeOptions.includeTimestamps || false;
+
+    // 根据是否需要时间戳选择字段
+    const selectFields = [
+      `${this.tableName}.key as "key"`,
+      `${this.tableName}.value as "value"`,
+    ];
+
+    if (includeTimestamps) {
+      selectFields.push(
+        `${this.tableName}.created_at as "created_at"`,
+        `${this.tableName}.updated_at as "updated_at"`,
+      );
+    }
+
     const queryBuilder = this.db
       .createQueryBuilder()
-      .select([
-        `${this.tableName}.key as "key"`,
-        `${this.tableName}.value as "value"`,
-      ])
+      .select(selectFields)
       .from(this.tableName, this.tableName);
 
     const operator = (timeOptions.type || 'after') === 'before' ? '<' : '>';
@@ -907,7 +1420,19 @@ export class PGKVDatabase {
 
     try {
       const results = await queryBuilder.getRawMany();
-      return results;
+      return results.map((record) => {
+        const result: any = {
+          key: record.key,
+          value: this.deserializeValue(record.value),
+        };
+
+        if (includeTimestamps) {
+          result.created_at = record.created_at;
+          result.updated_at = record.updated_at;
+        }
+
+        return result;
+      });
     } catch (error) {
       console.error('Query error:', queryBuilder.getSql());
       console.error('Query parameters:', queryBuilder.getParameters());
@@ -1404,25 +1929,60 @@ export class PGKVDatabase {
   /**
    * 获取指定数量的随机记录
    * @param count 需要获取的随机记录数量
+   * @param options 查询选项
    * @returns 随机记录数组
    */
   async getRandomData(
     count: number = 1,
-  ): Promise<Array<{ key: string; value: any }>> {
+    options?: {
+      includeTimestamps?: boolean;
+    },
+  ): Promise<
+    Array<{
+      key: string;
+      value: any;
+      created_at?: Date;
+      updated_at?: Date;
+    }>
+  > {
     await this.ensureInitialized();
+
+    const { includeTimestamps = false } = options || {};
+
+    // 根据是否需要时间戳选择字段
+    const selectFields = [
+      `${this.tableName}.key as "key"`,
+      `${this.tableName}.value as "value"`,
+    ];
+
+    if (includeTimestamps) {
+      selectFields.push(
+        `${this.tableName}.created_at as "created_at"`,
+        `${this.tableName}.updated_at as "updated_at"`,
+      );
+    }
 
     // 使用 ORDER BY RANDOM() 获取随机记录
     const results = await this.db
       .createQueryBuilder(this.tableName)
-      .select([
-        `${this.tableName}.key as "key"`,
-        `${this.tableName}.value as "value"`,
-      ])
+      .select(selectFields)
       .orderBy('RANDOM()')
       .limit(count)
       .getRawMany();
 
-    return results;
+    return results.map((record) => {
+      const result: any = {
+        key: record.key,
+        value: this.deserializeValue(record.value),
+      };
+
+      if (includeTimestamps) {
+        result.created_at = record.created_at;
+        result.updated_at = record.updated_at;
+      }
+
+      return result;
+    });
   }
 
   /**

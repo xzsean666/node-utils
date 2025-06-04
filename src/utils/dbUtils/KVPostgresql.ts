@@ -40,7 +40,26 @@ interface SaveArrayOptions {
  * const jsonbDB = new PGKVDatabase('postgresql://...', 'json_store', 'jsonb');
  * await jsonbDB.put('user:1', { name: 'John', age: 30 });
  * await jsonbDB.merge('user:1', { email: 'john@example.com' });
+ *
+ * // 高级搜索功能示例
+ * // 精确匹配搜索
  * await jsonbDB.searchJson({ contains: { name: 'John' } });
+ *
+ * // 文本包含搜索（推荐用于搜索功能）
+ * await jsonbDB.searchJson({
+ *   textSearch: [
+ *     { path: 'english_only', text: 'legal document', caseSensitive: false }
+ *   ],
+ *   includeTimestamps: true
+ * });
+ *
+ * // 混合搜索条件
+ * await jsonbDB.searchJson({
+ *   contains: { status: 'active' },
+ *   textSearch: [{ path: 'content', text: 'search term', caseSensitive: false }],
+ *   compare: [{ path: 'priority', operator: '>=', value: 5 }],
+ *   limit: 20
+ * });
  *
  * // VARCHAR 类型 - 基本字符串操作
  * const stringDB = new PGKVDatabase('postgresql://...', 'string_store', 'varchar');
@@ -1153,6 +1172,45 @@ export class PGKVDatabase {
    * 高级 JSON 搜索 - 仅支持 JSONB 类型
    * @param searchOptions 搜索选项
    */
+  /**
+   * 高级 JSON 搜索 - 仅支持 JSONB 类型
+   * @param searchOptions 搜索选项
+   * @returns 搜索结果和分页游标
+   *
+   * 使用示例：
+   *
+   * // 精确匹配
+   * await db.searchJson({
+   *   contains: { status: 'active' },
+   *   limit: 10
+   * });
+   *
+   * // 比较操作
+   * await db.searchJson({
+   *   compare: [
+   *     { path: 'age', operator: '>', value: 18 },
+   *     { path: 'name', operator: '=', value: 'John' }
+   *   ]
+   * });
+   *
+   * // 文本包含搜索（LIKE/ILIKE）
+   * await db.searchJson({
+   *   textSearch: [
+   *     { path: 'english_only', text: 'legal document', caseSensitive: false },
+   *     { path: 'description', text: 'important', caseSensitive: true }
+   *   ],
+   *   includeTimestamps: true
+   * });
+   *
+   * // 混合搜索
+   * await db.searchJson({
+   *   contains: { status: 'active' },
+   *   textSearch: [{ path: 'content', text: 'search term', caseSensitive: false }],
+   *   compare: [{ path: 'priority', operator: '>=', value: 5 }],
+   *   limit: 20,
+   *   includeTimestamps: true
+   * });
+   */
   async searchJson(searchOptions: {
     contains?: object;
     limit?: number;
@@ -1162,6 +1220,14 @@ export class PGKVDatabase {
       operator: '>' | '<' | '>=' | '<=' | '=' | '!=';
       value: number | string | Date;
     }>;
+    textSearch?: Array<{
+      path: string;
+      text: string;
+      caseSensitive?: boolean;
+    }>;
+    includeTimestamps?: boolean;
+    orderBy?: 'ASC' | 'DESC';
+    orderByField?: 'key' | 'created_at' | 'updated_at';
   }): Promise<{
     data: any[];
     nextCursor: string | null;
@@ -1170,16 +1236,25 @@ export class PGKVDatabase {
     await this.ensureInitialized();
 
     const limit = searchOptions.limit || 100;
+    const includeTimestamps = searchOptions.includeTimestamps || false;
+    const orderBy = searchOptions.orderBy || 'ASC';
+    const orderByField = searchOptions.orderByField || 'key';
 
     // 使用原生SQL查询，更直接地访问数据库
     try {
-      let query = `SELECT * FROM "${this.tableName}"`;
+      // 根据是否需要时间戳选择字段
+      const selectFields = includeTimestamps
+        ? 'key, value, created_at, updated_at'
+        : 'key, value';
+
+      let query = `SELECT ${selectFields} FROM "${this.tableName}"`;
       const params: any[] = [];
       let paramIndex = 1;
 
       // 构建WHERE子句
       const whereConditions: string[] = [];
 
+      // 处理 contains 条件（精确匹配）
       if (searchOptions.contains) {
         Object.entries(searchOptions.contains).forEach(([key, value]) => {
           whereConditions.push(`value->>'${key}' = $${paramIndex}`);
@@ -1188,6 +1263,7 @@ export class PGKVDatabase {
         });
       }
 
+      // 处理 compare 条件（比较操作）
       if (searchOptions.compare) {
         searchOptions.compare.forEach((condition) => {
           whereConditions.push(
@@ -1198,8 +1274,25 @@ export class PGKVDatabase {
         });
       }
 
+      // 处理 textSearch 条件（LIKE/ILIKE 搜索）
+      if (searchOptions.textSearch) {
+        searchOptions.textSearch.forEach((textCondition) => {
+          const likeOperator = textCondition.caseSensitive ? 'LIKE' : 'ILIKE';
+          whereConditions.push(
+            `value->>'${textCondition.path}' ${likeOperator} $${paramIndex}`,
+          );
+          params.push(`%${textCondition.text}%`);
+          paramIndex++;
+        });
+      }
+
+      // 处理游标分页
       if (searchOptions.cursor) {
-        whereConditions.push(`key > $${paramIndex}`);
+        if (orderByField === 'key') {
+          whereConditions.push(`key > $${paramIndex}`);
+        } else {
+          whereConditions.push(`${orderByField} > $${paramIndex}`);
+        }
         params.push(searchOptions.cursor);
         paramIndex++;
       }
@@ -1210,21 +1303,29 @@ export class PGKVDatabase {
       }
 
       // 添加排序和分页
-      query += ` ORDER BY key ASC LIMIT ${limit + 1}`;
+      query += ` ORDER BY ${orderByField} ${orderBy} LIMIT ${limit + 1}`;
 
       const results = await this.db.query(query, params);
 
       const hasMore = results.length > limit;
       const data = results.slice(0, limit);
       const nextCursor =
-        hasMore && data.length > 0 ? data[data.length - 1].key : null;
+        hasMore && data.length > 0 ? data[data.length - 1][orderByField] : null;
+
+      // 如果不需要时间戳，移除时间戳字段（保持向后兼容）
+      if (!includeTimestamps) {
+        data.forEach((item: any) => {
+          delete item.created_at;
+          delete item.updated_at;
+        });
+      }
 
       return {
         data,
         nextCursor,
       };
     } catch (error) {
-      console.error('Query error:', error);
+      console.error('SearchJson query error:', error);
       throw error;
     }
   }

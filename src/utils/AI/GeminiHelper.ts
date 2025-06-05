@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI, Schema, Content } from '@google/generative-ai';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import axios from 'axios';
 
@@ -11,6 +11,7 @@ interface GeminiConfig {
   systemInstruction?: string | { parts: { text: string }[] };
   model?: ModelType;
   proxyUrl?: string;
+  responseMimeType?: string;
 }
 
 type ModelType =
@@ -24,6 +25,7 @@ export class GeminiHelper {
   private chat: any;
   private history: ChatMessage[] = [];
   private systemInstruction?: string | { parts: { text: string }[] };
+  private responseMimeType?: string;
 
   constructor(apiKey: string, config: GeminiConfig = {}) {
     const {
@@ -33,6 +35,8 @@ export class GeminiHelper {
         : 'gemini-2.0-flash-lite',
       proxyUrl,
     } = config;
+
+    this.responseMimeType = config.responseMimeType;
 
     // Configure global fetch
     if (proxyUrl) {
@@ -95,7 +99,19 @@ export class GeminiHelper {
 
     // 添加 systemInstruction
     if (this.systemInstruction) {
-      chatOptions.systemInstruction = this.systemInstruction;
+      let systemInstructionForModel: Content;
+      if (typeof this.systemInstruction === 'string') {
+        systemInstructionForModel = {
+          role: 'system',
+          parts: [{ text: this.systemInstruction }],
+        };
+      } else {
+        systemInstructionForModel = {
+          role: 'system',
+          parts: this.systemInstruction.parts,
+        };
+      }
+      chatOptions.systemInstruction = systemInstructionForModel;
     }
 
     this.chat = this.model.startChat(chatOptions);
@@ -154,6 +170,58 @@ export class GeminiHelper {
     } catch (error) {
       console.error('Gemini Chat Error:', error);
       throw new Error('Error processing chat request');
+    }
+  }
+
+  /**
+   * 发送消息并获取结构化回复
+   * @param message 用户消息
+   * @param responseSchema 定义所需 JSON 结构的模式对象
+   * @returns 返回AI根据模式生成的结构化回复（JSON对象）
+   */
+  async sendMessageStructured<T>(
+    message: string,
+    responseSchema: Schema,
+  ): Promise<T> {
+    try {
+      let systemInstructionForModel: Content | undefined;
+      if (this.systemInstruction) {
+        if (typeof this.systemInstruction === 'string') {
+          systemInstructionForModel = {
+            role: 'system',
+            parts: [{ text: this.systemInstruction }],
+          };
+        } else {
+          systemInstructionForModel = {
+            role: 'system',
+            parts: this.systemInstruction.parts,
+          };
+        }
+      }
+
+      const modelWithConfig = this.genAI.getGenerativeModel({
+        model: this.model.modelName,
+        generationConfig: {
+          responseMimeType: this.responseMimeType || 'application/json',
+          responseSchema: responseSchema,
+        },
+        systemInstruction: systemInstructionForModel,
+      });
+
+      const result = await modelWithConfig.generateContent(message);
+      const response = await result.response;
+      const responseText = response.text();
+
+      try {
+        const parsedResponse: T = JSON.parse(responseText);
+        return parsedResponse;
+      } catch (jsonError) {
+        console.error('Failed to parse JSON response:', jsonError);
+        throw new Error('Model did not return valid JSON');
+      }
+    } catch (error) {
+      console.error('Gemini Structured Chat Error:', error);
+      throw new Error('Error processing structured chat request');
     }
   }
 

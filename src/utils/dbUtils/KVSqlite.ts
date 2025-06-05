@@ -184,15 +184,39 @@ export class SqliteKVDatabase {
     });
   }
 
+  // 方法重载以保持向后兼容性
+  async get<T = any>(key: string, expire?: number): Promise<T | null>;
   async get<T = any>(
     key: string,
-    expire?: number,
-    deleteExpired: boolean = true,
-  ): Promise<T | null> {
+    options?: {
+      expire?: number;
+      includeTimestamps?: boolean;
+    },
+  ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null>;
+  async get<T = any>(
+    key: string,
+    optionsOrExpire?:
+      | number
+      | {
+          expire?: number;
+          includeTimestamps?: boolean;
+        },
+  ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null> {
     await this.ensureInitialized();
     const record = await this.db.findOne({ where: { key } });
 
     if (!record) return null;
+
+    // 处理参数类型 - 兼容旧的expire参数和新的options对象
+    let expire: number | undefined;
+    let includeTimestamps = false;
+
+    if (typeof optionsOrExpire === 'number') {
+      expire = optionsOrExpire;
+    } else if (optionsOrExpire && typeof optionsOrExpire === 'object') {
+      expire = optionsOrExpire.expire;
+      includeTimestamps = optionsOrExpire.includeTimestamps || false;
+    }
 
     // 如果设置了过期时间，检查是否过期
     if (expire !== undefined) {
@@ -200,15 +224,24 @@ export class SqliteKVDatabase {
       const createdTime = Math.floor(record.created_at.getTime() / 1000);
 
       if (currentTime - createdTime > expire) {
-        // 可选：删除过期数据
-        if (deleteExpired) {
-          await this.delete(key);
-        }
+        // 过期数据自动删除
+        await this.delete(key);
         return null;
       }
     }
 
-    return this.typeHandler.deserialize(record.value);
+    const deserializedValue = this.typeHandler.deserialize(record.value);
+
+    // 如果需要包含时间戳，返回包含时间戳的对象
+    if (includeTimestamps) {
+      return {
+        value: deserializedValue,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+      };
+    }
+
+    return deserializedValue;
   }
 
   async delete(key: string): Promise<boolean> {
@@ -376,5 +409,97 @@ export class SqliteKVDatabase {
       valueType: this.valueType,
       columnType: this.typeHandler.columnType,
     };
+  }
+
+  /**
+   * 高效获取指定前缀的所有键值对
+   * 使用范围查询充分利用主键索引性能
+   * @param prefix 键前缀
+   * @param options 查询选项
+   * @returns 匹配前缀的键值对数组
+   */
+  async getWithPrefix<T = any>(
+    prefix: string,
+    options?: {
+      limit?: number;
+      offset?: number;
+      orderBy?: 'ASC' | 'DESC';
+      includeTimestamps?: boolean;
+    },
+  ): Promise<
+    Array<{
+      key: string;
+      value: T;
+      created_at?: Date;
+      updated_at?: Date;
+    }>
+  > {
+    await this.ensureInitialized();
+
+    if (!prefix) {
+      throw new Error('Prefix cannot be empty');
+    }
+
+    const {
+      limit,
+      offset,
+      orderBy = 'ASC',
+      includeTimestamps = false,
+    } = options || {};
+
+    // 根据是否需要时间戳选择字段
+    const selectFields = [
+      `${this.tableName}.key as "key"`,
+      `${this.tableName}.value as "value"`,
+    ];
+
+    if (includeTimestamps) {
+      selectFields.push(
+        `${this.tableName}.created_at as "created_at"`,
+        `${this.tableName}.updated_at as "updated_at"`,
+      );
+    }
+
+    // 使用范围查询 - 这是最高效的前缀搜索方式
+    // key >= 'prefix' AND key < 'prefix' + char(255)
+    // 这样可以充分利用主键的索引
+    const queryBuilder = this.db
+      .createQueryBuilder(this.tableName)
+      .select(selectFields)
+      .where(`${this.tableName}.key >= :startPrefix`, { startPrefix: prefix })
+      .andWhere(`${this.tableName}.key < :endPrefix`, {
+        endPrefix: prefix + String.fromCharCode(255), // 使用 char(255) 作为范围上限
+      })
+      .orderBy(`${this.tableName}.key`, orderBy);
+
+    if (limit !== undefined) {
+      queryBuilder.limit(limit);
+    }
+
+    if (offset !== undefined) {
+      queryBuilder.offset(offset);
+    }
+
+    try {
+      const results = await queryBuilder.getRawMany();
+
+      // 反序列化值并根据选项返回时间戳
+      return results.map((record) => {
+        const result: any = {
+          key: record.key,
+          value: this.typeHandler.deserialize(record.value),
+        };
+
+        if (includeTimestamps) {
+          result.created_at = record.created_at;
+          result.updated_at = record.updated_at;
+        }
+
+        return result;
+      });
+    } catch (error) {
+      console.error('getWithPrefix query error:', error);
+      throw error;
+    }
   }
 }

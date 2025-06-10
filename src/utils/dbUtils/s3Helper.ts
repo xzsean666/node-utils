@@ -1,4 +1,38 @@
 // 需要安装: pnpm add @aws-sdk/client-s3 @aws-sdk/s3-request-presigner
+//
+// S3Helper 使用示例:
+//
+// 1. 基本上传文件夹图片:
+//    await s3Helper.uploadFolderImages('/local/images', { s3Prefix: 'uploads/images' });
+//
+// 2. 限制搜索深度为2层:
+//    await s3Helper.uploadFolderImages('/local/images', { s3Prefix: 'uploads/images', depth: 2 });
+//
+// 3. 只搜索当前目录（不递归）:
+//    await s3Helper.uploadFolderImages('/local/images', { s3Prefix: 'uploads/images', depth: 0 });
+//
+// 4. 高级上传，包含详细的 UploadResult:
+//    const result = await s3Helper.uploadFolderImages('/local/images', {
+//      s3Prefix: 'uploads/images',
+//      depth: 1,
+//      advanced: true
+//    });
+//    console.log(`Uploaded: ${result.uploadedCount}, Cached: ${result.cachedCount}`);
+//
+// 5. 自定义 bucket 和上传选项:
+//    await s3Helper.uploadFolderImages('/local/images', {
+//      s3Prefix: 'uploads/images',
+//      bucket: 'my-custom-bucket',
+//      depth: 2,
+//      forceUpload: false,
+//      acl: 'public-read'
+//    });
+//
+// 6. 生成简化的签名URL（只包含objectName和downloadUrl）:
+//    await s3Helper.generateSignedUrlsToJson('./urls.json', {
+//      simplify: true,
+//      expiry: 7 * 24 * 60 * 60
+//    });
 import {
   S3Client,
   HeadBucketCommand,
@@ -101,6 +135,17 @@ export interface FileInfo {
   metadata?: Record<string, string>;
 }
 
+// 签名URL生成选项
+export interface GenerateUrlOptions {
+  bucket?: string;
+  prefix?: string;
+  expiry?: number; // 过期时间，单位秒
+  downloadUrls?: boolean; // 是否生成下载URL（默认true）
+  uploadUrls?: boolean; // 是否生成上传URL（默认false）
+  includeMetadata?: boolean; // 是否包含文件元数据（默认true）
+  simplify?: boolean; // 是否简化输出，只返回objectName和downloadUrl（默认false）
+}
+
 // S3 对象信息接口 (替代 minio 的 BucketItem)
 export interface S3Object {
   name?: string;
@@ -115,6 +160,41 @@ export interface S3Object {
 export interface BatchResult<T> {
   successful: T[];
   failed: Array<{ item: T; error: string }>;
+}
+
+// 文件夹上传选项
+export interface FolderUploadOptions extends UploadOptions {
+  s3Prefix?: string; // S3前缀路径
+  bucket?: string; // 目标bucket
+  depth?: number; // 搜索深度，-1 表示无限深度，0 表示只搜索当前目录，1 表示搜索当前目录及一级子目录
+  advanced?: boolean; // 是否返回详细的上传结果（包含 UploadResult）
+}
+
+// 文件夹上传结果（基础版）
+export interface FolderUploadResult {
+  successful: Array<{
+    localPath: string;
+    s3Key: string;
+    fileInfo: FileInfo;
+    wasUploaded: boolean;
+  }>;
+  failed: Array<{ localPath: string; error: string }>;
+  totalFiles: number;
+  uploadedCount: number;
+  cachedCount: number;
+}
+
+// 文件夹上传结果（高级版）
+export interface FolderUploadResultAdvanced {
+  successful: Array<{
+    localPath: string;
+    s3Key: string;
+    uploadResult: UploadResult;
+  }>;
+  failed: Array<{ localPath: string; error: string }>;
+  totalFiles: number;
+  uploadedCount: number;
+  cachedCount: number;
 }
 
 export class S3Helper {
@@ -1152,6 +1232,758 @@ export class S3Helper {
       );
     } catch (error: any) {
       throw new Error(`移除缓存条目失败: ${error.message}`);
+    }
+  }
+
+  // 上传文件夹中的所有图片（统一接口，支持基础和高级模式）
+  async uploadFolderImages(
+    localFolderPath: string,
+    options?: FolderUploadOptions,
+  ): Promise<FolderUploadResult | FolderUploadResultAdvanced> {
+    try {
+      // 支持的图片格式
+      const imageExtensions = [
+        '.jpg',
+        '.jpeg',
+        '.png',
+        '.gif',
+        '.bmp',
+        '.webp',
+        '.svg',
+        '.tiff',
+        '.ico',
+      ];
+
+      // 解构参数
+      const {
+        s3Prefix,
+        bucket,
+        depth,
+        advanced = false,
+        ...uploadOptions
+      } = options || {};
+
+      const successfulBasic: Array<{
+        localPath: string;
+        s3Key: string;
+        fileInfo: FileInfo;
+        wasUploaded: boolean;
+      }> = [];
+
+      const successfulAdvanced: Array<{
+        localPath: string;
+        s3Key: string;
+        uploadResult: UploadResult;
+      }> = [];
+
+      const failed: Array<{ localPath: string; error: string }> = [];
+
+      let uploadedCount = 0;
+      let cachedCount = 0;
+
+      // 默认深度为 -1（无限深度）
+      const searchDepth = depth ?? -1;
+
+      // 递归获取所有图片文件，支持深度控制
+      const getImageFiles = async (
+        dirPath: string,
+        basePath: string,
+        currentDepth: number = 0,
+      ): Promise<string[]> => {
+        const files: string[] = [];
+        const items = await fs.promises.readdir(dirPath, {
+          withFileTypes: true,
+        });
+
+        for (const item of items) {
+          const fullPath = `${dirPath}/${item.name}`;
+
+          if (item.isDirectory()) {
+            // 检查是否需要继续递归
+            // searchDepth === -1 表示无限深度
+            // currentDepth < searchDepth 表示还未达到指定深度
+            if (searchDepth === -1 || currentDepth < searchDepth) {
+              const subFiles = await getImageFiles(
+                fullPath,
+                basePath,
+                currentDepth + 1,
+              );
+              files.push(...subFiles);
+            }
+          } else if (item.isFile()) {
+            // 检查是否为图片文件
+            const ext = item.name
+              .toLowerCase()
+              .substring(item.name.lastIndexOf('.'));
+            if (imageExtensions.includes(ext)) {
+              files.push(fullPath);
+            }
+          }
+        }
+
+        return files;
+      };
+
+      // 获取所有图片文件
+      const imageFiles = await getImageFiles(
+        localFolderPath,
+        localFolderPath,
+        0,
+      );
+
+      console.log(
+        `Found ${imageFiles.length} image files to upload (depth: ${
+          searchDepth === -1 ? 'unlimited' : searchDepth
+        }, mode: ${advanced ? 'advanced' : 'basic'})`,
+      );
+
+      // 批量上传图片
+      for (const filePath of imageFiles) {
+        try {
+          // 生成S3对象名称
+          const relativePath = filePath
+            .replace(localFolderPath, '')
+            .replace(/^\/+/, '');
+          const s3Key = s3Prefix ? `${s3Prefix}/${relativePath}` : relativePath;
+
+          // 根据文件扩展名设置content type
+          const ext = filePath
+            .toLowerCase()
+            .substring(filePath.lastIndexOf('.'));
+          const contentTypeMap: Record<string, string> = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.gif': 'image/gif',
+            '.bmp': 'image/bmp',
+            '.webp': 'image/webp',
+            '.svg': 'image/svg+xml',
+            '.tiff': 'image/tiff',
+            '.ico': 'image/x-icon',
+          };
+
+          const finalUploadOptions: UploadOptions = {
+            ...uploadOptions,
+            contentType: contentTypeMap[ext] || 'application/octet-stream',
+          };
+
+          if (advanced) {
+            // 高级模式：使用 uploadFileAdvanced
+            const uploadResult = await this.uploadFileAdvanced(
+              s3Key,
+              filePath,
+              bucket,
+              finalUploadOptions,
+            );
+
+            successfulAdvanced.push({
+              localPath: filePath,
+              s3Key,
+              uploadResult,
+            });
+
+            if (uploadResult.wasUploaded) {
+              uploadedCount++;
+              console.log(`✓ Uploaded: ${filePath} -> ${s3Key}`);
+            } else {
+              cachedCount++;
+              console.log(
+                `⚡ Cached: ${filePath} -> ${uploadResult.objectName} (already exists)`,
+              );
+            }
+          } else {
+            // 基础模式：使用原有逻辑
+            let wasUploaded = true;
+            if (
+              this.isDuplicationCheckEnabled() &&
+              !uploadOptions?.forceUpload
+            ) {
+              // 计算文件MD5用于重复检查
+              const fileMD5 = await this.calculateFileMD5(filePath);
+              const existingObjectName = await this.checkDuplicate(fileMD5);
+
+              if (existingObjectName) {
+                // 验证文件是否仍然存在于S3中
+                try {
+                  const existingInfo = await this.getFileInfo(
+                    existingObjectName,
+                    bucket,
+                  );
+                  if (this.normalizeETag(existingInfo.etag) === fileMD5) {
+                    // 文件已存在且完整，跳过上传
+                    successfulBasic.push({
+                      localPath: filePath,
+                      s3Key: existingObjectName,
+                      fileInfo: existingInfo,
+                      wasUploaded: false,
+                    });
+                    cachedCount++;
+                    console.log(
+                      `⚡ Cached: ${filePath} -> ${existingObjectName} (already exists)`,
+                    );
+                    continue;
+                  }
+                } catch (error) {
+                  // 如果获取文件信息失败，可能文件已被删除，继续上传
+                  console.warn(
+                    `Cached file ${existingObjectName} not found, will upload ${filePath}`,
+                  );
+                }
+              }
+            }
+
+            const fileInfo = await this.uploadFile(
+              s3Key,
+              filePath,
+              bucket,
+              finalUploadOptions,
+            );
+
+            successfulBasic.push({
+              localPath: filePath,
+              s3Key,
+              fileInfo,
+              wasUploaded,
+            });
+            uploadedCount++;
+
+            console.log(`✓ Uploaded: ${filePath} -> ${s3Key}`);
+          }
+        } catch (error: any) {
+          failed.push({
+            localPath: filePath,
+            error: error.message,
+          });
+          console.error(`✗ Failed to upload: ${filePath} - ${error.message}`);
+        }
+      }
+
+      console.log(
+        `Upload summary: ${uploadedCount} uploaded, ${cachedCount} from cache, ${failed.length} failed`,
+      );
+
+      // 根据模式返回不同类型的结果
+      if (advanced) {
+        return {
+          successful: successfulAdvanced,
+          failed,
+          totalFiles: imageFiles.length,
+          uploadedCount,
+          cachedCount,
+        } as FolderUploadResultAdvanced;
+      } else {
+        return {
+          successful: successfulBasic,
+          failed,
+          totalFiles: imageFiles.length,
+          uploadedCount,
+          cachedCount,
+        } as FolderUploadResult;
+      }
+    } catch (error: any) {
+      throw new Error(`上传文件夹图片失败: ${error.message}`);
+    }
+  }
+
+  // 生成所有文件的signed URL并写入JSON文件（支持批处理和简化模式）
+  async generateSignedUrlsToJson(
+    outputJsonPath: string,
+    options?: GenerateUrlOptions & { batchSize?: number },
+  ): Promise<{
+    totalFiles: number;
+    successfulUrls: number;
+    failedUrls: number;
+    outputPath: string;
+  }> {
+    try {
+      const opts = {
+        downloadUrls: true,
+        uploadUrls: false,
+        includeMetadata: false,
+        simplify: true,
+        bucket: this.defaultBucket,
+        prefix: undefined,
+        expiry: 7 * 24 * 60 * 60,
+        batchSize: 100, // 默认批处理大小
+        ...options,
+      };
+
+      // 如果启用简化模式，强制设置相关选项
+      // if (opts.simplify) {
+      //   opts.downloadUrls = true;
+      //   opts.uploadUrls = false;
+      //   opts.includeMetadata = false;
+      // }
+
+      // 获取所有文件
+      const files = await this.listFiles(opts.prefix, opts.bucket, true);
+      const fileObjects = files.filter((f) => f.name && !f.name.endsWith('/'));
+
+      console.log(
+        `Found ${fileObjects.length} files to generate URLs for (batch size: ${opts.batchSize})`,
+      );
+
+      const results: Array<{
+        objectName: string;
+        downloadUrl?: string;
+        uploadUrl?: string;
+        metadata?: {
+          size?: number;
+          lastModified?: Date;
+          etag?: string;
+          contentType?: string;
+        };
+        error?: string;
+      }> = [];
+
+      let successfulUrls = 0;
+      let failedUrls = 0;
+
+      // 批处理函数
+      const processBatch = async (batch: typeof fileObjects) => {
+        const batchPromises = batch.map(async (file) => {
+          try {
+            const result: any = {
+              objectName: file.name,
+            };
+
+            // 简化模式：只生成下载URL
+            if (opts.simplify) {
+              try {
+                const downloadUrl = await this.getPresignedDownloadUrl(
+                  file.name!,
+                  opts.expiry,
+                  opts.bucket,
+                );
+                result.downloadUrl = downloadUrl;
+              } catch (error: any) {
+                result.error = error.message;
+              }
+              return result;
+            }
+
+            // 完整模式：并行执行所有操作
+            const operations: Promise<any>[] = [];
+
+            // 生成下载URL
+            if (opts.downloadUrls) {
+              operations.push(
+                this.getPresignedDownloadUrl(
+                  file.name!,
+                  opts.expiry,
+                  opts.bucket,
+                )
+                  .then((url) => ({ type: 'downloadUrl', value: url }))
+                  .catch((error) => ({
+                    type: 'downloadUrl',
+                    error: error.message,
+                  })),
+              );
+            }
+
+            // 生成上传URL
+            if (opts.uploadUrls) {
+              operations.push(
+                this.getPresignedUploadUrl(file.name!, opts.expiry, opts.bucket)
+                  .then((url) => ({ type: 'uploadUrl', value: url }))
+                  .catch((error) => ({
+                    type: 'uploadUrl',
+                    error: error.message,
+                  })),
+              );
+            }
+
+            // 获取文件元数据
+            if (opts.includeMetadata) {
+              operations.push(
+                this.getFileInfo(file.name!, opts.bucket)
+                  .then((fileInfo) => ({
+                    type: 'metadata',
+                    value: {
+                      size: fileInfo.size,
+                      lastModified: fileInfo.lastModified,
+                      etag: fileInfo.etag,
+                      contentType: fileInfo.contentType,
+                    },
+                  }))
+                  .catch((error) => ({
+                    type: 'metadata',
+                    error: error.message,
+                  })),
+              );
+            }
+
+            // 等待所有操作完成
+            const operationResults = await Promise.all(operations);
+            const errors: string[] = [];
+
+            // 处理结果
+            for (const opResult of operationResults) {
+              if (opResult.error) {
+                errors.push(`${opResult.type} failed: ${opResult.error}`);
+              } else {
+                if (opResult.type === 'downloadUrl') {
+                  result.downloadUrl = opResult.value;
+                } else if (opResult.type === 'uploadUrl') {
+                  result.uploadUrl = opResult.value;
+                } else if (opResult.type === 'metadata') {
+                  result.metadata = opResult.value;
+                }
+              }
+            }
+
+            if (errors.length > 0) {
+              result.error = errors.join('; ');
+            }
+
+            return result;
+          } catch (error: any) {
+            return {
+              objectName: file.name!,
+              error: error.message,
+            };
+          }
+        });
+
+        return await Promise.all(batchPromises);
+      };
+
+      // 分批处理文件
+      for (let i = 0; i < fileObjects.length; i += opts.batchSize) {
+        const batch = fileObjects.slice(i, i + opts.batchSize);
+        const batchNumber = Math.floor(i / opts.batchSize) + 1;
+        const totalBatches = Math.ceil(fileObjects.length / opts.batchSize);
+
+        console.log(
+          `Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)`,
+        );
+
+        try {
+          const batchResults = await processBatch(batch);
+
+          // 统计结果
+          for (const result of batchResults) {
+            if (result.error) {
+              failedUrls++;
+              console.error(
+                `✗ Failed to generate URLs for: ${result.objectName} - ${result.error}`,
+              );
+            } else {
+              successfulUrls++;
+              console.log(`✓ Generated URLs for: ${result.objectName}`);
+            }
+            results.push(result);
+          }
+        } catch (error: any) {
+          // 如果整个批次失败，将所有文件标记为失败
+          for (const file of batch) {
+            results.push({
+              objectName: file.name!,
+              error: `Batch processing failed: ${error.message}`,
+            });
+            failedUrls++;
+            console.error(
+              `✗ Batch failed for: ${file.name} - ${error.message}`,
+            );
+          }
+        }
+
+        // 显示进度
+        const processed = Math.min(i + opts.batchSize, fileObjects.length);
+        console.log(
+          `Progress: ${processed}/${fileObjects.length} files processed`,
+        );
+      }
+
+      // 创建完整的输出对象
+      const output = {
+        generatedAt: new Date().toISOString(),
+        bucket: this.getBucketName(opts.bucket),
+        prefix: opts.prefix || '',
+        expiry: opts.expiry,
+        batchSize: opts.batchSize,
+        options: opts,
+        summary: {
+          totalFiles: fileObjects.length,
+          successfulUrls,
+          failedUrls,
+        },
+        files: results,
+      };
+
+      // 写入JSON文件
+      await fs.promises.writeFile(
+        outputJsonPath,
+        JSON.stringify(output, null, 2),
+        'utf8',
+      );
+
+      console.log(`✓ Signed URLs written to: ${outputJsonPath}`);
+      console.log(
+        `📊 Final Summary: ${successfulUrls} successful, ${failedUrls} failed out of ${fileObjects.length} total files`,
+      );
+
+      return {
+        totalFiles: fileObjects.length,
+        successfulUrls,
+        failedUrls,
+        outputPath: outputJsonPath,
+      };
+    } catch (error: any) {
+      throw new Error(`生成签名URL到JSON文件失败: ${error.message}`);
+    }
+  }
+
+  // 批量生成特定文件列表的signed URL（支持批处理和简化模式）
+  async generateSignedUrlsForFiles(
+    objectNames: string[],
+    outputJsonPath: string,
+    options?: GenerateUrlOptions & { batchSize?: number },
+  ): Promise<{
+    totalFiles: number;
+    successfulUrls: number;
+    failedUrls: number;
+    outputPath: string;
+  }> {
+    try {
+      const opts = {
+        downloadUrls: true,
+        uploadUrls: false,
+        includeMetadata: true,
+        simplify: false,
+        bucket: this.defaultBucket,
+        expiry: 24 * 60 * 60,
+        batchSize: 25, // 默认批处理大小
+        ...options,
+      };
+
+      // 如果启用简化模式，强制设置相关选项
+      if (opts.simplify) {
+        opts.downloadUrls = true;
+        opts.uploadUrls = false;
+        opts.includeMetadata = false;
+      }
+
+      console.log(
+        `Generating URLs for ${objectNames.length} specified files (batch size: ${opts.batchSize})`,
+      );
+
+      const results: Array<{
+        objectName: string;
+        downloadUrl?: string;
+        uploadUrl?: string;
+        metadata?: {
+          size?: number;
+          lastModified?: Date;
+          etag?: string;
+          contentType?: string;
+        };
+        error?: string;
+      }> = [];
+
+      let successfulUrls = 0;
+      let failedUrls = 0;
+
+      // 批处理函数
+      const processBatch = async (batch: string[]) => {
+        const batchPromises = batch.map(async (objectName) => {
+          try {
+            const result: any = {
+              objectName,
+            };
+
+            // 首先检查文件是否存在
+            const exists = await this.fileExists(objectName, opts.bucket);
+            if (!exists) {
+              return {
+                objectName,
+                error: 'File does not exist',
+              };
+            }
+
+            // 简化模式：只生成下载URL
+            if (opts.simplify) {
+              try {
+                const downloadUrl = await this.getPresignedDownloadUrl(
+                  objectName,
+                  opts.expiry,
+                  opts.bucket,
+                );
+                result.downloadUrl = downloadUrl;
+              } catch (error: any) {
+                result.error = error.message;
+              }
+              return result;
+            }
+
+            // 完整模式：并行执行所有操作
+            const operations: Promise<any>[] = [];
+
+            // 生成下载URL
+            if (opts.downloadUrls) {
+              operations.push(
+                this.getPresignedDownloadUrl(
+                  objectName,
+                  opts.expiry,
+                  opts.bucket,
+                )
+                  .then((url) => ({ type: 'downloadUrl', value: url }))
+                  .catch((error) => ({
+                    type: 'downloadUrl',
+                    error: error.message,
+                  })),
+              );
+            }
+
+            // 生成上传URL
+            if (opts.uploadUrls) {
+              operations.push(
+                this.getPresignedUploadUrl(objectName, opts.expiry, opts.bucket)
+                  .then((url) => ({ type: 'uploadUrl', value: url }))
+                  .catch((error) => ({
+                    type: 'uploadUrl',
+                    error: error.message,
+                  })),
+              );
+            }
+
+            // 获取文件元数据
+            if (opts.includeMetadata) {
+              operations.push(
+                this.getFileInfo(objectName, opts.bucket)
+                  .then((fileInfo) => ({
+                    type: 'metadata',
+                    value: {
+                      size: fileInfo.size,
+                      lastModified: fileInfo.lastModified,
+                      etag: fileInfo.etag,
+                      contentType: fileInfo.contentType,
+                    },
+                  }))
+                  .catch((error) => ({
+                    type: 'metadata',
+                    error: error.message,
+                  })),
+              );
+            }
+
+            // 等待所有操作完成
+            const operationResults = await Promise.all(operations);
+            const errors: string[] = [];
+
+            // 处理结果
+            for (const opResult of operationResults) {
+              if (opResult.error) {
+                errors.push(`${opResult.type} failed: ${opResult.error}`);
+              } else {
+                if (opResult.type === 'downloadUrl') {
+                  result.downloadUrl = opResult.value;
+                } else if (opResult.type === 'uploadUrl') {
+                  result.uploadUrl = opResult.value;
+                } else if (opResult.type === 'metadata') {
+                  result.metadata = opResult.value;
+                }
+              }
+            }
+
+            if (errors.length > 0) {
+              result.error = errors.join('; ');
+            }
+
+            return result;
+          } catch (error: any) {
+            return {
+              objectName,
+              error: error.message,
+            };
+          }
+        });
+
+        return await Promise.all(batchPromises);
+      };
+
+      // 分批处理文件
+      for (let i = 0; i < objectNames.length; i += opts.batchSize) {
+        const batch = objectNames.slice(i, i + opts.batchSize);
+        const batchNumber = Math.floor(i / opts.batchSize) + 1;
+        const totalBatches = Math.ceil(objectNames.length / opts.batchSize);
+
+        console.log(
+          `Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)`,
+        );
+
+        try {
+          const batchResults = await processBatch(batch);
+
+          // 统计结果
+          for (const result of batchResults) {
+            if (result.error) {
+              failedUrls++;
+              console.error(
+                `✗ Failed to generate URLs for: ${result.objectName} - ${result.error}`,
+              );
+            } else {
+              successfulUrls++;
+              console.log(`✓ Generated URLs for: ${result.objectName}`);
+            }
+            results.push(result);
+          }
+        } catch (error: any) {
+          // 如果整个批次失败，将所有文件标记为失败
+          for (const objectName of batch) {
+            results.push({
+              objectName,
+              error: `Batch processing failed: ${error.message}`,
+            });
+            failedUrls++;
+            console.error(
+              `✗ Batch failed for: ${objectName} - ${error.message}`,
+            );
+          }
+        }
+
+        // 显示进度
+        const processed = Math.min(i + opts.batchSize, objectNames.length);
+        console.log(
+          `Progress: ${processed}/${objectNames.length} files processed`,
+        );
+      }
+
+      // 创建完整的输出对象
+      const output = {
+        generatedAt: new Date().toISOString(),
+        bucket: this.getBucketName(opts.bucket),
+        expiry: opts.expiry,
+        batchSize: opts.batchSize,
+        options: opts,
+        summary: {
+          totalFiles: objectNames.length,
+          successfulUrls,
+          failedUrls,
+        },
+        files: results,
+      };
+
+      // 写入JSON文件
+      await fs.promises.writeFile(
+        outputJsonPath,
+        JSON.stringify(output, null, 2),
+        'utf8',
+      );
+
+      console.log(`✓ Signed URLs written to: ${outputJsonPath}`);
+      console.log(
+        `📊 Final Summary: ${successfulUrls} successful, ${failedUrls} failed out of ${objectNames.length} total files`,
+      );
+
+      return {
+        totalFiles: objectNames.length,
+        successfulUrls,
+        failedUrls,
+        outputPath: outputJsonPath,
+      };
+    } catch (error: any) {
+      throw new Error(`生成指定文件签名URL失败: ${error.message}`);
     }
   }
 }

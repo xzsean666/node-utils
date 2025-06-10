@@ -14,31 +14,38 @@ async function awsSDKExamples() {
     process.env.CLOUDFLARE_R2_ACCESS_KEY_ID || 'your-access-key',
     process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY || 'your-secret-key',
     process.env.CLOUDFLARE_ACCOUNT_ID || 'your-account-id',
-    'pgbackup',
+    'arts400',
     kvdb,
   );
 
   try {
     // 使用 AWS S3 进行演示
     // 上传 JSON 数据
-    const jsonData = {
-      message: 'Hello from S3Helper with AWS SDK v3 7779',
-      features: [
-        'Multi-provider support',
-        'TypeScript support',
-        'Batch operations',
-        'Presigned URLs',
-      ],
-    };
-    const res = await awsS3.uploadBufferGzip(
-      'data12.json',
-      Buffer.from(JSON.stringify(jsonData, null, 2), 'utf-8'),
-    );
-    console.log(res);
+    // const jsonData = {
+    //   message: 'Hello from S3Helper with AWS SDK v3 7779',
+    //   features: [
+    //     'Multi-provider support',
+    //     'TypeScript support',
+    //     'Batch operations',
+    //     'Presigned URLs',
+    //   ],
+    // };
+    // const res = await awsS3.uploadBufferGzip(
+    //   'data12.json',
+    //   Buffer.from(JSON.stringify(jsonData, null, 2), 'utf-8'),
+    // );
+    // console.log(res);
     // const res = await awsS3.getObjectETag('data1.json');
     // console.log(res);
     // const res2 = await awsS3.getPresignedDownloadUrl('data1.json');
     // console.log(res2);
+    // const uploadPath = '/media/sean/901996121CEB8E14/arts_converted';
+    // const res = await awsS3.uploadFolderImages(uploadPath);
+    // console.log(res);
+    const res = await awsS3.generateSignedUrlsToJson(
+      'src/utils/dbUtils/exmaples/arts_converted.json',
+    );
+    console.log(res);
   } catch (error) {
     console.error('❌ 演示过程中出现错误:', error);
   }

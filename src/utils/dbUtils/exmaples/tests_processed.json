@@ -1,0 +1,150 @@
+{
+  "generatedAt": "2025-06-06T06:48:29.237Z",
+  "bucket": "arts400",
+  "prefix": "",
+  "expiry": 604800,
+  "options": {
+    "downloadUrls": true,
+    "uploadUrls": false,
+    "includeMetadata": true,
+    "bucket": "arts400",
+    "expiry": 604800
+  },
+  "summary": {
+    "totalFiles": 13,
+    "successfulUrls": 13,
+    "failedUrls": 0
+  },
+  "files": [
+    {
+      "objectName": "Aaron Douglas - Study for Aspects of Negro Life An Idyll of the Deep South, 1934.jpg",
+      "downloadUrl": "https://151172ef838f73d5928d316f0f01fba7.r2.cloudflarestorage.com/arts400/Aaron%20Douglas%20-%20Study%20for%20Aspects%20of%20Negro%20Life%20An%20Idyll%20of%20the%20Deep%20South%2C%201934.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=8340f7af82f169891400b8b1a5618ace%2F20250606%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250606T064823Z&X-Amz-Expires=604800&X-Amz-Signature=5c3367ae2fdaede2bdf14138883eecdf0a7b9d0a8086d0db3c5a3fa03508b47c&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+      "metadata": {
+        "size": 20898,
+        "lastModified": "2025-06-06T06:25:23.000Z",
+        "etag": "6d6d58cef15865febe4c3a1b135abf64",
+        "contentType": "image/jpeg"
+      }
+    },
+    {
+      "objectName": "Abraham Janssens - Diana and Her Companions with Trophies of the Hunt, 1609 - 1612.jpg",
+      "downloadUrl": "https://151172ef838f73d5928d316f0f01fba7.r2.cloudflarestorage.com/arts400/Abraham%20Janssens%20-%20Diana%20and%20Her%20Companions%20with%20Trophies%20of%20the%20Hunt%2C%201609%20-%201612.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=8340f7af82f169891400b8b1a5618ace%2F20250606%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250606T064823Z&X-Amz-Expires=604800&X-Amz-Signature=9c658c558ec37c637f1556689a75cf9b4868d6c6f3e5656d95ca5b062265a790&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+      "metadata": {
+        "size": 31403,
+        "lastModified": "2025-06-06T06:25:24.000Z",
+        "etag": "e5b9c8e61c64b06e4a9d4b9518131296",
+        "contentType": "image/jpeg"
+      }
+    },
+    {
+      "objectName": "Adelaide Labille-Guiard - Portrait of Joachim Le Breton, 1795.jpg",
+      "downloadUrl": "https://151172ef838f73d5928d316f0f01fba7.r2.cloudflarestorage.com/arts400/Adelaide%20Labille-Guiard%20-%20Portrait%20of%20Joachim%20Le%20Breton%2C%201795.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=8340f7af82f169891400b8b1a5618ace%2F20250606%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250606T064824Z&X-Amz-Expires=604800&X-Amz-Signature=e486b0557791a9d2ba374966bc6c8c03dc68b87e8f9c0de2035ed3073d47dbf4&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+      "metadata": {
+        "size": 19395,
+        "lastModified": "2025-06-06T06:25:26.000Z",
+        "etag": "d77f63e5f51f880a5e3680d7637c495e",
+        "contentType": "image/jpeg"
+      }
+    },
+    {
+      "objectName": "Adolf Schreyer - Arab Horsemen, ca. 1860s.jpg",
+      "downloadUrl": "https://151172ef838f73d5928d316f0f01fba7.r2.cloudflarestorage.com/arts400/Adolf%20Schreyer%20-%20Arab%20Horsemen%2C%20ca.%201860s.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=8340f7af82f169891400b8b1a5618ace%2F20250606%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250606T064824Z&X-Amz-Expires=604800&X-Amz-Signature=472700dd1cd4af95144a105e675b15671b772c271f747fd979788804ea3123f7&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+      "metadata": {
+        "size": 31180,
+        "lastModified": "2025-06-06T06:25:27.000Z",
+        "etag": "5fc5cb34baa7ec8bf1a4cfab24835da7",
+        "contentType": "image/jpeg"
+      }
+    },
+    {
+      "objectName": "Adolphe William Bouguereau - Italian Woman at the Fountain, 1869.jpg",
+      "downloadUrl": "https://151172ef838f73d5928d316f0f01fba7.r2.cloudflarestorage.com/arts400/Adolphe%20William%20Bouguereau%20-%20Italian%20Woman%20at%20the%20Fountain%2C%201869.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=8340f7af82f169891400b8b1a5618ace%2F20250606%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250606T064825Z&X-Amz-Expires=604800&X-Amz-Signature=223643e60fb9eb9cfc5bcb63d8a02f2e0146a7fe80edc3066059fccc72103e89&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+      "metadata": {
+        "size": 21380,
+        "lastModified": "2025-06-06T06:25:28.000Z",
+        "etag": "0442d47c70ae5a607c5dd6c868a8ee38",
+        "contentType": "image/jpeg"
+      }
+    },
+    {
+      "objectName": "Adriaen Hanneman - Portrait of a Nobleman, ca. 1655.jpg",
+      "downloadUrl": "https://151172ef838f73d5928d316f0f01fba7.r2.cloudflarestorage.com/arts400/Adriaen%20Hanneman%20-%20Portrait%20of%20a%20Nobleman%2C%20ca.%201655.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=8340f7af82f169891400b8b1a5618ace%2F20250606%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250606T064825Z&X-Amz-Expires=604800&X-Amz-Signature=2cce0511e0802e183c5a60265bfa704ca4def15dea8b40ddec047ce2afcc0fa9&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+      "metadata": {
+        "size": 12897,
+        "lastModified": "2025-06-06T06:25:29.000Z",
+        "etag": "5222a5a51b726baa08eb080fc833c0e8",
+        "contentType": "image/jpeg"
+      }
+    },
+    {
+      "objectName": "Agnolo di Cosimo di Mariano (Bronzino) - Portrait of a Young Man, 1550-1555.jpg",
+      "downloadUrl": "https://151172ef838f73d5928d316f0f01fba7.r2.cloudflarestorage.com/arts400/Agnolo%20di%20Cosimo%20di%20Mariano%20%28Bronzino%29%20-%20Portrait%20of%20a%20Young%20Man%2C%201550-1555.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=8340f7af82f169891400b8b1a5618ace%2F20250606%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250606T064826Z&X-Amz-Expires=604800&X-Amz-Signature=e2343b4718ddbf237d453c700abff37d176ece0eb3f1827982ea092bcec43c2d&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+      "metadata": {
+        "size": 12585,
+        "lastModified": "2025-06-06T06:25:31.000Z",
+        "etag": "2ef7fe66077596cbeb357625904326f7",
+        "contentType": "image/jpeg"
+      }
+    },
+    {
+      "objectName": "Albert Bierstadt - Falls of Yosemite, ca. 1880s.jpg",
+      "downloadUrl": "https://151172ef838f73d5928d316f0f01fba7.r2.cloudflarestorage.com/arts400/Albert%20Bierstadt%20-%20Falls%20of%20Yosemite%2C%20ca.%201880s.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=8340f7af82f169891400b8b1a5618ace%2F20250606%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250606T064826Z&X-Amz-Expires=604800&X-Amz-Signature=5847155b2b44cabd22e3573f6e25aad419aa44889675fc616bf0dc947eea1c07&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+      "metadata": {
+        "size": 24977,
+        "lastModified": "2025-06-06T06:25:32.000Z",
+        "etag": "cc7602f626d952552cb9c9d3d61f2b8c",
+        "contentType": "image/jpeg"
+      }
+    },
+    {
+      "objectName": "Albert Bierstadt - Farallon Islands, Pacific Ocean, California, 1872.jpg",
+      "downloadUrl": "https://151172ef838f73d5928d316f0f01fba7.r2.cloudflarestorage.com/arts400/Albert%20Bierstadt%20-%20Farallon%20Islands%2C%20Pacific%20Ocean%2C%20California%2C%201872.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=8340f7af82f169891400b8b1a5618ace%2F20250606%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250606T064826Z&X-Amz-Expires=604800&X-Amz-Signature=dac49793cc26836cb798c8fc7350870bff7628b25686c227b7767136ca205e31&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+      "metadata": {
+        "size": 23089,
+        "lastModified": "2025-06-06T06:25:33.000Z",
+        "etag": "60a959ebe465bfe6b53e9da667304a69",
+        "contentType": "image/jpeg"
+      }
+    },
+    {
+      "objectName": "Albert Bloch - Composition Red and Blue, 1926.jpg",
+      "downloadUrl": "https://151172ef838f73d5928d316f0f01fba7.r2.cloudflarestorage.com/arts400/Albert%20Bloch%20-%20Composition%20Red%20and%20Blue%2C%201926.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=8340f7af82f169891400b8b1a5618ace%2F20250606%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250606T064827Z&X-Amz-Expires=604800&X-Amz-Signature=92b778977f82dd507c8bd26cc7ec4914ac06bc4fc170887c3304c5ada7a6c5b8&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+      "metadata": {
+        "size": 29264,
+        "lastModified": "2025-06-06T06:25:34.000Z",
+        "etag": "1266cbdb5dcc50c354b1f539c5f692e4",
+        "contentType": "image/jpeg"
+      }
+    },
+    {
+      "objectName": "Albert Bloch - Die drei Pierrots Nr. 2 (The Three Pierrots No. 2), 1911.jpg",
+      "downloadUrl": "https://151172ef838f73d5928d316f0f01fba7.r2.cloudflarestorage.com/arts400/Albert%20Bloch%20-%20Die%20drei%20Pierrots%20Nr.%202%20%28The%20Three%20Pierrots%20No.%202%29%2C%201911.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=8340f7af82f169891400b8b1a5618ace%2F20250606%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250606T064827Z&X-Amz-Expires=604800&X-Amz-Signature=3dc331bbc0664fcf03f18bcdf9e1abae6435c5511d866065fb7468fa65e61fd9&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+      "metadata": {
+        "size": 26814,
+        "lastModified": "2025-06-06T06:25:35.000Z",
+        "etag": "8220a938125cb85f2b04b109c66f3f6b",
+        "contentType": "image/jpeg"
+      }
+    },
+    {
+      "objectName": "Albert Bloch - Klagelied (Lamentation), 1912-1913.jpg",
+      "downloadUrl": "https://151172ef838f73d5928d316f0f01fba7.r2.cloudflarestorage.com/arts400/Albert%20Bloch%20-%20Klagelied%20%28Lamentation%29%2C%201912-1913.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=8340f7af82f169891400b8b1a5618ace%2F20250606%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250606T064828Z&X-Amz-Expires=604800&X-Amz-Signature=1c5a79ba29bc609b91c864ffd2597526004c99695fffd938b82abc130ae5e314&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+      "metadata": {
+        "size": 20030,
+        "lastModified": "2025-06-06T06:25:37.000Z",
+        "etag": "ccd21d0cb397fbbf6f172590a79413c3",
+        "contentType": "image/jpeg"
+      }
+    },
+    {
+      "objectName": "Albert Bloch - The Green Domino, 1913.jpg",
+      "downloadUrl": "https://151172ef838f73d5928d316f0f01fba7.r2.cloudflarestorage.com/arts400/Albert%20Bloch%20-%20The%20Green%20Domino%2C%201913.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=8340f7af82f169891400b8b1a5618ace%2F20250606%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250606T064828Z&X-Amz-Expires=604800&X-Amz-Signature=c72f80e9f4f960ed29335c7763f5b87f94bad472fe40719405f94ac334728bfa&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+      "metadata": {
+        "size": 26713,
+        "lastModified": "2025-06-06T06:25:38.000Z",
+        "etag": "3f21c407404a720718cbae1995c4e4ee",
+        "contentType": "image/jpeg"
+      }
+    }
+  ]
+}

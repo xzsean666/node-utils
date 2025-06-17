@@ -9,7 +9,7 @@
 - **`jsonb`** - JSON 二进制格式（默认）- 支持所有高级功能
 - **`varchar`** - 可变长度字符串（最大 255 字符）
 - **`text`** - 无限长度文本
-- **`integer`** - 32位整数
+- **`integer`** - 32 位整数
 - **`boolean`** - 布尔值
 - **`float`** - 浮点数
 - **`bytea`** - 二进制数据类型，用于存储 BLOB 数据
@@ -23,7 +23,11 @@ import { PGKVDatabase, ValueType } from './KVPostgresql';
 const jsonbDB = new PGKVDatabase('postgresql://...', 'json_store', 'jsonb');
 
 // VARCHAR 类型 - 基本字符串操作
-const stringDB = new PGKVDatabase('postgresql://...', 'string_store', 'varchar');
+const stringDB = new PGKVDatabase(
+  'postgresql://...',
+  'string_store',
+  'varchar',
+);
 
 // INTEGER 类型 - 数值操作
 const intDB = new PGKVDatabase('postgresql://...', 'int_store', 'integer');
@@ -37,21 +41,21 @@ const blobDB = new PGKVDatabase('postgresql://...', 'blob_store', 'bytea');
 
 ## 功能支持矩阵
 
-| 操作 | JSONB | VARCHAR | TEXT | INTEGER | BOOLEAN | FLOAT | BYTEA |
-|------|-------|---------|------|---------|---------|-------|-------|
-| `put/get/delete` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `add/has/keys` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `putMany/deleteMany` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `getAll/count/clear` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `searchByTime` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `getRandomData` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `merge` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| `searchJson` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| `searchJsonByTime` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| `findBoolValues` | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| `saveArray`* | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ |
+| 操作                 | JSONB | VARCHAR | TEXT | INTEGER | BOOLEAN | FLOAT | BYTEA |
+| -------------------- | ----- | ------- | ---- | ------- | ------- | ----- | ----- |
+| `put/get/delete`     | ✅    | ✅      | ✅   | ✅      | ✅      | ✅    | ✅    |
+| `add/has/keys`       | ✅    | ✅      | ✅   | ✅      | ✅      | ✅    | ✅    |
+| `putMany/deleteMany` | ✅    | ✅      | ✅   | ✅      | ✅      | ✅    | ✅    |
+| `getAll/count/clear` | ✅    | ✅      | ✅   | ✅      | ✅      | ✅    | ✅    |
+| `searchByTime`       | ✅    | ✅      | ✅   | ✅      | ✅      | ✅    | ✅    |
+| `getRandomData`      | ✅    | ✅      | ✅   | ✅      | ✅      | ✅    | ✅    |
+| `merge`              | ✅    | ❌      | ❌   | ❌      | ❌      | ❌    | ❌    |
+| `searchJson`         | ✅    | ❌      | ❌   | ❌      | ❌      | ❌    | ❌    |
+| `searchJsonByTime`   | ✅    | ❌      | ❌   | ❌      | ❌      | ❌    | ❌    |
+| `findBoolValues`     | ✅    | ❌      | ❌   | ❌      | ✅      | ❌    | ❌    |
+| `saveArray`\*        | ✅    | ⚠️      | ⚠️   | ⚠️      | ⚠️      | ⚠️    | ⚠️    |
 
-*⚠️ 表示提供基本支持，但针对 JSONB 优化
+\*⚠️ 表示提供基本支持，但针对 JSONB 优化
 
 ## 类型检查
 
@@ -72,21 +76,21 @@ console.log(db.isOperationSupported('put')); // true
 const db = new PGKVDatabase(url, 'json_store', 'jsonb');
 
 // 存储复杂对象
-await db.put('user:1', { 
-  name: 'John', 
-  age: 30, 
-  preferences: { theme: 'dark' }
+await db.put('user:1', {
+  name: 'John',
+  age: 30,
+  preferences: { theme: 'dark' },
 });
 
 // 合并更新
-await db.merge('user:1', { 
-  age: 31, 
-  preferences: { language: 'en' }
+await db.merge('user:1', {
+  age: 31,
+  preferences: { language: 'en' },
 });
 
 // JSON 搜索
 const results = await db.searchJson({
-  contains: { name: 'John' }
+  contains: { name: 'John' },
 });
 
 // 数组操作
@@ -164,6 +168,7 @@ await db.putMany([
 ```
 
 **BYTEA 类型注意事项：**
+
 - 自动将字符串转换为 Buffer（UTF-8 编码）
 - 自动将 Uint8Array 转换为 Buffer
 - 其他类型会先 JSON 序列化再转为 Buffer
@@ -186,7 +191,7 @@ const db = new PGKVDatabase(url, 'string_store', 'varchar');
 try {
   await db.merge('key', { data: 'value' }); // 抛出错误
 } catch (error) {
-  console.error(error.message); 
+  console.error(error.message);
   // "Operation 'merge' is not supported for value type 'varchar'"
 }
 ```
@@ -213,5 +218,6 @@ try {
 ## 完整示例
 
 参见以下文件：
+
 - `postgresql-examples.ts` - 所有值类型的详细使用示例
-- `bytea-test.ts` - BYTEA 类型的专门测试示例 
+- `bytea-test.ts` - BYTEA 类型的专门测试示例

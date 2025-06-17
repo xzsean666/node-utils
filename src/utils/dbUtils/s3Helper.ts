@@ -1749,7 +1749,7 @@ export class S3Helper {
       const opts = {
         downloadUrls: true,
         uploadUrls: false,
-        includeMetadata: true,
+        includeMetadata: false,
         simplify: false,
         bucket: this.defaultBucket,
         expiry: 24 * 60 * 60,

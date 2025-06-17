@@ -57,6 +57,7 @@
     "reflect-metadata": "^0.2.2",
     "socket.io-client": "^4.8.1",
     "sqlite3": "^5.1.7",
+    "telegram": "^2.26.22",
     "ts-jest": "^29.2.5",
     "typeorm": "^0.3.20",
     "typescript": "^5.7.2",
@@ -73,10 +74,13 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "@tensorflow/tfjs-node",
+      "bufferutil",
       "core-js",
+      "es5-ext",
       "keccak",
       "secp256k1",
-      "sqlite3"
+      "sqlite3",
+      "utf-8-validate"
     ]
   }
 }

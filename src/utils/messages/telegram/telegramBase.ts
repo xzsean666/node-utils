@@ -368,7 +368,7 @@ export class TelegramJSBase {
     } = {},
   ): Promise<Api.Message[]> {
     const messages = await this.client.getMessages(entity, {
-      limit: options.limit || 100,
+      limit: options.limit || 10,
       offsetId: options.offsetId,
       minId: options.minId,
       maxId: options.maxId,

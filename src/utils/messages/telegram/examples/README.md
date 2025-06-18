@@ -1,6 +1,150 @@
-# GramJSBase 使用示例
+# Telegram 客户端使用示例
 
-这个目录包含了 GramJSBase 类的完整使用示例，展示了如何使用两步认证 API、发送消息、文件传输等功能。
+本目录包含了 Telegram 消息处理的各种示例代码，展示了如何使用 `TelegramJSBase` (GramJS) 和 `TelegramBotBase` (Grammy) 进行 Telegram 开发。
+
+## 主要类说明
+
+### TelegramJSBase
+
+- 基于 `telegram` (GramJS) 库
+- 支持用户账户登录 (需要 API ID/Hash)
+- 可以访问完整的 Telegram API
+- 适合需要高级功能的应用
+
+### TelegramBotBase
+
+- 基于 `grammy` 库
+- 支持 Bot Token 登录
+- 使用 Telegram Bot API
+- 适合标准的机器人应用
+
+## 🔄 类同步说明
+
+两个类现在具有一致的接口，主要同步的方法包括：
+
+### 共同方法
+
+| 方法             | TelegramJSBase | TelegramBotBase | 说明                           |
+| ---------------- | -------------- | --------------- | ------------------------------ |
+| `onMessage()`    | ✅             | ✅              | 消息事件处理器，支持多个处理器 |
+| `getMessages()`  | ✅             | ✅              | 获取历史消息                   |
+| `sendMessage()`  | ✅             | ✅              | 发送文本消息                   |
+| `sendFile()`     | ✅             | ✅              | 发送文件                       |
+| `connect()`      | ✅             | ✅              | 连接客户端                     |
+| `disconnect()`   | ✅             | ✅              | 断开连接                       |
+| `getUserInfo()`  | ✅             | ✅              | 获取用户信息                   |
+| `isAuthorized()` | ✅             | ✅              | 检查授权状态                   |
+
+### 消息处理器同步
+
+两个类现在都支持相同的消息处理模式：
+
+```typescript
+// TelegramJSBase
+client.onMessage(async (event: NewMessageEvent) => {
+  // 处理消息
+});
+
+// TelegramBotBase
+bot.onMessage(async (ctx: BaseContext) => {
+  // 处理消息
+});
+```
+
+两者都支持：
+
+- 多个消息处理器
+- 错误处理机制
+- 自动用户信息更新
+
+## 示例文件
+
+### 1. `onMessage-with-getMessages-example.ts`
+
+完整的示例文件，展示了：
+
+- **示例 0**: `TelegramBotBase` 的使用方法
+- **示例 1**: `TelegramJSBase` 的基础用法
+- **示例 2-3**: 高级消息处理器
+
+### 2. `grammy-base-example.ts`
+
+Grammy (Bot API) 的基础使用示例
+
+### 3. `gramjs-base-example.ts`
+
+GramJS (User API) 的基础使用示例
+
+### 4. `simple-usage-example.ts`
+
+最简单的使用示例
+
+## 使用指南
+
+### 启动示例
+
+```bash
+# 使用 TelegramBotBase (Bot API)
+npx ts-node onMessage-with-getMessages-example.ts 0
+
+# 使用 TelegramJSBase (User API) - 基础用法
+npx ts-node onMessage-with-getMessages-example.ts 1
+
+# 使用 TelegramJSBase (User API) - 高级用法
+npx ts-node onMessage-with-getMessages-example.ts 2
+```
+
+### 配置参数
+
+在使用前，请在示例文件中配置：
+
+```typescript
+const config = {
+  apiId: 12968078, // 从 https://my.telegram.org/apps 获取
+  apiHash: 'your_api_hash', // 从 https://my.telegram.org/apps 获取
+  sessionString: 'your_session_string', // TelegramJSBase 的会话字符串
+  proxy: 'http://127.0.0.1:7897', // 可选的代理设置
+  botToken: 'your_bot_token', // TelegramBotBase 的 Bot Token
+};
+```
+
+## API 差异说明
+
+### getMessages 方法
+
+- **TelegramJSBase**: 可以获取任意数量的历史消息，支持复杂的查询参数
+- **TelegramBotBase**: 受 Bot API 限制，主要通过 `getUpdates` 实现，功能相对有限
+
+### 文件发送
+
+- **TelegramJSBase**: 支持直接发送本地文件、Buffer、URL
+- **TelegramBotBase**: 支持文件路径、URL、Buffer，使用 `InputFile` 处理
+
+### 用户信息
+
+- **TelegramJSBase**: 可以获取完整的用户账户信息
+- **TelegramBotBase**: 只能获取机器人的基本信息
+
+## 最佳实践
+
+1. **选择合适的类**:
+
+   - 需要访问用户消息历史 → `TelegramJSBase`
+   - 标准机器人功能 → `TelegramBotBase`
+
+2. **错误处理**:
+
+   - 两个类都内置了错误处理机制
+   - 建议在消息处理器中添加 try-catch
+
+3. **性能考虑**:
+
+   - `getMessages` 操作可能较慢，建议限制数量
+   - 避免在高频消息中进行大量历史查询
+
+4. **代理使用**:
+   - 两个类都支持代理配置
+   - `TelegramJSBase` 支持更多代理类型 (SOCKS4/5, MTProxy)
 
 ## 📂 文件说明
 

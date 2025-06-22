@@ -6,9 +6,16 @@
   "author": "sean-astrid <xz_sean@qq.com>",
   "license": "MIT",
   "devDependencies": {
+    "@eslint/js": "^9.29.0",
     "@types/minio": "^7.1.1",
     "@types/node": "^22.10.2",
-    "@types/ws": "^8.5.10"
+    "@types/ws": "^8.5.10",
+    "eslint": "^9.29.0",
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-plugin-prettier": "^5.5.0",
+    "globals": "^16.2.0",
+    "prettier": "^3.5.3",
+    "typescript-eslint": "^8.34.1"
   },
   "scripts": {
     "clean": "rm -rf dist",

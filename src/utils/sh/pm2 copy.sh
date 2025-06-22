@@ -102,22 +102,10 @@ read_env_vars() {
 # Function to build PM2 start command
 build_pm2_command() {
     local app_name="$1"
-    local app_path="$2"
-    local cmd="pm2 start \"$app_path\" --name \"$app_name\""
+    local cmd="pm2 start dist/main.js --name \"$app_name\""
     
-    # 根据实例数选择模式
-    if [ "$PM2_INSTANCES" = "1" ]; then
-        # 单实例使用 fork 模式（不添加 -i 参数）
-        echo "使用 Fork 模式 (单进程)" >&2
-    else
-        # 多实例使用 cluster 模式
-        cmd="$cmd -i $PM2_INSTANCES"
-        if [ "$PM2_INSTANCES" = "max" ]; then
-            echo "使用 Cluster 模式 (最大CPU核心数)" >&2
-        else
-            echo "使用 Cluster 模式 (${PM2_INSTANCES}个进程)" >&2
-        fi
-    fi
+    # Add instances parameter (-i)
+    cmd="$cmd -i $PM2_INSTANCES"
     
     # Add node arguments
     cmd="$cmd --node-args=\"--max-old-space-size=${PM2_MAX_MEMORY%M}\""
@@ -141,51 +129,15 @@ build_pm2_command() {
     echo "$cmd"
 }
 
-# Parse command line arguments
-BUILD_FLAG=false
-COMMAND=""
-APP_PATH="dist/main.js"  # Default path
-
-# Parse arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --start|--stop|--restart|--status)
-            COMMAND="$1"
-            shift
-            ;;
-        --build)
-            BUILD_FLAG=true
-            shift
-            ;;
-        --path)
-            if [[ -n "$2" && "$2" != --* ]]; then
-                APP_PATH="$2"
-                shift 2
-            else
-                echo "错误：--path 参数需要指定路径值"
-                exit 1
-            fi
-            ;;
-        *)
-            echo "未知参数: $1"
-            exit 1
-            ;;
-    esac
-done
-
 # Check if parameters are provided
-if [ -z "$COMMAND" ]; then
+if [ $# -eq 0 ]; then
     echo "请提供参数: --start 或 --stop 或 --restart 或 --status"
     echo ""
     echo "用法:"
-    echo "  $0 --start                       启动应用 (不构建)"
-    echo "  $0 --start --build               启动应用 (先构建)"
-    echo "  $0 --start --path <文件路径>      启动指定路径的应用"
-    echo "  $0 --start --build --path <路径>  构建并启动指定路径的应用"
-    echo "  $0 --stop                        停止应用"
-    echo "  $0 --restart                     重启应用 (不构建，除非应用文件不存在)"
-    echo "  $0 --restart --build             重启应用 (强制构建)"
-    echo "  $0 --status                      查看应用状态"
+    echo "  $0 --start    启动应用"
+    echo "  $0 --stop     停止应用"
+    echo "  $0 --restart  重启应用"
+    echo "  $0 --status   查看应用状态"
     echo ""
     echo "支持的 .env 配置:"
     echo "  PORT=3000                    # 应用端口"
@@ -206,7 +158,7 @@ APP_NAME_FILE="app.name"
 # Read environment variables
 read_env_vars
 
-case "$COMMAND" in
+case "$1" in
     --start)
         # Check and install pm2
         check_and_install_pm2
@@ -235,25 +187,18 @@ case "$COMMAND" in
             fi
         fi
 
-        # Run build command if --build flag is provided
-        if [ "$BUILD_FLAG" = true ]; then
-            echo "运行 npm run build..."
-            npm run build
-            if [ $? -ne 0 ]; then
-                echo "构建失败，启动终止。"
-                exit 1
-            fi
-            echo "构建完成。"
+        # Run build command
+        echo "运行 npm run build..."
+        npm run build
+        if [ $? -ne 0 ]; then
+            echo "构建失败，启动终止。"
+            exit 1
         fi
+        echo "构建完成。"
 
-        # Check if app file exists
-        if [ ! -f "$APP_PATH" ]; then
-            if [ "$BUILD_FLAG" = true ]; then
-                echo "错误：找不到应用文件 $APP_PATH，请确保构建成功。"
-            else
-                echo "错误：找不到应用文件 $APP_PATH，请先构建项目或使用 --build 参数。"
-                echo "使用方法: $0 --start --build --path $APP_PATH"
-            fi
+        # Check if dist/main.js exists
+        if [ ! -f "dist/main.js" ]; then
+            echo "错误：找不到 dist/main.js 文件，请确保构建成功。"
             exit 1
         fi
 
@@ -264,14 +209,13 @@ case "$COMMAND" in
         echo "应用名称已记录到 $APP_NAME_FILE: $APP_NAME"
 
         # Build and execute PM2 command
-        PM2_CMD=$(build_pm2_command "$APP_NAME" "$APP_PATH")
+        PM2_CMD=$(build_pm2_command "$APP_NAME")
         echo "执行命令: $PM2_CMD"
         eval "$PM2_CMD"
         
         if [ $? -eq 0 ]; then
             echo "Nest.js 应用已使用 pm2 启动："
             echo "  名称: $APP_NAME"
-            echo "  文件路径: $APP_PATH"
             echo "  端口: $PORT"
             echo "  实例数: $PM2_INSTANCES"
             echo "  环境: $NODE_ENV"
@@ -335,22 +279,18 @@ case "$COMMAND" in
              exit 1
         fi
 
-        # Run build command if --build flag is provided or if app file doesn't exist
-        if [ "$BUILD_FLAG" = true ] || [ ! -f "$APP_PATH" ]; then
-            echo "运行 npm run build..."
-            npm run build
-            if [ $? -ne 0 ]; then
-                echo "构建失败，重启终止。"
-                exit 1
-            fi
-            echo "构建完成。"
-        else
-            echo "跳过构建步骤（使用 --build 参数强制构建）"
+        # Run build command
+        echo "运行 npm run build..."
+        npm run build
+        if [ $? -ne 0 ]; then
+            echo "构建失败，重启终止。"
+            exit 1
         fi
+        echo "构建完成。"
 
-        # Check if app file exists
-        if [ ! -f "$APP_PATH" ]; then
-            echo "错误：找不到应用文件 $APP_PATH，请确保构建成功。"
+        # Check if dist/main.js exists
+        if [ ! -f "dist/main.js" ]; then
+            echo "错误：找不到 dist/main.js 文件，请确保构建成功。"
             exit 1
         fi
 
@@ -360,9 +300,6 @@ case "$COMMAND" in
 
         if [ $? -eq 0 ]; then
             echo "pm2 应用 $APP_NAME 已重启。"
-            if [ "$BUILD_FLAG" = true ]; then
-                echo "  已执行构建"
-            fi
             echo ""
             pm2 list
         else
@@ -391,8 +328,7 @@ case "$COMMAND" in
         ;;
 
     *)
-        echo "无效的命令。请使用 --start 或 --stop 或 --restart 或 --status"
-        echo "使用 '$0' 查看完整用法"
+        echo "无效的参数。请使用 --start 或 --stop 或 --restart 或 --status"
         exit 1
         ;;
 esac

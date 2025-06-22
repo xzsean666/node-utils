@@ -56,7 +56,7 @@ export class TelegramBotBase {
     this.setupErrorHandling();
 
     // Setup message handlers
-    this.setupMessageHandlers();
+    // this.setupMessageHandlers();
   }
 
   /**
@@ -88,6 +88,11 @@ export class TelegramBotBase {
    */
   private setupMessageHandlers() {
     this.bot.on('message:text', async (ctx) => {
+      // Skip command messages (starting with /) to let command handlers process them
+      if (ctx.message?.text?.startsWith('/')) {
+        return;
+      }
+
       this.updateUserInfo(ctx);
       for (const handler of this.messageHandlers) {
         try {
@@ -304,7 +309,20 @@ export class TelegramBotBase {
    * @param handler Text handler function
    */
   onMessage(handler: (ctx: BaseContext) => Promise<void> | void): void {
-    this.messageHandlers.push(handler);
+    // Register directly on the bot, but skip command messages
+    this.bot.on('message:text', async (ctx) => {
+      // Skip command messages (starting with /) to let command handlers process them
+      if (ctx.message?.text?.startsWith('/')) {
+        return;
+      }
+
+      this.updateUserInfo(ctx);
+      try {
+        await handler(ctx);
+      } catch (error) {
+        console.error('Error in message handler:', error);
+      }
+    });
   }
 
   /**

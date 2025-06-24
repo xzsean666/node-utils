@@ -1,7 +1,6 @@
-import { TwitterApi } from 'twitter-api-v2';
+// Note: this package is an external package, it isn't bundled with Node.
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import * as https from 'https';
-import * as http from 'http';
+import { TwitterApi } from 'twitter-api-v2';
 
 export interface TwitterAPIConfig {
   // 传统的API Keys方式 (超简单！)
@@ -28,56 +27,29 @@ export class TwitterAPIHelper {
       );
     }
 
-    // 配置全局代理 - 通过 monkey patching 覆盖 HTTP 请求方法
-    if (config.proxyUrl) {
-      console.log(`🔗 使用代理: ${config.proxyUrl}`);
-      const proxyAgent = new HttpsProxyAgent(config.proxyUrl);
-
-      // 保存原始的 request 方法
-      const originalHttpsRequest = https.request;
-      const originalHttpRequest = http.request;
-
-      // 覆盖 https.request 方法
-      (https as any).request = function (options: any, callback?: any) {
-        if (typeof options === 'string') {
-          options = new URL(options);
-        }
-        // 使用代理 agent
-        options.agent = proxyAgent;
-        return originalHttpsRequest.call(this, options, callback);
-      };
-
-      // 覆盖 http.request 方法
-      (http as any).request = function (options: any, callback?: any) {
-        if (typeof options === 'string') {
-          options = new URL(options);
-        }
-        // 使用代理 agent
-        options.agent = proxyAgent;
-        return originalHttpRequest.call(this, options, callback);
-      };
-
-      console.log(`✅ 已通过 monkey patching 设置全局代理`);
-    }
-
-    // 创建配置对象
-    const twitterConfig: any = {
+    // 创建认证配置对象
+    const credentials = {
       appKey: config.appKey,
       appSecret: config.appSecret,
       accessToken: config.accessToken,
       accessSecret: config.accessSecret,
     };
 
-    // 仍然保留原有的代理配置作为备用
+    // 按照官方例子配置代理 - 只有明确提供 proxyUrl 时才使用
     if (config.proxyUrl) {
-      const proxyAgent = new HttpsProxyAgent(config.proxyUrl);
-      twitterConfig.requestConfig = {
-        httpAgent: proxyAgent,
-        httpsAgent: proxyAgent,
-      };
-    }
+      console.log(`🔗 使用代理: ${config.proxyUrl}`);
 
-    this.client = new TwitterApi(twitterConfig);
+      // create an instance of the `HttpsProxyAgent` class with the proxy server information
+      const httpAgent = new HttpsProxyAgent(config.proxyUrl);
+
+      // 第二个参数才是配置选项
+      this.client = new TwitterApi(credentials, { httpAgent });
+
+      console.log(`✅ 已配置代理: ${config.proxyUrl}`);
+    } else {
+      // 不使用代理
+      this.client = new TwitterApi(credentials);
+    }
   }
 
   // 发推文 - 超简单！

@@ -66,6 +66,8 @@
     "sqlite3": "^5.1.7",
     "telegram": "^2.26.22",
     "ts-jest": "^29.2.5",
+    "twitter-api-sdk": "^1.2.1",
+    "twitter-api-v2": "^1.23.2",
     "typeorm": "^0.3.20",
     "typescript": "^5.7.2",
     "ws": "^8.18.0"

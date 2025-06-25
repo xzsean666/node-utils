@@ -480,7 +480,7 @@ export class PGKVDatabase {
 
   /**
    * 高效获取指定前缀的所有键值对
-   * 使用范围查询充分利用主键索引性能
+   * 使用范围查询充分利用主键索引性能，contains过滤在应用层执行以保持高性能
    * @param prefix 键前缀
    * @param options 查询选项
    * @returns 匹配前缀的键值对数组
@@ -492,6 +492,8 @@ export class PGKVDatabase {
       offset?: number;
       orderBy?: 'ASC' | 'DESC';
       includeTimestamps?: boolean;
+      contains?: string;
+      caseSensitive?: boolean;
     },
   ): Promise<
     Array<{
@@ -512,6 +514,8 @@ export class PGKVDatabase {
       offset,
       orderBy = 'ASC',
       includeTimestamps = false,
+      contains,
+      caseSensitive = true,
     } = options || {};
 
     // 根据是否需要时间戳选择字段
@@ -527,9 +531,8 @@ export class PGKVDatabase {
       );
     }
 
-    // 使用范围查询 - 这是最高效的前缀搜索方式
+    // 始终使用高效的范围查询 - 充分利用主键的 B-tree 索引
     // key >= 'prefix' AND key < 'prefix' + '\xFF'
-    // 这样可以充分利用主键的 B-tree 索引
     const queryBuilder = this.db
       .createQueryBuilder(this.tableName)
       .select(selectFields)
@@ -539,19 +542,24 @@ export class PGKVDatabase {
       })
       .orderBy(`${this.tableName}.key`, orderBy);
 
-    if (limit !== undefined) {
-      queryBuilder.limit(limit);
-    }
+    // 如果有 contains 过滤，不在数据库层限制 limit 和 offset
+    // 在应用层过滤后再应用分页，确保结果准确性
+    if (!contains) {
+      // 只有在没有 contains 过滤时才在数据库层应用分页
+      if (limit !== undefined) {
+        queryBuilder.limit(limit);
+      }
 
-    if (offset !== undefined) {
-      queryBuilder.offset(offset);
+      if (offset !== undefined) {
+        queryBuilder.offset(offset);
+      }
     }
 
     try {
       const results = await queryBuilder.getRawMany();
 
-      // 反序列化值并根据选项返回时间戳
-      return results.map((record) => {
+      // 反序列化值
+      let processedResults = results.map((record) => {
         const result: any = {
           key: record.key,
           value: this.deserializeValue(record.value),
@@ -564,6 +572,27 @@ export class PGKVDatabase {
 
         return result;
       });
+
+      // 如果有 contains 条件，在应用层进行高效过滤
+      if (contains) {
+        const searchTerm = caseSensitive ? contains : contains.toLowerCase();
+        processedResults = processedResults.filter((record) => {
+          const keyToSearch = caseSensitive
+            ? record.key
+            : record.key.toLowerCase();
+          return keyToSearch.includes(searchTerm);
+        });
+
+        // 应用原始的 offset 和 limit
+        if (offset !== undefined) {
+          processedResults = processedResults.slice(offset);
+        }
+        if (limit !== undefined) {
+          processedResults = processedResults.slice(0, limit);
+        }
+      }
+
+      return processedResults;
     } catch (error) {
       console.error('getWithPrefix query error:', error);
       throw error;

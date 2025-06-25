@@ -78,16 +78,28 @@ async function performFullBackupAndUpload() {
 
     console.log(`Starting PostgreSQL full backup to ${backupFilePath}...`);
 
-    // Construct the pg_dump command
+    // Construct the pg_dump command arguments
     // Using PGPASSWORD environment variable for security
-    const pgDumpCommand = `pg_dump -h ${pgConfig.host} -p ${pgConfig.port} -U ${pgConfig.user} -d ${pgConfig.database} -F p -b -v`;
+    const pgDumpArgs = [
+      '-h',
+      pgConfig.host,
+      '-p',
+      pgConfig.port.toString(),
+      '-U',
+      pgConfig.user,
+      '-d',
+      pgConfig.database,
+      '-F',
+      'p',
+      '-b',
+      '-v',
+    ];
 
     // Set PGPASSWORD environment variable for the command
     const envWithPassword = { ...process.env, PGPASSWORD: pgConfig.password };
 
     // Execute pg_dump and pipe output to a file
-    const dumpProcess = spawn(pgDumpCommand, {
-      shell: true,
+    const dumpProcess = spawn('pg_dump', pgDumpArgs, {
       env: envWithPassword,
     });
     const outputStream = fs.createWriteStream(backupFilePath);

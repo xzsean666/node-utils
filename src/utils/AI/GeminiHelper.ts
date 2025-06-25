@@ -14,10 +14,31 @@ interface GeminiConfig {
   responseMimeType?: string;
 }
 
+interface Model {
+  name: string;
+  baseModelId?: string;
+  version: string;
+  displayName: string;
+  description: string;
+  inputTokenLimit: number;
+  outputTokenLimit: number;
+  supportedGenerationMethods: string[];
+  temperature?: number;
+  maxTemperature?: number;
+  topP?: number;
+  topK?: number;
+}
+
+interface ListModelsResponse {
+  models: Model[];
+  nextPageToken?: string;
+}
+
 type ModelType =
   | 'gemini-2.0-flash'
-  | 'gemini-2.5-pro-exp-03-25'
-  | 'gemini-2.0-flash-lite';
+  | 'gemini-2.5-flash-lite-preview-06-17'
+  | 'gemini-2.5-flash'
+  | 'gemma-3-27b-it';
 
 export class GeminiHelper {
   private genAI: GoogleGenerativeAI;
@@ -26,6 +47,8 @@ export class GeminiHelper {
   private history: ChatMessage[] = [];
   private systemInstruction?: string | { parts: { text: string }[] };
   private responseMimeType?: string;
+  private apiKey: string;
+  private proxyUrl?: string;
 
   constructor(apiKey: string, config: GeminiConfig = {}) {
     const {
@@ -36,6 +59,8 @@ export class GeminiHelper {
       proxyUrl,
     } = config;
 
+    this.apiKey = apiKey;
+    this.proxyUrl = proxyUrl;
     this.responseMimeType = config.responseMimeType;
 
     // Configure global fetch
@@ -115,6 +140,71 @@ export class GeminiHelper {
     }
 
     this.chat = this.model.startChat(chatOptions);
+  }
+
+  /**
+   * 列出可用的Gemini模型
+   * @param pageSize 每页返回的模型数量，默认50，最大1000
+   * @param pageToken 分页令牌，用于获取下一页结果
+   * @returns 返回模型列表和下一页令牌
+   */
+  async listModels(
+    pageSize?: number,
+    pageToken?: string,
+  ): Promise<ListModelsResponse> {
+    try {
+      const url = new URL(
+        'https://generativelanguage.googleapis.com/v1beta/models',
+      );
+      url.searchParams.append('key', this.apiKey);
+
+      if (pageSize) {
+        url.searchParams.append('pageSize', pageSize.toString());
+      }
+
+      if (pageToken) {
+        url.searchParams.append('pageToken', pageToken);
+      }
+
+      let response: Response;
+
+      if (this.proxyUrl) {
+        // 使用代理
+        const proxyAgent = new HttpsProxyAgent(this.proxyUrl);
+        const axiosResponse = await axios({
+          url: url.toString(),
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          httpsAgent: proxyAgent,
+        });
+
+        response = new Response(JSON.stringify(axiosResponse.data), {
+          status: axiosResponse.status,
+          statusText: axiosResponse.statusText,
+          headers: new Headers(axiosResponse.headers as any),
+        });
+      } else {
+        // 直接请求
+        response = await fetch(url.toString(), {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data: ListModelsResponse = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Gemini List Models Error:', error);
+      throw new Error('Error fetching models list');
+    }
   }
 
   /**
@@ -209,7 +299,7 @@ export class GeminiHelper {
       });
 
       const result = await modelWithConfig.generateContent(message);
-      const response = await result.response;
+      const response = result.response;
       const responseText = response.text();
 
       try {

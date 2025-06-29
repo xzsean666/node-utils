@@ -141,7 +141,7 @@ interface SaveArrayOptions {
  * );
  */
 export class PGKVDatabase {
-  private db: Repository<KVEntity>;
+  db: Repository<KVEntity>;
   private dataSource: DataSource;
   private initialized = false;
   private tableName: string;

@@ -562,14 +562,14 @@ export class EthersUtils {
   async getContractLogs(
     contractAddresses: string | string[],
     eventNames: string | string[],
-    abi: any,
+    abi: any[],
     filter: LogFilter = {},
     initialBatchSize: number = 50000,
   ) {
     try {
       // 1. 基础验证
-      if (!contractAddresses || !abi) {
-        throw new Error('合约地址和ABI是必需的');
+      if (!contractAddresses || !abi || !Array.isArray(abi)) {
+        throw new Error('合约地址和ABI数组是必需的');
       }
 
       const addresses = Array.isArray(contractAddresses)
@@ -577,23 +577,37 @@ export class EthersUtils {
         : [contractAddresses];
       const events = Array.isArray(eventNames) ? eventNames : [eventNames];
 
+      // 检查事件名数组是否为空
+      if (events.length === 0) {
+        throw new Error('至少需要指定一个事件名');
+      }
+
       // 2. 事件ABI过滤
-      const abiArray = Array.isArray(abi) ? abi : [abi];
-      const eventAbis = abiArray
+      const eventAbis = abi
         .filter((item: any) => item.type === 'event')
         .filter((item: any) => events.includes(item.name));
 
       if (eventAbis.length === 0) {
         throw new Error('未找到指定的事件定义');
       }
+
       // 3. 生成事件topics
       const eventTopics = this.getEventTopics(eventAbis);
+
       // 4. 获取区块范围
+      const currentBlockNumber = await this.web3.getBlockNumber();
       const fromBlock = BigInt(filter.fromBlock || 0);
       const toBlock =
         filter.toBlock === 'latest'
-          ? await this.web3.getBlockNumber()
-          : BigInt(filter.toBlock || (await this.web3.getBlockNumber()));
+          ? BigInt(currentBlockNumber)
+          : BigInt(filter.toBlock || currentBlockNumber);
+
+      // 检查区块范围是否合理
+      if (fromBlock > toBlock) {
+        throw new Error(
+          `起始区块 (${fromBlock}) 不能大于结束区块 (${toBlock})`,
+        );
+      }
 
       // 5. 批量处理设置
       let batchSize = initialBatchSize;
@@ -601,15 +615,18 @@ export class EthersUtils {
       let currentBlock = fromBlock;
       const allLogs: Log[] = [];
 
+      // 在循环外创建合约实例，避免重复创建
+      const contractInterface = new ethers.Interface(abi);
+
       // 6. 批量获取日志
       while (currentBlock <= toBlock) {
+        const endBlock = BigInt(
+          Math.min(Number(currentBlock) + batchSize - 1, Number(toBlock)),
+        );
+
+        console.log(`获取日志: ${currentBlock} 至 ${endBlock}`);
+
         try {
-          const endBlock = BigInt(
-            Math.min(Number(currentBlock) + batchSize - 1, Number(toBlock)),
-          );
-
-          console.log(`获取日志: ${currentBlock} 至 ${endBlock}`);
-
           const logs = await this.web3.getLogs({
             address: addresses,
             topics: [eventTopics, ...(filter.topics || [])],
@@ -624,34 +641,37 @@ export class EthersUtils {
           if (batchSize < initialBatchSize) {
             batchSize = Math.min(batchSize * 2, initialBatchSize);
           }
-        } catch (error) {
+        } catch (error: any) {
           console.warn(
-            `获取区块 ${currentBlock} 至 ${
-              currentBlock + BigInt(batchSize)
-            } 的日志失败`,
+            `获取区块 ${currentBlock} 至 ${endBlock} 的日志失败: ${error.message}`,
           );
 
           // 减小批次大小并重试
           batchSize = Math.floor(batchSize / 2);
 
           if (batchSize < MIN_BATCH_SIZE) {
-            throw new Error(
-              `批次大小 ${batchSize} 小于最小值 ${MIN_BATCH_SIZE}`,
-            );
+            // 如果批次大小太小，尝试处理单个区块
+            if (currentBlock === endBlock) {
+              console.error(`无法处理单个区块 ${currentBlock}，跳过`);
+              currentBlock = currentBlock + BigInt(1);
+              batchSize = initialBatchSize; // 重置批次大小
+              continue;
+            } else {
+              // 重置为最小批次大小
+              batchSize = MIN_BATCH_SIZE;
+            }
           }
 
           console.log(`减小批次大小至 ${batchSize} 并重试`);
-          continue;
+          // 注意：这里不移动 currentBlock，让它重试当前批次
         }
       }
 
       // 7. 解析日志
-
-      const contract = new ethers.Contract(addresses[0], abi, this.web3);
       return allLogs
         .map((log: Log) => {
           try {
-            const parsedLog = contract.interface.parseLog({
+            const parsedLog = contractInterface.parseLog({
               topics: [...log.topics],
               data: log.data,
             });
@@ -680,7 +700,7 @@ export class EthersUtils {
             };
           }
         })
-        .filter(Boolean);
+        .filter((log): log is NonNullable<typeof log> => log !== null);
     } catch (error: any) {
       throw new Error(`获取合约日志失败: ${error.message}`);
     }

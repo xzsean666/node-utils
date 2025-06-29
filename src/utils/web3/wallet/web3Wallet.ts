@@ -195,6 +195,10 @@ class Web3Wallet {
       walletAddress: walletInfo.address,
       orderId,
     });
+    const isExsist = await this.achived_orders_db.get(orderHash);
+    if (isExsist) {
+      throw new Error('OrderId already exists, please try again');
+    }
 
     // 保存订单到数据库
     await this.orders_db.add(orderHash, order);

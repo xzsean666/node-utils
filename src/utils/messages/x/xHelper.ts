@@ -52,13 +52,58 @@ export class TwitterAPIHelper {
     }
   }
 
-  // 发推文 - 超简单！
-  async createTweet(text: string) {
+  // 发推文 - 超简单！图片可选！
+  async createTweet(text: string, mediaFiles?: string[] | Buffer[]) {
     try {
+      const hasMedia = mediaFiles && mediaFiles.length > 0;
       console.log(
-        `🔄 正在发送推文: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`,
+        hasMedia
+          ? `🔄 正在上传 ${mediaFiles.length} 个媒体文件并发送推文: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`
+          : `🔄 正在发送推文: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`,
       );
-      const response = await this.client.v2.tweet(text);
+
+      let response;
+
+      if (hasMedia) {
+        // 上传媒体文件
+        const mediaIds: string[] = [];
+        for (let i = 0; i < mediaFiles.length; i++) {
+          const media = mediaFiles[i];
+          console.log(`📤 正在上传第 ${i + 1} 个媒体文件...`);
+
+          let mediaId: string;
+          if (typeof media === 'string') {
+            // 如果是文件路径
+            mediaId = await this.client.v1.uploadMedia(media);
+          } else {
+            // 如果是 Buffer
+            mediaId = await this.client.v1.uploadMedia(media);
+          }
+
+          mediaIds.push(mediaId);
+          console.log(`✅ 媒体文件 ${i + 1} 上传成功! ID: ${mediaId}`);
+        }
+
+        // 检查媒体文件数量限制
+        if (mediaIds.length > 4) {
+          throw new Error('Twitter 最多只能上传4个媒体文件');
+        }
+
+        // 发送带媒体的推文
+        response = await this.client.v2.tweet(text, {
+          media: {
+            media_ids: mediaIds as
+              | [string]
+              | [string, string]
+              | [string, string, string]
+              | [string, string, string, string],
+          },
+        });
+      } else {
+        // 发送普通推文
+        response = await this.client.v2.tweet(text);
+      }
+
       console.log(`✅ 推文发送成功! ID: ${response.data.id}`);
       return response;
     } catch (error) {
@@ -127,10 +172,14 @@ export function createTwitterAPIHelper(
   return new TwitterAPIHelper(config);
 }
 
-// 超简单发推文！
-export async function quickTweet(config: TwitterAPIConfig, text: string) {
+// 超简单发推文！图片可选！
+export async function quickTweet(
+  config: TwitterAPIConfig,
+  text: string,
+  mediaFiles?: string[] | Buffer[],
+) {
   const twitter = new TwitterAPIHelper(config);
-  return twitter.createTweet(text);
+  return twitter.createTweet(text, mediaFiles);
 }
 
 // 快速搜索

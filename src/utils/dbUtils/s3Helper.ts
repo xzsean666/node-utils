@@ -197,6 +197,71 @@ export interface FolderUploadResultAdvanced {
   cachedCount: number;
 }
 
+// 同步模式枚举
+export enum SyncMode {
+  LOCAL_TO_S3 = 'localToS3',
+  S3_TO_LOCAL = 's3ToLocal',
+  BIDIRECTIONAL = 'bidirectional',
+}
+
+// 文件过滤器接口
+export interface FileFilter {
+  extensions?: string[]; // 支持的文件扩展名，如 ['.jpg', '.png', '.pdf']
+  excludeExtensions?: string[]; // 排除的文件扩展名
+  includePatterns?: RegExp[]; // 包含的文件名模式
+  excludePatterns?: RegExp[]; // 排除的文件名模式
+  minSize?: number; // 最小文件大小（字节）
+  maxSize?: number; // 最大文件大小（字节）
+}
+
+// 同步选项接口
+export interface SyncOptions extends UploadOptions {
+  syncMode?: SyncMode; // 同步模式，默认 LOCAL_TO_S3
+  s3Prefix?: string; // S3前缀路径
+  bucket?: string; // 目标bucket
+  depth?: number; // 搜索深度，-1 表示无限深度
+  deleteExtraFiles?: boolean; // 是否删除目标中不存在于源中的文件，默认 false
+  overwriteExisting?: boolean; // 是否覆写已存在的文件，默认 true
+  fileFilter?: FileFilter; // 文件过滤器
+  dryRun?: boolean; // 试运行模式，不执行实际操作，默认 false
+  compareBy?: 'etag' | 'size' | 'lastModified' | 'both'; // 文件比较方式，默认 'etag'
+}
+
+// 同步操作类型
+export enum SyncOperation {
+  UPLOAD = 'upload',
+  DOWNLOAD = 'download',
+  DELETE_LOCAL = 'deleteLocal',
+  DELETE_S3 = 'deleteS3',
+  SKIP = 'skip',
+  UPDATE = 'update',
+}
+
+// 同步结果项
+export interface SyncResultItem {
+  operation: SyncOperation;
+  localPath?: string;
+  s3Key?: string;
+  size?: number;
+  error?: string;
+  skipped?: boolean;
+}
+
+// 同步结果
+export interface SyncResult {
+  summary: {
+    totalFiles: number;
+    uploaded: number;
+    downloaded: number;
+    deleted: number;
+    skipped: number;
+    failed: number;
+    dryRun: boolean;
+  };
+  operations: SyncResultItem[];
+  errors: Array<{ path: string; error: string }>;
+}
+
 export class S3Helper {
   private client: S3Client;
   private config: S3Config;
@@ -220,7 +285,7 @@ export class S3Helper {
     }
 
     // 构建端点 URL
-    const protocol = this.config.useSSL ?? true ? 'https' : 'http';
+    const protocol = (this.config.useSSL ?? true) ? 'https' : 'http';
     const port = this.config.port || (this.config.useSSL ? 443 : 80);
     const endpoint = `${protocol}://${this.config.endPoint}${
       port !== (this.config.useSSL ? 443 : 80) ? `:${port}` : ''
@@ -361,9 +426,9 @@ export class S3Helper {
     }
     try {
       await this.kvdb.put(etag, objectName);
-    } catch (error) {
+    } catch (error: any) {
       // 存储失败不应该影响上传流程，只记录错误
-      console.warn(`Failed to store duplicate mapping: ${error}`);
+      console.warn(`Failed to store duplicate mapping: ${error.message}`);
     }
   }
 
@@ -1206,7 +1271,7 @@ export class S3Helper {
   }
 
   // 清理失效的缓存条目（当S3中的文件已被删除但缓存中仍存在时）
-  async cleanupInvalidCache(
+  cleanupInvalidCache(
     bucket?: string,
     batchSize: number = 100,
   ): Promise<{ cleaned: number; failed: number }> {
@@ -1216,20 +1281,21 @@ export class S3Helper {
       console.warn(
         'cleanupInvalidCache requires KVDatabase to support iteration over all keys',
       );
-      return { cleaned: 0, failed: 0 };
+      return Promise.resolve({ cleaned: 0, failed: 0 });
     } catch (error: any) {
       throw new Error(`清理失效缓存失败: ${error.message}`);
     }
   }
 
   // 手动移除缓存条目
-  async removeCacheEntry(etag: string): Promise<void> {
+  removeCacheEntry(etag: string): Promise<void> {
     try {
       // 注意：这需要KVDatabase支持删除操作
       // 当前接口只有get和put，可能需要扩展接口
       console.warn(
         'removeCacheEntry requires KVDatabase to support delete operation',
       );
+      return Promise.resolve();
     } catch (error: any) {
       throw new Error(`移除缓存条目失败: ${error.message}`);
     }
@@ -1393,7 +1459,7 @@ export class S3Helper {
             }
           } else {
             // 基础模式：使用原有逻辑
-            let wasUploaded = true;
+            const wasUploaded = true;
             if (
               this.isDuplicationCheckEnabled() &&
               !uploadOptions?.forceUpload
@@ -1985,5 +2051,569 @@ export class S3Helper {
     } catch (error: any) {
       throw new Error(`生成指定文件签名URL失败: ${error.message}`);
     }
+  }
+
+  // 文件过滤器辅助函数
+  private applyFileFilter(
+    filePath: string,
+    fileSize?: number,
+    filter?: FileFilter,
+  ): boolean {
+    if (!filter) return true;
+
+    const fileName = filePath.split('/').pop() || '';
+    const fileExt = fileName.toLowerCase().substring(fileName.lastIndexOf('.'));
+
+    // 检查文件扩展名
+    if (filter.extensions && filter.extensions.length > 0) {
+      if (!filter.extensions.some((ext) => fileExt === ext.toLowerCase())) {
+        return false;
+      }
+    }
+
+    // 检查排除的文件扩展名
+    if (filter.excludeExtensions && filter.excludeExtensions.length > 0) {
+      if (
+        filter.excludeExtensions.some((ext) => fileExt === ext.toLowerCase())
+      ) {
+        return false;
+      }
+    }
+
+    // 检查包含模式
+    if (filter.includePatterns && filter.includePatterns.length > 0) {
+      if (!filter.includePatterns.some((pattern) => pattern.test(fileName))) {
+        return false;
+      }
+    }
+
+    // 检查排除模式
+    if (filter.excludePatterns && filter.excludePatterns.length > 0) {
+      if (filter.excludePatterns.some((pattern) => pattern.test(fileName))) {
+        return false;
+      }
+    }
+
+    // 检查文件大小
+    if (fileSize !== undefined) {
+      if (filter.minSize && fileSize < filter.minSize) {
+        return false;
+      }
+      if (filter.maxSize && fileSize > filter.maxSize) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  // 获取本地文件列表（支持深度控制和过滤）
+  private async getLocalFiles(
+    localFolderPath: string,
+    filter?: FileFilter,
+    depth: number = -1,
+  ): Promise<
+    Array<{
+      localPath: string;
+      relativePath: string;
+      size: number;
+      lastModified: Date;
+    }>
+  > {
+    const files: Array<{
+      localPath: string;
+      relativePath: string;
+      size: number;
+      lastModified: Date;
+    }> = [];
+
+    const scanDirectory = async (
+      dirPath: string,
+      basePath: string,
+      currentDepth: number = 0,
+    ): Promise<void> => {
+      const items = await fs.promises.readdir(dirPath, { withFileTypes: true });
+
+      for (const item of items) {
+        const fullPath = `${dirPath}/${item.name}`;
+
+        if (item.isDirectory()) {
+          // 检查是否需要继续递归
+          if (depth === -1 || currentDepth < depth) {
+            await scanDirectory(fullPath, basePath, currentDepth + 1);
+          }
+        } else if (item.isFile()) {
+          const stats = await fs.promises.stat(fullPath);
+          const relativePath = fullPath
+            .replace(basePath, '')
+            .replace(/^\/+/, '');
+
+          // 应用文件过滤器
+          if (this.applyFileFilter(relativePath, stats.size, filter)) {
+            files.push({
+              localPath: fullPath,
+              relativePath,
+              size: stats.size,
+              lastModified: stats.mtime,
+            });
+          }
+        }
+      }
+    };
+
+    await scanDirectory(localFolderPath, localFolderPath, 0);
+    return files;
+  }
+
+  // 获取S3文件列表（支持过滤）
+  private async getS3Files(
+    bucket: string,
+    prefix?: string,
+    filter?: FileFilter,
+  ): Promise<
+    Array<{
+      s3Key: string;
+      relativePath: string;
+      size: number;
+      lastModified: Date;
+      etag: string;
+    }>
+  > {
+    const s3Objects = await this.listFiles(prefix, bucket, true);
+    const files: Array<{
+      s3Key: string;
+      relativePath: string;
+      size: number;
+      lastModified: Date;
+      etag: string;
+    }> = [];
+
+    for (const obj of s3Objects) {
+      if (obj.name && !obj.name.endsWith('/')) {
+        const relativePath = prefix
+          ? obj.name.replace(new RegExp(`^${prefix.replace(/\/$/, '')}/`), '')
+          : obj.name;
+
+        // 应用文件过滤器
+        if (this.applyFileFilter(relativePath, obj.size, filter)) {
+          files.push({
+            s3Key: obj.name,
+            relativePath,
+            size: obj.size || 0,
+            lastModified: obj.lastModified || new Date(),
+            etag: this.normalizeETag(obj.etag || ''),
+          });
+        }
+      }
+    }
+
+    return files;
+  }
+
+  // 比较文件是否相同
+  private async compareFiles(
+    localFile: { localPath: string; size: number; lastModified: Date },
+    s3File: { size: number; lastModified: Date; etag: string },
+    compareBy: 'etag' | 'size' | 'lastModified' | 'both',
+  ): Promise<boolean> {
+    switch (compareBy) {
+      case 'size':
+        return localFile.size === s3File.size;
+
+      case 'lastModified':
+        // 允许1秒的时间差异（考虑到精度问题）
+        return (
+          Math.abs(
+            localFile.lastModified.getTime() - s3File.lastModified.getTime(),
+          ) <= 1000
+        );
+
+      case 'etag': {
+        const localEtag = await this.calculateFileMD5(localFile.localPath);
+        return localEtag === s3File.etag;
+      }
+
+      case 'both': {
+        if (localFile.size !== s3File.size) return false;
+        const localEtagBoth = await this.calculateFileMD5(localFile.localPath);
+        return localEtagBoth === s3File.etag;
+      }
+
+      default:
+        return false;
+    }
+  }
+
+  // 同步文件夹到S3（支持双向同步）
+  async syncFolderToS3(
+    localFolderPath: string,
+    options?: SyncOptions,
+  ): Promise<SyncResult> {
+    try {
+      // 解构并设置默认值
+      const {
+        syncMode = SyncMode.LOCAL_TO_S3,
+        s3Prefix,
+        bucket,
+        depth = -1,
+        deleteExtraFiles = false,
+        overwriteExisting = true,
+        fileFilter,
+        dryRun = false,
+        compareBy = 'etag',
+        ...uploadOptions
+      } = options || {};
+
+      const bucketName = this.getBucketName(bucket);
+
+      console.log(`🔄 Starting ${dryRun ? 'DRY RUN ' : ''}sync: ${syncMode}`);
+      console.log(`📁 Local folder: ${localFolderPath}`);
+      console.log(
+        `🪣 S3 bucket: ${bucketName}${s3Prefix ? ` (prefix: ${s3Prefix})` : ''}`,
+      );
+
+      const result: SyncResult = {
+        summary: {
+          totalFiles: 0,
+          uploaded: 0,
+          downloaded: 0,
+          deleted: 0,
+          skipped: 0,
+          failed: 0,
+          dryRun,
+        },
+        operations: [],
+        errors: [],
+      };
+
+      // 获取本地文件列表
+      const localFiles =
+        syncMode !== SyncMode.S3_TO_LOCAL
+          ? await this.getLocalFiles(localFolderPath, fileFilter, depth)
+          : [];
+
+      // 获取S3文件列表
+      const s3Files =
+        syncMode !== SyncMode.LOCAL_TO_S3
+          ? await this.getS3Files(bucketName, s3Prefix, fileFilter)
+          : [];
+
+      console.log(
+        `📊 Found ${localFiles.length} local files, ${s3Files.length} S3 files`,
+      );
+
+      // 创建文件映射以便快速查找
+      const localFileMap = new Map(localFiles.map((f) => [f.relativePath, f]));
+      const s3FileMap = new Map(s3Files.map((f) => [f.relativePath, f]));
+
+      // 收集所有唯一的相对路径
+      const allPaths = new Set([
+        ...localFiles.map((f) => f.relativePath),
+        ...s3Files.map((f) => f.relativePath),
+      ]);
+
+      result.summary.totalFiles = allPaths.size;
+
+      // 处理每个文件
+      for (const relativePath of allPaths) {
+        const localFile = localFileMap.get(relativePath);
+        const s3File = s3FileMap.get(relativePath);
+
+        try {
+          if (localFile && s3File) {
+            // 文件在两边都存在，检查是否需要更新
+            if (syncMode === SyncMode.BIDIRECTIONAL) {
+              // 双向同步：比较时间戳决定哪个是最新的
+              const localNewer = localFile.lastModified > s3File.lastModified;
+
+              if (overwriteExisting) {
+                if (localNewer) {
+                  // 本地文件更新，上传到S3
+                  await this.performSyncOperation(
+                    SyncOperation.UPLOAD,
+                    localFile,
+                    s3File,
+                    s3Prefix,
+                    bucketName,
+                    uploadOptions,
+                    dryRun,
+                    result,
+                  );
+                } else if (s3File.lastModified > localFile.lastModified) {
+                  // S3文件更新，下载到本地
+                  await this.performSyncOperation(
+                    SyncOperation.DOWNLOAD,
+                    localFile,
+                    s3File,
+                    s3Prefix,
+                    bucketName,
+                    uploadOptions,
+                    dryRun,
+                    result,
+                  );
+                } else {
+                  // 时间戳相同，检查内容是否相同
+                  const filesMatch = await this.compareFiles(
+                    localFile,
+                    s3File,
+                    compareBy,
+                  );
+                  if (!filesMatch) {
+                    // 内容不同但时间戳相同，默认上传本地文件
+                    await this.performSyncOperation(
+                      SyncOperation.UPLOAD,
+                      localFile,
+                      s3File,
+                      s3Prefix,
+                      bucketName,
+                      uploadOptions,
+                      dryRun,
+                      result,
+                    );
+                  } else {
+                    this.addSkipOperation(localFile, s3File, result);
+                  }
+                }
+              } else {
+                this.addSkipOperation(localFile, s3File, result);
+              }
+            } else {
+              // 单向同步：检查文件是否相同
+              const filesMatch = await this.compareFiles(
+                localFile,
+                s3File,
+                compareBy,
+              );
+
+              if (!filesMatch && overwriteExisting) {
+                if (syncMode === SyncMode.LOCAL_TO_S3) {
+                  await this.performSyncOperation(
+                    SyncOperation.UPDATE,
+                    localFile,
+                    s3File,
+                    s3Prefix,
+                    bucketName,
+                    uploadOptions,
+                    dryRun,
+                    result,
+                  );
+                } else {
+                  await this.performSyncOperation(
+                    SyncOperation.DOWNLOAD,
+                    localFile,
+                    s3File,
+                    s3Prefix,
+                    bucketName,
+                    uploadOptions,
+                    dryRun,
+                    result,
+                  );
+                }
+              } else {
+                this.addSkipOperation(localFile, s3File, result);
+              }
+            }
+          } else if (localFile && !s3File) {
+            // 文件只存在于本地
+            if (
+              syncMode === SyncMode.LOCAL_TO_S3 ||
+              syncMode === SyncMode.BIDIRECTIONAL
+            ) {
+              await this.performSyncOperation(
+                SyncOperation.UPLOAD,
+                localFile,
+                undefined,
+                s3Prefix,
+                bucketName,
+                uploadOptions,
+                dryRun,
+                result,
+              );
+            } else if (syncMode === SyncMode.S3_TO_LOCAL && deleteExtraFiles) {
+              await this.performSyncOperation(
+                SyncOperation.DELETE_LOCAL,
+                localFile,
+                undefined,
+                s3Prefix,
+                bucketName,
+                uploadOptions,
+                dryRun,
+                result,
+              );
+            }
+          } else if (!localFile && s3File) {
+            // 文件只存在于S3
+            if (
+              syncMode === SyncMode.S3_TO_LOCAL ||
+              syncMode === SyncMode.BIDIRECTIONAL
+            ) {
+              await this.performSyncOperation(
+                SyncOperation.DOWNLOAD,
+                undefined,
+                s3File,
+                s3Prefix,
+                bucketName,
+                uploadOptions,
+                dryRun,
+                result,
+              );
+            } else if (syncMode === SyncMode.LOCAL_TO_S3 && deleteExtraFiles) {
+              await this.performSyncOperation(
+                SyncOperation.DELETE_S3,
+                undefined,
+                s3File,
+                s3Prefix,
+                bucketName,
+                uploadOptions,
+                dryRun,
+                result,
+              );
+            }
+          }
+        } catch (error: any) {
+          result.summary.failed++;
+          result.errors.push({
+            path: relativePath,
+            error: error.message,
+          });
+          console.error(`✗ Failed to sync: ${relativePath} - ${error.message}`);
+        }
+      }
+
+      // 输出同步结果总结
+      this.printSyncSummary(result);
+
+      return result;
+    } catch (error: any) {
+      throw new Error(`文件夹同步失败: ${error.message}`);
+    }
+  }
+
+  // 执行同步操作
+  private async performSyncOperation(
+    operation: SyncOperation,
+    localFile?: { localPath: string; relativePath: string; size: number },
+    s3File?: { s3Key: string; relativePath: string; size: number },
+    s3Prefix?: string,
+    bucketName?: string,
+    uploadOptions?: UploadOptions,
+    dryRun?: boolean,
+    result?: SyncResult,
+  ): Promise<void> {
+    const relativePath = localFile?.relativePath || s3File?.relativePath || '';
+    const s3Key = s3Prefix ? `${s3Prefix}/${relativePath}` : relativePath;
+
+    if (!result) return;
+
+    const resultItem: SyncResultItem = {
+      operation,
+      localPath: localFile?.localPath,
+      s3Key: s3File?.s3Key || s3Key,
+      size: localFile?.size || s3File?.size,
+    };
+
+    if (dryRun) {
+      resultItem.skipped = true;
+      result.operations.push(resultItem);
+      console.log(`[DRY RUN] Would ${operation}: ${relativePath}`);
+      return;
+    }
+
+    try {
+      switch (operation) {
+        case SyncOperation.UPLOAD:
+        case SyncOperation.UPDATE:
+          if (localFile) {
+            await this.uploadFile(
+              s3Key,
+              localFile.localPath,
+              bucketName,
+              uploadOptions,
+            );
+            result.summary.uploaded++;
+            console.log(`✓ Uploaded: ${localFile.localPath} -> ${s3Key}`);
+          }
+          break;
+
+        case SyncOperation.DOWNLOAD:
+          if (s3File && localFile) {
+            // 确保本地目录存在
+            const localDir = localFile.localPath.substring(
+              0,
+              localFile.localPath.lastIndexOf('/'),
+            );
+            await fs.promises.mkdir(localDir, { recursive: true });
+            await this.downloadFile(
+              s3File.s3Key,
+              localFile.localPath,
+              bucketName,
+            );
+            result.summary.downloaded++;
+            console.log(
+              `✓ Downloaded: ${s3File.s3Key} -> ${localFile.localPath}`,
+            );
+          }
+          break;
+
+        case SyncOperation.DELETE_LOCAL:
+          if (localFile) {
+            await fs.promises.unlink(localFile.localPath);
+            result.summary.deleted++;
+            console.log(`✓ Deleted local: ${localFile.localPath}`);
+          }
+          break;
+
+        case SyncOperation.DELETE_S3:
+          if (s3File) {
+            await this.deleteFile(s3File.s3Key, bucketName);
+            result.summary.deleted++;
+            console.log(`✓ Deleted S3: ${s3File.s3Key}`);
+          }
+          break;
+      }
+
+      result.operations.push(resultItem);
+    } catch (error: any) {
+      resultItem.error = error.message;
+      result.operations.push(resultItem);
+      result.summary.failed++;
+      throw error;
+    }
+  }
+
+  // 添加跳过操作记录
+  private addSkipOperation(
+    localFile?: { localPath: string; relativePath: string; size: number },
+    s3File?: { s3Key: string; relativePath: string; size: number },
+    result?: SyncResult,
+  ): void {
+    if (!result) return;
+
+    result.summary.skipped++;
+    result.operations.push({
+      operation: SyncOperation.SKIP,
+      localPath: localFile?.localPath,
+      s3Key: s3File?.s3Key,
+      size: localFile?.size || s3File?.size,
+      skipped: true,
+    });
+
+    const relativePath = localFile?.relativePath || s3File?.relativePath || '';
+    console.log(`⚡ Skipped (already in sync): ${relativePath}`);
+  }
+
+  // 打印同步结果总结
+  private printSyncSummary(result: SyncResult): void {
+    const { summary } = result;
+    console.log('\n📊 Sync Summary:');
+    console.log(`Total files: ${summary.totalFiles}`);
+    if (summary.uploaded > 0) console.log(`✓ Uploaded: ${summary.uploaded}`);
+    if (summary.downloaded > 0)
+      console.log(`✓ Downloaded: ${summary.downloaded}`);
+    if (summary.deleted > 0) console.log(`🗑️ Deleted: ${summary.deleted}`);
+    if (summary.skipped > 0) console.log(`⚡ Skipped: ${summary.skipped}`);
+    if (summary.failed > 0) console.log(`✗ Failed: ${summary.failed}`);
+    if (summary.dryRun)
+      console.log(`🔍 Mode: DRY RUN (no actual changes made)`);
   }
 }

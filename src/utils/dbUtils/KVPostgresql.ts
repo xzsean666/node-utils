@@ -494,6 +494,8 @@ export class PGKVDatabase {
       includeTimestamps?: boolean;
       contains?: string;
       caseSensitive?: boolean;
+      createdAtAfter?: number;
+      createdAtBefore?: number;
     },
   ): Promise<
     Array<{
@@ -516,6 +518,8 @@ export class PGKVDatabase {
       includeTimestamps = false,
       contains,
       caseSensitive = true,
+      createdAtAfter,
+      createdAtBefore,
     } = options || {};
 
     // 根据是否需要时间戳选择字段
@@ -542,10 +546,37 @@ export class PGKVDatabase {
       })
       .orderBy(`${this.tableName}.key`, orderBy);
 
-    // 如果有 contains 过滤，不在数据库层限制 limit 和 offset
+    // 添加时间过滤条件
+    if (createdAtAfter !== undefined) {
+      if (!isNaN(createdAtAfter) && createdAtAfter > 0) {
+        queryBuilder.andWhere(
+          `${this.tableName}.created_at > :createdAtAfter`,
+          {
+            createdAtAfter: new Date(createdAtAfter),
+          },
+        );
+      }
+    }
+
+    if (createdAtBefore !== undefined) {
+      if (!isNaN(createdAtBefore) && createdAtBefore > 0) {
+        queryBuilder.andWhere(
+          `${this.tableName}.created_at < :createdAtBefore`,
+          {
+            createdAtBefore: new Date(createdAtBefore),
+          },
+        );
+      }
+    }
+
+    // 检查是否有时间过滤条件，如果有则忽略 limit 和 offset
+    const hasTimeFilter =
+      createdAtAfter !== undefined || createdAtBefore !== undefined;
+
+    // 如果有 contains 过滤或时间过滤，不在数据库层限制 limit 和 offset
     // 在应用层过滤后再应用分页，确保结果准确性
-    if (!contains) {
-      // 只有在没有 contains 过滤时才在数据库层应用分页
+    if (!contains && !hasTimeFilter) {
+      // 只有在没有 contains 过滤和时间过滤时才在数据库层应用分页
       if (limit !== undefined) {
         queryBuilder.limit(limit);
       }
@@ -582,7 +613,10 @@ export class PGKVDatabase {
             : record.key.toLowerCase();
           return keyToSearch.includes(searchTerm);
         });
+      }
 
+      // 如果有时间过滤或 contains 过滤，在应用层应用 offset 和 limit
+      if (contains || hasTimeFilter) {
         // 应用原始的 offset 和 limit
         if (offset !== undefined) {
           processedResults = processedResults.slice(offset);

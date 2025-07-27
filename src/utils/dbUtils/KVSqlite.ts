@@ -273,19 +273,38 @@ export class SqliteKVDatabase {
   async getAll(): Promise<Record<string, any>> {
     await this.ensureInitialized();
     const records = await this.db.find();
-    return records.reduce((acc, record: { key: any; value: any }) => {
-      acc[record.key] = this.typeHandler.deserialize(record.value);
-      return acc;
-    }, {} as Record<string, any>);
+    return records.reduce(
+      (acc, record: { key: any; value: any }) => {
+        acc[record.key] = this.typeHandler.deserialize(record.value);
+        return acc;
+      },
+      {} as Record<string, any>,
+    );
   }
 
-  async getMany(limit: number = 10): Promise<Record<string, any>> {
+  async getMany(keys: string[]): Promise<Record<string, any>> {
     await this.ensureInitialized();
-    const records = await this.db.find({ take: limit });
-    return records.reduce((acc, record: { key: any; value: any }) => {
-      acc[record.key] = this.typeHandler.deserialize(record.value);
-      return acc;
-    }, {} as Record<string, any>);
+    if (keys.length === 0) {
+      return {};
+    }
+
+    const records = await this.db.find({ where: { key: In(keys) } });
+
+    // 使用Map提高查找性能，避免O(n²)复杂度
+    const recordMap = new Map(
+      records.map((record) => [
+        record.key,
+        this.typeHandler.deserialize(record.value),
+      ]),
+    );
+
+    // 为所有请求的keys分配值，不存在的返回null
+    const result: Record<string, any> = {};
+    for (const key of keys) {
+      result[key] = recordMap.get(key) ?? null;
+    }
+
+    return result;
   }
 
   // 获取所有键

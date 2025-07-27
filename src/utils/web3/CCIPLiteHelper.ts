@@ -1,6 +1,6 @@
-import { EthersUtils, ethers } from "./ethersUtilsV2";
-import IEVM2EVMOnRamp from "../web3config/abis/IEVM2EVMOnRamp.json";
-import IRouterClientABI from "../web3config/abis/IRouterClient.json";
+import { EthersUtils, ethers } from './ethersUtilsV2';
+import IEVM2EVMOnRamp from '../web3config/abis/IEVM2EVMOnRamp.json';
+import IRouterClientABI from '../web3config/abis/IRouterClient.json';
 
 interface TokenAmount {
   token?: string;
@@ -40,21 +40,21 @@ export class CCIPLiteHelper {
   async getCallData(
     sourceRouterAddress: string,
     destinationChainSelector: string,
-    message: CCIPMessage
+    message: CCIPMessage,
   ): Promise<any> {
     const useNative = message.feeToken === ethers.ZeroAddress;
 
     const fee = await this.getFee(
       sourceRouterAddress,
       destinationChainSelector,
-      message
+      message,
     );
     const callData = await this.ethersUtils.encodeDataByABI({
       abi: IRouterClientABI,
-      functionName: "ccipSend",
+      functionName: 'ccipSend',
       executeArgs: [destinationChainSelector, message],
       target: sourceRouterAddress,
-      value: useNative ? fee : "0",
+      value: useNative ? fee : '0',
     });
     return callData;
   }
@@ -62,11 +62,11 @@ export class CCIPLiteHelper {
   async getFee(
     sourceRouterAddress: string,
     destinationChainSelector: string,
-    message: CCIPMessage
+    message: CCIPMessage,
   ): Promise<string> {
     const routerContract = await this.ethersUtils.getContract(
       sourceRouterAddress,
-      IRouterClientABI
+      IRouterClientABI,
     );
     const fees = await routerContract.getFee(destinationChainSelector, message);
     return fees.toString();
@@ -74,14 +74,14 @@ export class CCIPLiteHelper {
 
   createMessage(params: MessageParams): CCIPMessage {
     if (!params.receiver) {
-      throw new Error("Receiver address is required");
+      throw new Error('Receiver address is required');
     }
 
     // Encode the receiver address using abi.encode
     const abiCoder = new ethers.AbiCoder();
     const formattedReceiver = abiCoder.encode(
-      ["address"],
-      [ethers.getAddress(params.receiver)]
+      ['address'],
+      [ethers.getAddress(params.receiver)],
     );
 
     // Only add tokenAmount if token or amount is provided
@@ -92,34 +92,34 @@ export class CCIPLiteHelper {
         try {
           formattedToken = ethers.getAddress(params.token);
         } catch (error) {
-          throw new Error("Invalid token address format");
+          throw new Error('Invalid token address format');
         }
       }
 
       tokenAmounts.push({
         token: formattedToken,
-        amount: BigInt(params.amount || "0"),
+        amount: BigInt(params.amount || '0'),
       });
     }
 
     return {
       receiver: formattedReceiver,
-      data: params.data || "0x",
+      data: params.data || '0x',
       tokenAmounts,
       feeToken: params.feeToken
         ? ethers.getAddress(params.feeToken)
         : ethers.ZeroAddress,
-      extraArgs: "0x",
+      extraArgs: '0x',
     };
   }
 
   createExtraArgs(gasLimit: number): string {
     const abiCoder = new ethers.AbiCoder();
     // bytes4(keccak256("CCIP EVMExtraArgsV1")) = 0x97a657c9
-    const EVM_EXTRA_ARGS_V1_TAG = "0x97a657c9";
+    const EVM_EXTRA_ARGS_V1_TAG = '0x97a657c9';
     const encodedArgs = abiCoder.encode(
-      ["tuple(uint256)"], // EVMExtraArgsV1 结构体
-      [[BigInt(gasLimit)]] // 只需要 gasLimit 参数
+      ['tuple(uint256)'], // EVMExtraArgsV1 结构体
+      [[BigInt(gasLimit)]], // 只需要 gasLimit 参数
     );
     return EVM_EXTRA_ARGS_V1_TAG + encodedArgs.slice(2);
   }
@@ -127,13 +127,13 @@ export class CCIPLiteHelper {
   async getMessageId(txHash: string) {
     const alllogs = await this.ethersUtils.getLogByTxHash(
       txHash,
-      IEVM2EVMOnRamp
+      IEVM2EVMOnRamp,
     );
     const receipt = await this.ethersUtils.web3.getTransactionReceipt(txHash);
     const log = alllogs.find(
       (log) =>
         (log as ethers.LogDescription)?.topic ===
-        "0xd0c3c799bf9e2639de44391e7f524d229b2b55f5b1ea94b2bf7da42f7243dddd"
+        '0xd0c3c799bf9e2639de44391e7f524d229b2b55f5b1ea94b2bf7da42f7243dddd',
     );
     const messageId = (log as ethers.LogDescription)?.args[0].at(-1);
     const result = {
@@ -161,26 +161,26 @@ export class CCIPLiteHelper {
     if (toAddress) addresses.push(toAddress);
 
     if (!addresses.every((addr) => ethers.isAddress(addr))) {
-      throw new Error("Invalid address provided");
+      throw new Error('Invalid address provided');
     }
     if (!destinationChainSelector) {
-      throw new Error("Invalid destination chain selector");
+      throw new Error('Invalid destination chain selector');
     }
 
     // 获取 onRamp 地址
     const routerContract = await this.ethersUtils.getContract(
       sourceRouterAddress,
-      IRouterClientABI
+      IRouterClientABI,
     );
 
     const onRamp = await routerContract
       .getOnRamp(destinationChainSelector)
       .catch(() => {
-        throw new Error("Failed to fetch onRamp address");
+        throw new Error('Failed to fetch onRamp address');
       });
 
     if (!onRamp) {
-      throw new Error("OnRamp not found for the specified chain");
+      throw new Error('OnRamp not found for the specified chain');
     }
 
     // 获取区块范围
@@ -190,12 +190,12 @@ export class CCIPLiteHelper {
     // 获取并过滤日志
     const logs = await this.ethersUtils.getContractLogs(
       onRamp,
-      ["CCIPSendRequested"],
+      ['CCIPSendRequested'],
       IEVM2EVMOnRamp,
       {
         fromBlock,
         toBlock: latestBlock,
-      }
+      },
     );
     // console.log(logs[0]);
 
@@ -227,7 +227,7 @@ export class CCIPLiteHelper {
               feeAmount: message.feeTokenAmount,
             },
           };
-        })
+        }),
     );
 
     return matchingTransactions;
@@ -237,12 +237,12 @@ export class CCIPLiteHelper {
     messageId: string,
     destinationRouterAddress: string,
     sourceChainSelector: string,
-    BLOCKS_TO_SEARCH = 1000
+    BLOCKS_TO_SEARCH = 1000,
   ) {
     // 验证目标路由地址
     if (!ethers.isAddress(destinationRouterAddress)) {
       throw new Error(
-        `参数错误: 目标路由地址 ${destinationRouterAddress} 无效`
+        `参数错误: 目标路由地址 ${destinationRouterAddress} 无效`,
       );
     }
 
@@ -253,26 +253,26 @@ export class CCIPLiteHelper {
 
     // 验证源链选择器
     if (!sourceChainSelector) {
-      throw new Error("参数错误: 源链选择器缺失或无效");
+      throw new Error('参数错误: 源链选择器缺失或无效');
     }
 
     // 获取所有的OffRamps
     const routerContract = await this.ethersUtils.getContract(
       destinationRouterAddress,
-      IRouterClientABI
+      IRouterClientABI,
     );
 
     let offRamps;
     try {
       offRamps = await routerContract.getOffRamps();
     } catch (error) {
-      console.log("获取 OffRamps 失败:", error);
-      console.log("Router 地址:", destinationRouterAddress);
+      console.log('获取 OffRamps 失败:', error);
+      console.log('Router 地址:', destinationRouterAddress);
       throw new Error(`合约调用错误: 无法获取 off-ramps 信息 (${error})`);
     }
 
     if (!offRamps || offRamps.length === 0) {
-      throw new Error("合约调用错误: 未找到任何 off-ramps");
+      throw new Error('合约调用错误: 未找到任何 off-ramps');
     }
     // 过滤匹配的OffRamps
     const matchingOffRamps = offRamps
@@ -283,21 +283,21 @@ export class CCIPLiteHelper {
       }));
 
     if (matchingOffRamps.length === 0) {
-      throw new Error("合约调用错误: 未找到匹配的off-ramp");
+      throw new Error('合约调用错误: 未找到匹配的off-ramp');
     }
 
     // 获取起始区块
     const latestBlock = await this.ethersUtils.getLatestBlockNumber();
     const fromBlock = Math.max(0, latestBlock - BLOCKS_TO_SEARCH);
     let status: any = {};
-    status.state = "UNTOUCHED";
+    status.state = 'UNTOUCHED';
     // 检查每个OffRamp的状态
     for (const offRamp of matchingOffRamps) {
       const logs = (
         await this.ethersUtils.web3.getLogs({
           address: offRamp.offRamp,
           topics: [
-            ethers.id("ExecutionStateChanged(uint64,bytes32,uint8,bytes)"),
+            ethers.id('ExecutionStateChanged(uint64,bytes32,uint8,bytes)'),
             null,
             ethers.zeroPadValue(messageId, 32),
           ],
@@ -307,7 +307,7 @@ export class CCIPLiteHelper {
 
       if (logs && logs.length > 0) {
         const iface = new ethers.Interface([
-          "event ExecutionStateChanged(uint64 indexed sequenceNumber, bytes32 indexed messageId, uint8 state, bytes returnData)",
+          'event ExecutionStateChanged(uint64 indexed sequenceNumber, bytes32 indexed messageId, uint8 state, bytes returnData)',
         ]);
         const parsedLog = iface.parseLog(logs[0]);
         status.blockNumber = logs[0].blockNumber;
@@ -319,16 +319,16 @@ export class CCIPLiteHelper {
             case 0:
               return status;
             case 1:
-              status.state = "IN_PROGRESS";
+              status.state = 'IN_PROGRESS';
               return status;
             case 2:
-              status.state = "SUCCESS";
+              status.state = 'SUCCESS';
               return status;
             case 3:
-              status.state = "FAILURE";
+              status.state = 'FAILURE';
               return status;
             default:
-              status.state = "UNKNOWN";
+              status.state = 'UNKNOWN';
               return status;
           }
         }

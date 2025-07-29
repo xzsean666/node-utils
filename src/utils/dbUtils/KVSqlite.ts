@@ -244,6 +244,45 @@ export class SqliteKVDatabase {
     return deserializedValue;
   }
 
+  async merge(key: string, value: any): Promise<void> {
+    await this.ensureInitialized();
+
+    // 先判断是不是JSON类型，如果不是直接抛出错误
+    if (this.valueType !== SqliteValueType.JSON) {
+      throw new Error(
+        `Merge operation is only supported for JSON type, current type is: ${this.valueType}`,
+      );
+    }
+
+    // 如果是JSON，先把原有的value取出来
+    const existingValue = await this.get(key);
+
+    let mergedValue: any;
+    if (existingValue === null) {
+      // 如果原来没有值，直接使用新值
+      mergedValue = value;
+    } else {
+      // 检查原有值和新值是否都是对象类型，才能进行合并
+      if (
+        typeof existingValue === 'object' &&
+        existingValue !== null &&
+        typeof value === 'object' &&
+        value !== null &&
+        !Array.isArray(existingValue) &&
+        !Array.isArray(value)
+      ) {
+        // 将新值与原有值合并
+        mergedValue = { ...existingValue, ...value };
+      } else {
+        // 如果不是对象类型，直接替换
+        mergedValue = value;
+      }
+    }
+
+    // 存储合并后的值
+    await this.put(key, mergedValue);
+  }
+
   async delete(key: string): Promise<boolean> {
     await this.ensureInitialized();
     const result = await this.db.delete({ key });
@@ -273,19 +312,38 @@ export class SqliteKVDatabase {
   async getAll(): Promise<Record<string, any>> {
     await this.ensureInitialized();
     const records = await this.db.find();
-    return records.reduce((acc, record: { key: any; value: any }) => {
-      acc[record.key] = this.typeHandler.deserialize(record.value);
-      return acc;
-    }, {} as Record<string, any>);
+    return records.reduce(
+      (acc, record: { key: any; value: any }) => {
+        acc[record.key] = this.typeHandler.deserialize(record.value);
+        return acc;
+      },
+      {} as Record<string, any>,
+    );
   }
 
-  async getMany(limit: number = 10): Promise<Record<string, any>> {
+  async getMany(keys: string[]): Promise<Record<string, any>> {
     await this.ensureInitialized();
-    const records = await this.db.find({ take: limit });
-    return records.reduce((acc, record: { key: any; value: any }) => {
-      acc[record.key] = this.typeHandler.deserialize(record.value);
-      return acc;
-    }, {} as Record<string, any>);
+    if (keys.length === 0) {
+      return {};
+    }
+
+    const records = await this.db.find({ where: { key: In(keys) } });
+
+    // 使用Map提高查找性能，避免O(n²)复杂度
+    const recordMap = new Map(
+      records.map((record) => [
+        record.key,
+        this.typeHandler.deserialize(record.value),
+      ]),
+    );
+
+    // 为所有请求的keys分配值，不存在的返回null
+    const result: Record<string, any> = {};
+    for (const key of keys) {
+      result[key] = recordMap.get(key) ?? null;
+    }
+
+    return result;
   }
 
   // 获取所有键

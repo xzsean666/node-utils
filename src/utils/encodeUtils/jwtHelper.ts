@@ -32,15 +32,19 @@ export class JWTHelper {
   public verifyToken(token: string): JWTPayload {
     try {
       const decoded = jwt.verify(token, this.secretKey) as JWTPayload;
-      if (this.isTokenExpired(token)) {
-        throw new Error('Token has expired');
-      }
       return decoded;
     } catch (error) {
-      if (error instanceof Error) {
-        throw error;
+      // jwt库会抛出不同类型的错误
+      if (error.name === 'TokenExpiredError') {
+        throw new Error('TOKEN_EXPIRED');
       }
-      throw new Error('Invalid token');
+      if (error.name === 'JsonWebTokenError') {
+        throw new Error('INVALID_TOKEN');
+      }
+      if (error.name === 'NotBeforeError') {
+        throw new Error('TOKEN_NOT_ACTIVE');
+      }
+      throw new Error('INVALID_TOKEN');
     }
   }
 

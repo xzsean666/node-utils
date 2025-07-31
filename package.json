@@ -87,6 +87,7 @@
       "bufferutil",
       "core-js",
       "es5-ext",
+      "ffmpeg-static",
       "keccak",
       "secp256k1",
       "sqlite3",

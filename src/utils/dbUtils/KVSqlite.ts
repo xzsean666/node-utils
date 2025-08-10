@@ -1,4 +1,4 @@
-import { DataSource, Repository, Table, In } from 'typeorm';
+import { DataSource, Repository, Table, In, MoreThan } from 'typeorm';
 import {
   Entity,
   PrimaryColumn,
@@ -87,6 +87,7 @@ export class SqliteKVDatabase {
   private db: Repository<KVEntity>;
   private dataSource: DataSource;
   private initialized = false;
+  private initializingPromise: Promise<void> | null = null;
   private tableName: string;
   private CustomKVStore: any;
   private valueType: SqliteValueType;
@@ -127,8 +128,20 @@ export class SqliteKVDatabase {
   }
 
   private async ensureInitialized(): Promise<void> {
-    if (!this.initialized) {
-      await this.dataSource.initialize();
+    if (this.initialized && this.dataSource?.isInitialized && this.db) {
+      return;
+    }
+
+    if (this.initializingPromise) {
+      await this.initializingPromise;
+      return;
+    }
+
+    this.initializingPromise = (async () => {
+      if (!this.dataSource.isInitialized) {
+        await this.dataSource.initialize();
+      }
+
       this.db = this.dataSource.getRepository(this.CustomKVStore);
 
       if (this.dataSource.options.synchronize) {
@@ -172,6 +185,12 @@ export class SqliteKVDatabase {
       }
 
       this.initialized = true;
+    })();
+
+    try {
+      await this.initializingPromise;
+    } finally {
+      this.initializingPromise = null;
     }
   }
 
@@ -346,6 +365,31 @@ export class SqliteKVDatabase {
     return result;
   }
 
+  async getRecent(
+    limit: number = 100,
+    seconds: number = 0,
+  ): Promise<Record<string, any>> {
+    await this.ensureInitialized();
+    const baseOptions: any = {
+      order: { created_at: 'DESC' },
+      take: limit,
+    };
+
+    if (seconds > 0) {
+      baseOptions.where = {
+        created_at: MoreThan(new Date(Date.now() - seconds * 1000)),
+      };
+    }
+
+    const records = await this.db.find(baseOptions);
+    return records.reduce(
+      (acc, record: { key: any; value: any }) => {
+        acc[record.key] = this.typeHandler.deserialize(record.value);
+        return acc;
+      },
+      {} as Record<string, any>,
+    );
+  }
   // 获取所有键
   async keys(): Promise<string[]> {
     await this.ensureInitialized();

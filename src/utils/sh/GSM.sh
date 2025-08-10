@@ -3,6 +3,15 @@
 # GitHub 更新检查脚本 - 支持私有仓库
 
 # 获取 GitHub Token 和更新后操作脚本相关参数
+
+# 如果环境变量中没有 GITHUB_TOKEN，尝试从当前目录的 .env 中加载
+if [ -z "$GITHUB_TOKEN" ] && [ -f ".env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env
+    set +a
+fi
+
 if [ -n "$GITHUB_TOKEN" ]; then
     TOKEN="$GITHUB_TOKEN"
 elif [ -n "$1" ] && [[ "$1" != /* ]]; then
@@ -23,6 +32,12 @@ echo "开始检查更新: $(date '+%Y-%m-%d %H:%M:%S')"
 # 配置Git安全设置（防止Docker权限问题）
 git config --global --add safe.directory "$(pwd)" 2>/dev/null || true
 git config --global --add safe.directory /app 2>/dev/null || true
+
+# 配置Git网络设置（解决HTTP/2问题）
+git config --global http.version HTTP/1.1
+git config --global http.postBuffer 1048576000
+git config --global http.lowSpeedLimit 0
+git config --global http.lowSpeedTime 999999
 
 # 检查是否在Git仓库中
 if [ ! -d ".git" ]; then

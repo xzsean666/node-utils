@@ -328,36 +328,72 @@ export class SqliteKVDatabase {
   }
 
   // 获取所有键值对
-  async getAll(): Promise<Record<string, any>> {
+  async getAll<T = any>(options?: {
+    includeTimestamps?: boolean;
+  }): Promise<
+    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
+  > {
     await this.ensureInitialized();
+    const includeTimestamps = options?.includeTimestamps === true;
     const records = await this.db.find();
+
     return records.reduce(
-      (acc, record: { key: any; value: any }) => {
-        acc[record.key] = this.typeHandler.deserialize(record.value);
+      (
+        acc,
+        record: { key: any; value: any; created_at: Date; updated_at: Date },
+      ) => {
+        const deserialized = this.typeHandler.deserialize(record.value) as T;
+        acc[record.key] = includeTimestamps
+          ? {
+              value: deserialized,
+              created_at: record.created_at,
+              updated_at: record.updated_at,
+            }
+          : deserialized;
         return acc;
       },
-      {} as Record<string, any>,
+      {} as Record<
+        string,
+        T | { value: T; created_at: Date; updated_at: Date }
+      >,
     );
   }
 
-  async getMany(keys: string[]): Promise<Record<string, any>> {
+  async getMany<T = any>(
+    keys: string[],
+    options?: { includeTimestamps?: boolean },
+  ): Promise<
+    Record<string, T | { value: T; created_at: Date; updated_at: Date } | null>
+  > {
     await this.ensureInitialized();
     if (keys.length === 0) {
       return {};
     }
 
+    const includeTimestamps = options?.includeTimestamps === true;
     const records = await this.db.find({ where: { key: In(keys) } });
 
     // 使用Map提高查找性能，避免O(n²)复杂度
-    const recordMap = new Map(
-      records.map((record) => [
+    const recordMap = new Map<string, any>();
+    for (const record of records) {
+      const deserialized = this.typeHandler.deserialize(record.value) as T;
+      recordMap.set(
         record.key,
-        this.typeHandler.deserialize(record.value),
-      ]),
-    );
+        includeTimestamps
+          ? {
+              value: deserialized,
+              created_at: record.created_at,
+              updated_at: record.updated_at,
+            }
+          : deserialized,
+      );
+    }
 
     // 为所有请求的keys分配值，不存在的返回null
-    const result: Record<string, any> = {};
+    const result: Record<
+      string,
+      T | { value: T; created_at: Date; updated_at: Date } | null
+    > = {};
     for (const key of keys) {
       result[key] = recordMap.get(key) ?? null;
     }
@@ -365,11 +401,15 @@ export class SqliteKVDatabase {
     return result;
   }
 
-  async getRecent(
+  async getRecent<T = any>(
     limit: number = 100,
     seconds: number = 0,
-  ): Promise<Record<string, any>> {
+    options?: { includeTimestamps?: boolean },
+  ): Promise<
+    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
+  > {
     await this.ensureInitialized();
+    const includeTimestamps = options?.includeTimestamps === true;
     const baseOptions: any = {
       order: { created_at: 'DESC' },
       take: limit,
@@ -383,11 +423,24 @@ export class SqliteKVDatabase {
 
     const records = await this.db.find(baseOptions);
     return records.reduce(
-      (acc, record: { key: any; value: any }) => {
-        acc[record.key] = this.typeHandler.deserialize(record.value);
+      (
+        acc,
+        record: { key: any; value: any; created_at: Date; updated_at: Date },
+      ) => {
+        const deserialized = this.typeHandler.deserialize(record.value) as T;
+        acc[record.key] = includeTimestamps
+          ? {
+              value: deserialized,
+              created_at: record.created_at,
+              updated_at: record.updated_at,
+            }
+          : deserialized;
         return acc;
       },
-      {} as Record<string, any>,
+      {} as Record<
+        string,
+        T | { value: T; created_at: Date; updated_at: Date }
+      >,
     );
   }
   // 获取所有键

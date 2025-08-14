@@ -68,13 +68,10 @@ export class EthersUtils {
     );
 
     // 将结果转换为字典格式
-    return statuses.reduce(
-      (acc, { rpc, blockNumber, latency }) => {
-        acc[rpc] = { blockNumber, latency };
-        return acc;
-      },
-      {} as { [key: string]: { blockNumber: number; latency: number } },
-    );
+    return statuses.reduce((acc, { rpc, blockNumber, latency }) => {
+      acc[rpc] = { blockNumber, latency };
+      return acc;
+    }, {} as { [key: string]: { blockNumber: number; latency: number } });
   }
   static async getCurrentChainStatus(rpc: string) {
     const provider = new ethers.JsonRpcProvider(rpc);
@@ -366,10 +363,33 @@ export class EthersUtils {
       };
     } catch (error: any) {
       console.error('交易发送失败:', error);
+
+      // 尝试从错误中提取交易hash（特别是"already known"的情况）
+      const errorInfo = this.extractHashFromTransactionError(error);
+      let extractedHash = '';
+
+      if (errorInfo.success && errorInfo.hash) {
+        extractedHash = errorInfo.hash;
+        console.log(`从错误中提取到交易hash: ${extractedHash}`);
+
+        // 如果是"already known"错误，使用增强的错误处理
+        if (errorInfo.isAlreadyKnown) {
+          console.log('检测到already known错误，使用增强处理...');
+          const enhancedResult = await this.handleAlreadyKnownError(
+            error,
+            call,
+          );
+
+          if (enhancedResult) {
+            return enhancedResult;
+          }
+        }
+      }
+
       return {
         target: call.target,
         success: false,
-        transactionHash: '',
+        transactionHash: extractedHash,
         function: call.functionName || '',
         args: call.executeArgs || [],
         decodedData: null,
@@ -1111,6 +1131,829 @@ export class EthersUtils {
     } catch (error: any) {
       throw new Error(`估算gas成本失败: ${error.message}`);
     }
+  }
+
+  /**
+   * 计算各种类型的hash值
+   * @param params 计算参数
+   * @returns 计算结果，包含hash值和可能的错误信息
+   */
+  calculateHash(params: {
+    data?: string;
+    types?: string[];
+    values?: any[];
+    text?: string;
+    functionSignature?: string;
+    eventSignature?: string;
+    transaction?: {
+      to: string;
+      value: string;
+      data: string;
+      nonce: number;
+      gasLimit: string;
+      gasPrice: string;
+    };
+    type:
+      | 'keccak256'
+      | 'id'
+      | 'solidityPacked'
+      | 'transactionHash'
+      | 'messageHash';
+  }): {
+    hash: string | null;
+    success: boolean;
+    error?: string;
+    type: string;
+  } {
+    let computedHash: string | null = null;
+    let errorMessage: string | undefined;
+
+    try {
+      switch (params.type) {
+        case 'keccak256':
+          // 计算数据的 keccak256 hash
+          if (!params.data) {
+            throw new Error('计算keccak256需要提供data参数');
+          }
+          computedHash = ethers.keccak256(params.data);
+          break;
+
+        case 'id':
+          // 计算字符串的 keccak256 hash（用于函数签名、事件签名等）
+          if (params.functionSignature) {
+            computedHash = ethers.id(params.functionSignature);
+          } else if (params.eventSignature) {
+            computedHash = ethers.id(params.eventSignature);
+          } else if (params.text) {
+            computedHash = ethers.id(params.text);
+          } else {
+            throw new Error(
+              '计算id hash需要提供functionSignature、eventSignature或text参数',
+            );
+          }
+          break;
+
+        case 'solidityPacked':
+          // 计算 Solidity packed 编码后的 keccak256
+          if (!params.types || !params.values) {
+            throw new Error('计算solidityPacked hash需要提供types和values参数');
+          }
+          computedHash = ethers.solidityPackedKeccak256(
+            params.types,
+            params.values,
+          );
+          break;
+
+        case 'transactionHash':
+          // 计算交易hash
+          if (!params.transaction) {
+            throw new Error('计算交易hash需要提供transaction参数');
+          }
+          const txData = {
+            to: params.transaction.to,
+            value: params.transaction.value,
+            data: params.transaction.data,
+            nonce: params.transaction.nonce,
+            gasLimit: params.transaction.gasLimit,
+            gasPrice: params.transaction.gasPrice,
+          };
+          // 使用ethers对交易数据进行编码后计算hash
+          const serialized = ethers.Transaction.from(txData).serialized;
+          computedHash = ethers.keccak256(serialized);
+          break;
+
+        case 'messageHash':
+          // 计算以太坊消息hash (用于签名验证等)
+          if (!params.text) {
+            throw new Error('计算消息hash需要提供text参数');
+          }
+          computedHash = ethers.hashMessage(params.text);
+          break;
+
+        default:
+          throw new Error('不支持的hash类型');
+      }
+
+      return {
+        hash: computedHash,
+        success: true,
+        type: params.type,
+      };
+    } catch (error: any) {
+      errorMessage = error.message;
+
+      // 即使出错，也尝试计算可能的hash值
+      try {
+        switch (params.type) {
+          case 'keccak256':
+            if (params.data) {
+              computedHash = ethers.keccak256(params.data);
+            }
+            break;
+          case 'id':
+            const textToHash =
+              params.functionSignature || params.eventSignature || params.text;
+            if (textToHash) {
+              computedHash = ethers.id(textToHash);
+            }
+            break;
+          case 'solidityPacked':
+            if (params.types && params.values) {
+              computedHash = ethers.solidityPackedKeccak256(
+                params.types,
+                params.values,
+              );
+            }
+            break;
+          case 'transactionHash':
+            if (params.transaction) {
+              try {
+                const txData = {
+                  to: params.transaction.to,
+                  value: params.transaction.value,
+                  data: params.transaction.data,
+                  nonce: params.transaction.nonce,
+                  gasLimit: params.transaction.gasLimit,
+                  gasPrice: params.transaction.gasPrice,
+                };
+                const serialized = ethers.Transaction.from(txData).serialized;
+                computedHash = ethers.keccak256(serialized);
+              } catch {
+                // 如果交易数据无效，尝试计算原始数据的hash
+                const rawData = JSON.stringify(params.transaction);
+                computedHash = ethers.keccak256(ethers.toUtf8Bytes(rawData));
+              }
+            }
+            break;
+          case 'messageHash':
+            if (params.text) {
+              computedHash = ethers.hashMessage(params.text);
+            }
+            break;
+        }
+      } catch {
+        // 如果在错误处理中再次失败，保持computedHash为null
+      }
+
+      return {
+        hash: computedHash,
+        success: false,
+        error: `计算hash失败: ${errorMessage}`,
+        type: params.type,
+      };
+    }
+  }
+
+  /**
+   * 从原始交易数据计算交易hash
+   * @param rawTxData 原始交易数据（十六进制字符串）
+   * @returns 交易hash
+   */
+  calculateHashFromRawTransaction(rawTxData: string): {
+    hash: string | null;
+    success: boolean;
+    error?: string;
+    transactionDetails?: any;
+  } {
+    try {
+      // 确保数据以0x开头
+      const normalizedData = rawTxData.startsWith('0x')
+        ? rawTxData
+        : `0x${rawTxData}`;
+
+      // 方法1: 使用ethers解析交易并获取hash
+      try {
+        const parsedTx = ethers.Transaction.from(normalizedData);
+        const hash = parsedTx.hash;
+
+        if (hash) {
+          return {
+            hash,
+            success: true,
+            transactionDetails: {
+              to: parsedTx.to,
+              value: parsedTx.value?.toString(),
+              gasLimit: parsedTx.gasLimit?.toString(),
+              gasPrice: parsedTx.gasPrice?.toString(),
+              nonce: parsedTx.nonce,
+              data: parsedTx.data,
+              type: parsedTx.type,
+            },
+          };
+        }
+      } catch (parseError) {
+        console.warn('使用Transaction.from解析失败，尝试其他方法:', parseError);
+      }
+
+      // 方法2: 直接计算keccak256 (作为备用方案)
+      const directHash = ethers.keccak256(normalizedData);
+
+      return {
+        hash: directHash,
+        success: true,
+        transactionDetails: {
+          rawData: normalizedData,
+          method: 'direct_keccak256',
+          note: '使用直接keccak256计算，可能不是正确的交易hash',
+        },
+      };
+    } catch (error: any) {
+      return {
+        hash: null,
+        success: false,
+        error: `计算原始交易hash失败: ${error.message}`,
+      };
+    }
+  }
+
+  /**
+   * 从错误信息中提取交易相关信息
+   * @param error 错误对象或错误消息
+   * @returns 提取的交易信息和计算出的hash
+   */
+  extractHashFromTransactionError(error: any): {
+    hash: string | null;
+    rawTransaction: string | null;
+    errorCode: string | null;
+    errorMessage: string | null;
+    isAlreadyKnown: boolean;
+    success: boolean;
+  } {
+    try {
+      let rawTransaction: string | null = null;
+      let errorCode: string | null = null;
+      let errorMessage: string | null = null;
+      let hash: string | null = null;
+      let isAlreadyKnown = false;
+
+      // 解析错误信息
+      const errorString =
+        typeof error === 'string'
+          ? error
+          : error.message || JSON.stringify(error);
+
+      // 检查是否是"already known"错误
+      if (errorString.includes('already known')) {
+        isAlreadyKnown = true;
+      }
+
+      // 尝试从错误中提取原始交易数据
+      const rawTxMatch = errorString.match(/"0x[a-fA-F0-9]+"/g);
+      if (rawTxMatch && rawTxMatch.length > 0) {
+        // 找到最长的十六进制字符串，通常是原始交易数据
+        rawTransaction = rawTxMatch
+          .map((match) => match.replace(/"/g, ''))
+          .sort((a, b) => b.length - a.length)[0];
+      }
+
+      // 尝试提取错误代码
+      const codeMatch = errorString.match(/"code":\s*(-?\d+)/);
+      if (codeMatch) {
+        errorCode = codeMatch[1];
+      }
+
+      // 尝试提取错误消息
+      const messageMatch = errorString.match(/"message":\s*"([^"]+)"/);
+      if (messageMatch) {
+        errorMessage = messageMatch[1];
+      }
+
+      // 如果找到了原始交易数据，计算hash
+      if (rawTransaction) {
+        const hashResult = this.calculateHashFromRawTransaction(rawTransaction);
+        hash = hashResult.hash;
+      }
+
+      return {
+        hash,
+        rawTransaction,
+        errorCode,
+        errorMessage,
+        isAlreadyKnown,
+        success: true,
+      };
+    } catch (extractError: any) {
+      return {
+        hash: null,
+        rawTransaction: null,
+        errorCode: null,
+        errorMessage: null,
+        isAlreadyKnown: false,
+        success: false,
+      };
+    }
+  }
+
+  /**
+   * 等待交易被确认或查找pending交易
+   * @param txHash 交易hash
+   * @param maxWaitTime 最大等待时间（毫秒）
+   * @param checkInterval 检查间隔（毫秒）
+   * @returns 交易收据或状态信息
+   */
+  async waitForTransactionOrFindPending(
+    txHash: string,
+    maxWaitTime: number = 30000,
+    checkInterval: number = 2000,
+  ): Promise<{
+    receipt: ethers.TransactionReceipt | null;
+    transaction: ethers.TransactionResponse | null;
+    status: 'confirmed' | 'pending' | 'not_found' | 'timeout';
+    waitTime: number;
+  }> {
+    const startTime = Date.now();
+    let currentTime = startTime;
+
+    while (currentTime - startTime < maxWaitTime) {
+      try {
+        // 1. 尝试获取交易收据（已确认）
+        const receipt = await this.web3.getTransactionReceipt(txHash);
+        if (receipt) {
+          return {
+            receipt,
+            transaction: null,
+            status: 'confirmed',
+            waitTime: currentTime - startTime,
+          };
+        }
+
+        // 2. 尝试获取交易信息（可能在pending中）
+        const transaction = await this.web3.getTransaction(txHash);
+        if (transaction) {
+          return {
+            receipt: null,
+            transaction,
+            status: 'pending',
+            waitTime: currentTime - startTime,
+          };
+        }
+
+        // 3. 等待后再次检查
+        await new Promise((resolve) => setTimeout(resolve, checkInterval));
+        currentTime = Date.now();
+      } catch (error) {
+        console.warn(`检查交易 ${txHash} 时出错:`, error);
+        await new Promise((resolve) => setTimeout(resolve, checkInterval));
+        currentTime = Date.now();
+      }
+    }
+
+    return {
+      receipt: null,
+      transaction: null,
+      status: 'timeout',
+      waitTime: maxWaitTime,
+    };
+  }
+
+  /**
+   * 增强的"already known"错误处理
+   * @param error 错误信息
+   * @param call 原始调用参数
+   * @returns 处理结果
+   */
+  async handleAlreadyKnownError(error: any, call: any) {
+    console.log('处理already known错误...');
+
+    // 1. 提取错误信息
+    const errorInfo = this.extractHashFromTransactionError(error);
+
+    if (!errorInfo.success || !errorInfo.hash) {
+      console.log('无法从错误中提取hash信息');
+      return null;
+    }
+
+    const extractedHash = errorInfo.hash;
+    console.log(`提取到的hash: ${extractedHash}`);
+    console.log('交易详情:', errorInfo);
+
+    // 2. 等待交易确认或查找pending状态
+    console.log('等待交易确认...');
+    const result = await this.waitForTransactionOrFindPending(
+      extractedHash,
+      60000,
+      3000,
+    );
+
+    console.log(`交易状态: ${result.status}, 等待时间: ${result.waitTime}ms`);
+
+    let decodedLogs: (ethers.LogDescription | null)[] | null = null;
+
+    // 3. 如果交易已确认，解码日志
+    if (result.status === 'confirmed' && result.receipt && call.abi) {
+      try {
+        const iface = new ethers.Interface(call.abi);
+        decodedLogs =
+          result.receipt.logs
+            .map((log) => {
+              try {
+                return iface.parseLog({
+                  topics: [...log.topics],
+                  data: log.data,
+                });
+              } catch (e) {
+                return null;
+              }
+            })
+            .filter(Boolean) || null;
+      } catch (decodeError) {
+        console.warn('解码日志失败:', decodeError);
+      }
+    }
+
+    // 4. 返回结果
+    const success =
+      result.status === 'confirmed' || result.status === 'pending';
+
+    return {
+      target: call.target,
+      success,
+      transactionHash: extractedHash,
+      function: call.functionName || '',
+      args: call.executeArgs || [],
+      decodedData: decodedLogs,
+      error: success
+        ? `交易${result.status === 'confirmed' ? '已确认' : '待确认'}: ${
+            errorInfo.errorMessage
+          }`
+        : `交易未找到或超时: ${errorInfo.errorMessage}`,
+      transactionStatus: {
+        status: result.status,
+        waitTime: result.waitTime,
+        hasReceipt: !!result.receipt,
+        hasTransaction: !!result.transaction,
+      },
+    };
+  }
+
+  /**
+   * 检查地址的交易状态，包括pending和最近的交易
+   * @param address 要检查的地址
+   * @param maxRecentTxs 检查最近的交易数量，默认10个
+   * @returns 地址的交易状态报告
+   */
+  async checkAddressTransactionStatus(
+    address: string,
+    maxRecentTxs: number = 10,
+    options?: {
+      scanBlocks?: boolean; // 是否扫描最近区块以获取交易记录（默认false避免阻塞）
+      maxBlocks?: number; // 扫描的最大区块数上限
+      timeoutMs?: number; // 扫描超时时间
+    },
+  ): Promise<{
+    address: string;
+    currentNonce: number;
+    onChainNonce: number;
+    isPendingStuck: boolean;
+    pendingCount: number;
+    recentTransactions: Array<{
+      hash: string;
+      nonce: number;
+      status: 'confirmed' | 'pending' | 'failed';
+      gasPrice: string;
+      gasLimit: string;
+      blockNumber?: number;
+      timestamp?: number;
+      age?: string;
+    }>;
+    recommendations: string[];
+    summary: {
+      hasStuckTransactions: boolean;
+      pendingDuration?: number;
+      suggestedAction?: string;
+    };
+  }> {
+    try {
+      // 验证地址格式
+      const normalizedAddress = this.checkAddress(address);
+      if (!normalizedAddress) {
+        throw new Error('无效的地址格式');
+      }
+
+      console.log(`=== 检查地址交易状态: ${normalizedAddress} ===`);
+
+      // 1. 获取当前nonce（包括pending）
+      const currentNonce = await this.web3.getTransactionCount(
+        normalizedAddress,
+        'pending',
+      );
+
+      // 2. 获取链上确认的nonce
+      const onChainNonce = await this.web3.getTransactionCount(
+        normalizedAddress,
+        'latest',
+      );
+
+      const pendingCount = currentNonce - onChainNonce;
+      const isPendingStuck = pendingCount > 0;
+
+      console.log(
+        `链上Nonce: ${onChainNonce}, 当前Nonce: ${currentNonce}, Pending: ${pendingCount}`,
+      );
+
+      // 3. 获取最近的交易记录（默认不扫描，避免阻塞）
+      const recentTransactions: any[] = [];
+      const scanBlocks = options?.scanBlocks ?? false;
+      const maxBlocks = Math.max(1, Math.min(options?.maxBlocks ?? 200, 200));
+      const scanDeadline = Date.now() + (options?.timeoutMs ?? 4000);
+
+      if (!scanBlocks) {
+        console.log('跳过区块扫描（scanBlocks=false）');
+      } else {
+        let currentBlockNumber = await this.web3.getBlockNumber();
+        let foundTxs = 0;
+
+        // 从最新区块开始往前搜索，带超时控制
+        for (
+          let blockNum = currentBlockNumber;
+          blockNum > currentBlockNumber - maxBlocks && foundTxs < maxRecentTxs;
+          blockNum--
+        ) {
+          if (Date.now() > scanDeadline) {
+            console.warn('扫描超时，提前结束区块扫描');
+            break;
+          }
+          try {
+            const block = await this.web3.getBlock(blockNum, true);
+            if (!block || !block.transactions) continue;
+
+            for (const tx of block.transactions) {
+              if (
+                typeof tx === 'object' &&
+                tx !== null &&
+                'from' in tx &&
+                'to' in tx
+              ) {
+                const transaction = tx as ethers.TransactionResponse;
+                const fromMatch =
+                  transaction.from?.toLowerCase() ===
+                  normalizedAddress.toLowerCase();
+                const toMatch =
+                  transaction.to?.toLowerCase() ===
+                  normalizedAddress.toLowerCase();
+                if (fromMatch || toMatch) {
+                  // 尽量减少额外RPC调用，收据仅在必要时查询
+                  let status: 'confirmed' | 'pending' | 'failed' = 'pending';
+                  try {
+                    const receipt = await this.web3.getTransactionReceipt(
+                      transaction.hash,
+                    );
+                    if (receipt) {
+                      status = receipt.status === 1 ? 'confirmed' : 'failed';
+                    }
+                  } catch {}
+
+                  const age = this.formatAge(
+                    Date.now() / 1000 - Number(block.timestamp),
+                  );
+
+                  recentTransactions.push({
+                    hash: transaction.hash,
+                    nonce: transaction.nonce,
+                    status,
+                    gasPrice: ethers.formatUnits(
+                      transaction.gasPrice || 0,
+                      'gwei',
+                    ),
+                    gasLimit: transaction.gasLimit?.toString() || '0',
+                    blockNumber: block.number,
+                    timestamp: Number(block.timestamp),
+                    age: age,
+                  });
+
+                  foundTxs++;
+                  if (foundTxs >= maxRecentTxs) break;
+                }
+              }
+            }
+          } catch (error) {
+            // 跳过无法访问的区块
+            continue;
+          }
+        }
+      }
+
+      // 4. 检查是否有pending交易
+      const pendingTxs: any[] = [];
+      if (isPendingStuck) {
+        // 尝试获取pending交易（这需要特殊的RPC支持）
+        try {
+          // 某些RPC提供者支持 txpool_content
+          const pendingPool = await this.web3.send('txpool_content', []);
+          const addressPending =
+            pendingPool?.pending?.[normalizedAddress.toLowerCase()];
+
+          if (addressPending) {
+            Object.values(addressPending).forEach((tx: any) => {
+              pendingTxs.push({
+                hash: tx.hash,
+                nonce: parseInt(tx.nonce, 16),
+                status: 'pending' as const,
+                gasPrice: ethers.formatUnits(BigInt(tx.gasPrice), 'gwei'),
+                gasLimit: parseInt(tx.gas, 16).toString(),
+                age: '等待中...',
+              });
+            });
+          }
+        } catch (error) {
+          console.warn('无法获取pending交易详情，RPC可能不支持txpool_content');
+        }
+      }
+
+      // 5. 合并并排序交易
+      const allTransactions = [...recentTransactions, ...pendingTxs]
+        .sort((a, b) => (b.nonce || 0) - (a.nonce || 0))
+        .slice(0, maxRecentTxs);
+
+      // 6. 分析和建议
+      const recommendations: string[] = [];
+      let hasStuckTransactions = false;
+      let suggestedAction = '';
+      let pendingDuration: number | undefined;
+
+      if (isPendingStuck) {
+        hasStuckTransactions = true;
+        recommendations.push(`⚠️  发现 ${pendingCount} 笔待处理交易`);
+
+        const oldestPending = allTransactions
+          .filter((tx) => tx.status === 'pending')
+          .sort((a, b) => (a.nonce || 0) - (b.nonce || 0))[0];
+
+        if (oldestPending && oldestPending.timestamp) {
+          pendingDuration = Date.now() / 1000 - oldestPending.timestamp;
+          if (pendingDuration > 300) {
+            // 5分钟
+            recommendations.push(
+              `🕐 最老的pending交易已等待 ${this.formatAge(pendingDuration)}`,
+            );
+
+            if (pendingDuration > 1800) {
+              // 30分钟
+              suggestedAction = 'cancel_or_speedup';
+              recommendations.push('💡 建议：交易可能已卡住，考虑加速或取消');
+              recommendations.push(
+                `🚀 可以使用 cancelPendingTransaction(${oldestPending.nonce}) 取消`,
+              );
+            } else if (pendingDuration > 600) {
+              // 10分钟
+              suggestedAction = 'speedup';
+              recommendations.push('💡 建议：可以尝试加速交易（提高gas价格）');
+            }
+          }
+        }
+
+        // 检查gas价格是否过低
+        const pendingGasPrices = allTransactions
+          .filter((tx) => tx.status === 'pending')
+          .map((tx) => parseFloat(tx.gasPrice));
+
+        if (pendingGasPrices.length > 0) {
+          const avgPendingGas =
+            pendingGasPrices.reduce((a, b) => a + b) / pendingGasPrices.length;
+          const currentGasPrice = await this.web3.getFeeData();
+          const currentGasPriceGwei = parseFloat(
+            ethers.formatUnits(currentGasPrice.gasPrice || 0, 'gwei'),
+          );
+
+          if (avgPendingGas < currentGasPriceGwei * 0.8) {
+            recommendations.push(
+              `⛽ Pending交易gas价格较低 (${avgPendingGas.toFixed(
+                2,
+              )} gwei vs 当前 ${currentGasPriceGwei.toFixed(2)} gwei)`,
+            );
+          }
+        }
+      } else {
+        recommendations.push('✅ 没有发现待处理的交易');
+      }
+
+      // 检查nonce gap
+      const confirmedTxs = allTransactions.filter(
+        (tx) => tx.status === 'confirmed',
+      );
+      if (confirmedTxs.length > 1) {
+        for (let i = 0; i < confirmedTxs.length - 1; i++) {
+          const currentNonce = confirmedTxs[i].nonce || 0;
+          const nextNonce = confirmedTxs[i + 1].nonce || 0;
+          if (currentNonce - nextNonce > 1) {
+            recommendations.push(
+              `⚠️  检测到nonce跳跃: ${nextNonce} → ${currentNonce}`,
+            );
+          }
+        }
+      }
+
+      const summary = {
+        hasStuckTransactions,
+        pendingDuration,
+        suggestedAction,
+      };
+
+      console.log('=== 检查完成 ===');
+      console.log(`Pending交易数: ${pendingCount}`);
+      console.log(`最近交易数: ${allTransactions.length}`);
+      recommendations.forEach((rec) => console.log(rec));
+
+      return {
+        address: normalizedAddress,
+        currentNonce,
+        onChainNonce,
+        isPendingStuck,
+        pendingCount,
+        recentTransactions: allTransactions,
+        recommendations,
+        summary,
+      };
+    } catch (error: any) {
+      throw new Error(`检查地址交易状态失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 格式化时间差为可读格式
+   * @param seconds 秒数
+   * @returns 格式化的时间字符串
+   */
+  private formatAge(seconds: number): string {
+    if (seconds < 60) return `${Math.floor(seconds)}秒前`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}分钟前`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}小时前`;
+    return `${Math.floor(seconds / 86400)}天前`;
+  }
+
+  /**
+   * 测试已知错误信息的处理（用于调试）
+   * @param errorMessage 您遇到的错误消息
+   * @returns 处理结果和详细信息
+   */
+  async testAlreadyKnownError(errorMessage: string): Promise<{
+    extraction: any;
+    hashCalculation: any;
+    transactionStatus: any;
+    recommendations: string[];
+  }> {
+    console.log('=== 测试already known错误处理 ===');
+
+    // 1. 提取错误信息
+    const extraction = this.extractHashFromTransactionError(errorMessage);
+    console.log('步骤1 - 错误信息提取:', extraction);
+
+    let hashCalculation: any = null;
+    let transactionStatus: any = null;
+    const recommendations: string[] = [];
+
+    // 2. 如果提取到原始交易数据，计算hash
+    if (extraction.rawTransaction) {
+      hashCalculation = this.calculateHashFromRawTransaction(
+        extraction.rawTransaction,
+      );
+      console.log('步骤2 - Hash计算:', hashCalculation);
+
+      // 3. 如果计算出hash，检查交易状态
+      if (hashCalculation.hash) {
+        console.log('步骤3 - 检查交易状态...');
+        transactionStatus = await this.waitForTransactionOrFindPending(
+          hashCalculation.hash,
+          10000, // 10秒测试
+          2000,
+        );
+        console.log('步骤3 - 交易状态:', transactionStatus);
+      }
+    }
+
+    // 4. 生成建议
+    if (extraction.isAlreadyKnown) {
+      recommendations.push(
+        '✅ 检测到"already known"错误 - 交易可能已在mempool中',
+      );
+    }
+
+    if (hashCalculation?.hash) {
+      recommendations.push(`✅ 计算出交易hash: ${hashCalculation.hash}`);
+      recommendations.push(`🔍 在区块浏览器中搜索: ${hashCalculation.hash}`);
+    }
+
+    if (transactionStatus?.status === 'confirmed') {
+      recommendations.push('✅ 交易已确认！');
+    } else if (transactionStatus?.status === 'pending') {
+      recommendations.push('⏳ 交易在pending状态，请等待确认');
+    } else if (transactionStatus?.status === 'not_found') {
+      recommendations.push('❌ 未找到交易，hash可能不正确');
+    }
+
+    if (!extraction.success) {
+      recommendations.push('❌ 无法提取错误信息，请检查错误格式');
+    }
+
+    console.log('=== 建议 ===');
+    recommendations.forEach((rec) => console.log(rec));
+
+    return {
+      extraction,
+      hashCalculation,
+      transactionStatus,
+      recommendations,
+    };
   }
 }
 

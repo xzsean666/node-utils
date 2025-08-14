@@ -330,12 +330,98 @@ export class SqliteKVDatabase {
   // 获取所有键值对
   async getAll<T = any>(options?: {
     includeTimestamps?: boolean;
+    createdAfter?: Date;
+    createdBefore?: Date;
+    updatedAfter?: Date;
+    updatedBefore?: Date;
   }): Promise<
     Record<string, T | { value: T; created_at: Date; updated_at: Date }>
   > {
     await this.ensureInitialized();
     const includeTimestamps = options?.includeTimestamps === true;
-    const records = await this.db.find();
+
+    // 构建查询条件
+    const whereConditions: any = {};
+
+    if (options?.createdAfter) {
+      whereConditions.created_at = whereConditions.created_at || {};
+      whereConditions.created_at = {
+        ...whereConditions.created_at,
+        $gte: options.createdAfter,
+      };
+    }
+
+    if (options?.createdBefore) {
+      whereConditions.created_at = whereConditions.created_at || {};
+      whereConditions.created_at = {
+        ...whereConditions.created_at,
+        $lte: options.createdBefore,
+      };
+    }
+
+    if (options?.updatedAfter) {
+      whereConditions.updated_at = whereConditions.updated_at || {};
+      whereConditions.updated_at = {
+        ...whereConditions.updated_at,
+        $gte: options.updatedAfter,
+      };
+    }
+
+    if (options?.updatedBefore) {
+      whereConditions.updated_at = whereConditions.updated_at || {};
+      whereConditions.updated_at = {
+        ...whereConditions.updated_at,
+        $lte: options.updatedBefore,
+      };
+    }
+
+    // 如果有筛选条件，使用 TypeORM 的查询方法
+    let records;
+    if (Object.keys(whereConditions).length > 0) {
+      const queryBuilder = this.db.createQueryBuilder(this.tableName);
+
+      if (whereConditions.created_at) {
+        if (whereConditions.created_at.$gte) {
+          queryBuilder.andWhere(
+            `${this.tableName}.created_at >= :createdAfter`,
+            {
+              createdAfter: whereConditions.created_at.$gte,
+            },
+          );
+        }
+        if (whereConditions.created_at.$lte) {
+          queryBuilder.andWhere(
+            `${this.tableName}.created_at <= :createdBefore`,
+            {
+              createdBefore: whereConditions.created_at.$lte,
+            },
+          );
+        }
+      }
+
+      if (whereConditions.updated_at) {
+        if (whereConditions.updated_at.$gte) {
+          queryBuilder.andWhere(
+            `${this.tableName}.updated_at >= :updatedAfter`,
+            {
+              updatedAfter: whereConditions.updated_at.$gte,
+            },
+          );
+        }
+        if (whereConditions.updated_at.$lte) {
+          queryBuilder.andWhere(
+            `${this.tableName}.updated_at <= :updatedBefore`,
+            {
+              updatedBefore: whereConditions.updated_at.$lte,
+            },
+          );
+        }
+      }
+
+      records = await queryBuilder.getMany();
+    } else {
+      records = await this.db.find();
+    }
 
     return records.reduce(
       (

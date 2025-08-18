@@ -1,4 +1,6 @@
-import axios from "axios";
+import axios from 'axios';
+import dotenv from 'dotenv';
+dotenv.config();
 
 export class SlackMessage {
   private blocks: any[];
@@ -6,10 +8,12 @@ export class SlackMessage {
   private username?: string;
   private icon_emoji?: string;
   private channel?: string;
+  private host?: string;
 
   constructor(webhookUrl: string) {
     this.blocks = [];
     this.webhookUrl = webhookUrl;
+    this.host = `Message from ${process.env.HOST_NAME}` || '';
   }
 
   // 设置发送者名称
@@ -42,9 +46,9 @@ export class SlackMessage {
   // 添加普通文本块
   addText(text: string): this {
     this.blocks.push({
-      type: "section",
+      type: 'section',
       text: {
-        type: "mrkdwn",
+        type: 'mrkdwn',
         text: text,
       },
     });
@@ -54,7 +58,7 @@ export class SlackMessage {
   // 添加分割线
   addDivider(): this {
     this.blocks.push({
-      type: "divider",
+      type: 'divider',
     });
     return this;
   }
@@ -62,12 +66,12 @@ export class SlackMessage {
   // 添加按钮
   addButton(text: string, actionId: string, value: string): this {
     this.blocks.push({
-      type: "actions",
+      type: 'actions',
       elements: [
         {
-          type: "button",
+          type: 'button',
           text: {
-            type: "plain_text",
+            type: 'plain_text',
             text: text,
           },
           action_id: actionId,
@@ -81,9 +85,9 @@ export class SlackMessage {
   // 添加字段列表
   addFields(fields: string[]): this {
     this.blocks.push({
-      type: "section",
+      type: 'section',
       fields: fields.map((field) => ({
-        type: "mrkdwn",
+        type: 'mrkdwn',
         text: field,
       })),
     });
@@ -98,13 +102,22 @@ export class SlackMessage {
   // 发送消息到 Slack
   async send(text?: string): Promise<boolean> {
     try {
-      const payload = text ? { text, ...this.getMessage() } : this.getMessage();
+      // 在消息头部添加 host 信息
+      const messageWithHost = this.host
+        ? text
+          ? `${this.host}\n${text}`
+          : this.host
+        : text;
+
+      const payload = messageWithHost
+        ? { text: messageWithHost, ...this.getMessage() }
+        : this.getMessage();
 
       const response = await axios.post(this.webhookUrl, payload);
-      console.log("Message sent to Slack successfully");
+      console.log('Message sent to Slack successfully');
       return response.status === 200;
     } catch (error) {
-      console.error("Failed to send message to Slack:", error);
+      console.error('Failed to send message to Slack:', error);
       return false;
     }
   }

@@ -457,22 +457,60 @@ export class SqliteKVDatabase {
     }
 
     const includeTimestamps = options?.includeTimestamps === true;
-    const records = await this.db.find({ where: { key: In(keys) } });
+
+    // 优化：对于大量键的查询，分批执行避免SQL过长和锁竞争
+    let records: any[] = [];
+    if (keys.length > 50) {
+      // 分批查询，每批50个
+      const batchSize = 50;
+      const allRecords: any[] = [];
+
+      for (let i = 0; i < keys.length; i += batchSize) {
+        const batch = keys.slice(i, i + batchSize);
+        try {
+          const batchRecords = await this.db.find({
+            where: { key: In(batch) },
+            cache: true, // 启用查询缓存
+          });
+          allRecords.push(...batchRecords);
+        } catch (error: any) {
+          console.warn(
+            `Batch query failed for keys ${i}-${i + batchSize}: ${error.message}`,
+          );
+          // 继续执行其他批次
+        }
+      }
+      records = allRecords;
+    } else {
+      // 小批量直接查询
+      records = await this.db.find({
+        where: { key: In(keys) },
+        cache: true, // 启用查询缓存
+      });
+    }
 
     // 使用Map提高查找性能，避免O(n²)复杂度
     const recordMap = new Map<string, any>();
     for (const record of records) {
-      const deserialized = this.typeHandler.deserialize(record.value) as T;
-      recordMap.set(
-        record.key,
-        includeTimestamps
-          ? {
-              value: deserialized,
-              created_at: record.created_at,
-              updated_at: record.updated_at,
-            }
-          : deserialized,
-      );
+      try {
+        const deserialized = this.typeHandler.deserialize(record.value) as T;
+        recordMap.set(
+          record.key,
+          includeTimestamps
+            ? {
+                value: deserialized,
+                created_at: record.created_at,
+                updated_at: record.updated_at,
+              }
+            : deserialized,
+        );
+      } catch (deserializeError: any) {
+        console.warn(
+          `Failed to deserialize record for key ${record.key}: ${deserializeError.message}`,
+        );
+        // 设置为null而不是抛出错误，保证其他数据正常返回
+        recordMap.set(record.key, null);
+      }
     }
 
     // 为所有请求的keys分配值，不存在的返回null

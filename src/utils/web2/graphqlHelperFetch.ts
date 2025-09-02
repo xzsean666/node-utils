@@ -1,3 +1,8 @@
+interface GraphQLResponse<T> {
+  data?: T;
+  errors?: Array<{ message: string }>;
+}
+
 export class GraphQLHelper {
   private endpoint: string;
   private headers: Record<string, string>;
@@ -5,7 +10,7 @@ export class GraphQLHelper {
   constructor(endpoint: string, headers?: Record<string, string>) {
     this.endpoint = endpoint;
     this.headers = {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
       ...(headers || {}),
     };
   }
@@ -18,18 +23,25 @@ export class GraphQLHelper {
    */
   async query<T = any>(
     query: string,
-    variables?: Record<string, any>
+    variables?: Record<string, any>,
   ): Promise<T> {
     try {
       const response = await fetch(this.endpoint, {
-        method: "POST",
+        method: 'POST',
         headers: this.headers,
         body: JSON.stringify({ query, variables }),
       });
-      const data = await response.json();
+      const data: GraphQLResponse<T> = await response.json();
+
+      if (data.errors) {
+        throw new Error(
+          `GraphQL Errors: ${data.errors.map((e: any) => e.message).join(', ')}`,
+        );
+      }
+
       return data.data as T;
     } catch (error) {
-      console.error("GraphQL query error:", error);
+      console.error('GraphQL query error:', error);
       throw error;
     }
   }
@@ -42,7 +54,7 @@ export class GraphQLHelper {
    */
   async mutate<T = any>(
     mutation: string,
-    variables?: Record<string, any>
+    variables?: Record<string, any>,
   ): Promise<T> {
     try {
       // 预处理 variables，自动序列化 JSON 类型的值
@@ -51,26 +63,24 @@ export class GraphQLHelper {
         : undefined;
 
       const response = await fetch(this.endpoint, {
-        method: "POST",
+        method: 'POST',
         headers: this.headers,
         body: JSON.stringify({
           query: mutation,
           variables: processedVariables,
         }),
       });
-      const result = await response.json();
+      const result: GraphQLResponse<T> = await response.json();
 
       if (result.errors) {
         throw new Error(
-          `GraphQL Errors: ${result.errors
-            .map((e: any) => e.message)
-            .join(", ")}`
+          `GraphQL Errors: ${result.errors.map((e: any) => e.message).join(', ')}`,
         );
       }
 
       return result.data as T;
     } catch (error) {
-      console.error("GraphQL mutation error:", error);
+      console.error('GraphQL mutation error:', error);
       throw error;
     }
   }
@@ -81,22 +91,25 @@ export class GraphQLHelper {
    * @returns 处理后的变量对象
    */
   private processVariables(
-    variables: Record<string, any>
+    variables: Record<string, any>,
   ): Record<string, any> {
-    return Object.entries(variables).reduce((acc, [key, value]) => {
-      // 如果值是对象但不是Date、Array等，则序列化
-      if (
-        value &&
-        typeof value === "object" &&
-        !(value instanceof Date) &&
-        !Array.isArray(value)
-      ) {
-        acc[key] = JSON.stringify(value);
-      } else {
-        acc[key] = value;
-      }
-      return acc;
-    }, {} as Record<string, any>);
+    return Object.entries(variables).reduce(
+      (acc, [key, value]) => {
+        // 如果值是对象但不是Date、Array等，则序列化
+        if (
+          value &&
+          typeof value === 'object' &&
+          !(value instanceof Date) &&
+          !Array.isArray(value)
+        ) {
+          acc[key] = JSON.stringify(value);
+        } else {
+          acc[key] = value;
+        }
+        return acc;
+      },
+      {} as Record<string, any>,
+    );
   }
 
   /**

@@ -68,10 +68,13 @@ export class EthersUtils {
     );
 
     // 将结果转换为字典格式
-    return statuses.reduce((acc, { rpc, blockNumber, latency }) => {
-      acc[rpc] = { blockNumber, latency };
-      return acc;
-    }, {} as { [key: string]: { blockNumber: number; latency: number } });
+    return statuses.reduce(
+      (acc, { rpc, blockNumber, latency }) => {
+        acc[rpc] = { blockNumber, latency };
+        return acc;
+      },
+      {} as { [key: string]: { blockNumber: number; latency: number } },
+    );
   }
   static async getCurrentChainStatus(rpc: string) {
     const provider = new ethers.JsonRpcProvider(rpc);
@@ -788,7 +791,7 @@ export class EthersUtils {
       executeArgs: any[];
     }>,
     blockNumber?: number,
-    batchLimit: number = 1000,
+    batchLimit: number = 200,
   ) {
     const IBatchCallABI = batchCallABI;
 

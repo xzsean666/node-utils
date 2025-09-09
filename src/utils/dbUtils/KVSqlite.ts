@@ -334,11 +334,15 @@ export class SqliteKVDatabase {
     createdBefore?: Date;
     updatedAfter?: Date;
     updatedBefore?: Date;
+    offset?: number;
+    limit?: number;
   }): Promise<
     Record<string, T | { value: T; created_at: Date; updated_at: Date }>
   > {
     await this.ensureInitialized();
     const includeTimestamps = options?.includeTimestamps === true;
+    const offset = options?.offset;
+    const limit = options?.limit;
 
     // 构建查询条件
     const whereConditions: any = {};
@@ -375,53 +379,55 @@ export class SqliteKVDatabase {
       };
     }
 
-    // 如果有筛选条件，使用 TypeORM 的查询方法
-    let records;
-    if (Object.keys(whereConditions).length > 0) {
-      const queryBuilder = this.db.createQueryBuilder(this.tableName);
+    // 统一使用 queryBuilder 来支持分页
+    const queryBuilder = this.db.createQueryBuilder(this.tableName);
 
-      if (whereConditions.created_at) {
-        if (whereConditions.created_at.$gte) {
-          queryBuilder.andWhere(
-            `${this.tableName}.created_at >= :createdAfter`,
-            {
-              createdAfter: whereConditions.created_at.$gte,
-            },
-          );
-        }
-        if (whereConditions.created_at.$lte) {
-          queryBuilder.andWhere(
-            `${this.tableName}.created_at <= :createdBefore`,
-            {
-              createdBefore: whereConditions.created_at.$lte,
-            },
-          );
-        }
+    // 添加时间筛选条件
+    if (whereConditions.created_at) {
+      if (whereConditions.created_at.$gte) {
+        queryBuilder.andWhere(`${this.tableName}.created_at >= :createdAfter`, {
+          createdAfter: whereConditions.created_at.$gte,
+        });
       }
-
-      if (whereConditions.updated_at) {
-        if (whereConditions.updated_at.$gte) {
-          queryBuilder.andWhere(
-            `${this.tableName}.updated_at >= :updatedAfter`,
-            {
-              updatedAfter: whereConditions.updated_at.$gte,
-            },
-          );
-        }
-        if (whereConditions.updated_at.$lte) {
-          queryBuilder.andWhere(
-            `${this.tableName}.updated_at <= :updatedBefore`,
-            {
-              updatedBefore: whereConditions.updated_at.$lte,
-            },
-          );
-        }
+      if (whereConditions.created_at.$lte) {
+        queryBuilder.andWhere(
+          `${this.tableName}.created_at <= :createdBefore`,
+          {
+            createdBefore: whereConditions.created_at.$lte,
+          },
+        );
       }
-
-      records = await queryBuilder.getMany();
-    } else {
-      records = await this.db.find();
     }
+
+    if (whereConditions.updated_at) {
+      if (whereConditions.updated_at.$gte) {
+        queryBuilder.andWhere(`${this.tableName}.updated_at >= :updatedAfter`, {
+          updatedAfter: whereConditions.updated_at.$gte,
+        });
+      }
+      if (whereConditions.updated_at.$lte) {
+        queryBuilder.andWhere(
+          `${this.tableName}.updated_at <= :updatedBefore`,
+          {
+            updatedBefore: whereConditions.updated_at.$lte,
+          },
+        );
+      }
+    }
+
+    // 添加分页支持
+    if (offset !== undefined) {
+      queryBuilder.skip(offset);
+    }
+
+    if (limit !== undefined) {
+      queryBuilder.take(limit);
+    }
+
+    // 添加排序以确保分页结果的一致性
+    queryBuilder.orderBy(`${this.tableName}.key`, 'ASC');
+
+    const records = await queryBuilder.getMany();
 
     return records.reduce(
       (

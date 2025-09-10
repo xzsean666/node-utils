@@ -48,6 +48,32 @@ class FFmpegHelper {
   }
 
   /**
+   * Converts height-based resolution to size string for thumbnail generation
+   * @param resolution - Height number (e.g., 480, 720, 1080) or full resolution string
+   * @returns Size string (e.g., "?x720") or full resolution string
+   */
+  private getThumbnailSize(resolution?: string | number): string | undefined {
+    if (!resolution) return undefined;
+
+    // If it's already a full resolution string, return as is
+    if (typeof resolution === 'string' && resolution.includes('x')) {
+      return resolution;
+    }
+
+    // Convert to number if it's a string
+    let height =
+      typeof resolution === 'string' ? parseInt(resolution) : resolution;
+
+    // Ensure height is even
+    if (height % 2 !== 0) {
+      height = height + 1;
+    }
+
+    // Return size format for screenshots API (? means maintain aspect ratio)
+    return `?x${height}`;
+  }
+
+  /**
    * Converts a video to HLS (HTTP Live Streaming) format.
    * @param options - Options for the FFmpeg command.
    * @returns A promise that resolves when the conversion is complete, or rejects on error.

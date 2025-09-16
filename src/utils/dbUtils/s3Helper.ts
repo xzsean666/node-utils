@@ -33,6 +33,28 @@
 //      simplify: true,
 //      expiry: 7 * 24 * 60 * 60
 //    });
+//
+// 7. 删除过期文件（删除30天前的文件）:
+//    const result = await s3Helper.deleteExpire(30 * 24 * 60 * 60);
+//    console.log(`删除了 ${result.deletedFiles} 个过期文件`);
+//
+// 8. 删除指定前缀下1小时前的文件:
+//    await s3Helper.deleteExpire(3600, 'my-bucket', 'temp/');
+//
+// 9. 为单个文件生成签名URL（简化模式）:
+//    const urlResult = await s3Helper.generateSignedUrlsForFile('image.jpg', {
+//      simplify: true,
+//      expiry: 7 * 24 * 60 * 60
+//    });
+//    console.log(`Download URL: ${urlResult.downloadUrl}`);
+//
+// 10. 为单个文件生成完整信息（包含上传URL和元数据）:
+//    const fullResult = await s3Helper.generateSignedUrlsForFile('document.pdf', {
+//      downloadUrls: true,
+//      uploadUrls: true,
+//      includeMetadata: true,
+//      expiry: 3600
+//    });
 import {
   S3Client,
   HeadBucketCommand,
@@ -1800,6 +1822,161 @@ export class S3Helper {
     }
   }
 
+  // 生成单个文件的signed URL
+  async generateSignedUrlsForFile(
+    objectName: string,
+    options?: Omit<GenerateUrlOptions, 'prefix'>,
+  ): Promise<{
+    objectName: string;
+    downloadUrl?: string;
+    uploadUrl?: string;
+    metadata?: {
+      size?: number;
+      lastModified?: Date;
+      etag?: string;
+      contentType?: string;
+    };
+    error?: string;
+  }> {
+    try {
+      const opts = {
+        downloadUrls: true,
+        uploadUrls: false,
+        includeMetadata: false,
+        simplify: false,
+        bucket: this.defaultBucket,
+        expiry: 24 * 60 * 60,
+        ...options,
+      };
+
+      // 如果启用简化模式，强制设置相关选项
+      if (opts.simplify) {
+        opts.downloadUrls = true;
+        opts.uploadUrls = false;
+        opts.includeMetadata = false;
+      }
+
+      console.log(`🔗 Generating URLs for: ${objectName}`);
+
+      const result: any = {
+        objectName,
+      };
+
+      // 首先检查文件是否存在
+      const exists = await this.fileExists(objectName, opts.bucket);
+      if (!exists) {
+        result.error = 'File does not exist';
+        console.error(`✗ File not found: ${objectName}`);
+        return result;
+      }
+
+      // 简化模式：只生成下载URL
+      if (opts.simplify) {
+        try {
+          const downloadUrl = await this.getPresignedDownloadUrl(
+            objectName,
+            opts.expiry,
+            opts.bucket,
+          );
+          result.downloadUrl = downloadUrl;
+          console.log(`✓ Generated download URL for: ${objectName}`);
+        } catch (error: any) {
+          result.error = error.message;
+          console.error(
+            `✗ Failed to generate download URL for: ${objectName} - ${error.message}`,
+          );
+        }
+        return result;
+      }
+
+      // 完整模式：并行执行所有操作
+      const operations: Promise<any>[] = [];
+
+      // 生成下载URL
+      if (opts.downloadUrls) {
+        operations.push(
+          this.getPresignedDownloadUrl(objectName, opts.expiry, opts.bucket)
+            .then((url) => ({ type: 'downloadUrl', value: url }))
+            .catch((error) => ({
+              type: 'downloadUrl',
+              error: error.message,
+            })),
+        );
+      }
+
+      // 生成上传URL
+      if (opts.uploadUrls) {
+        operations.push(
+          this.getPresignedUploadUrl(objectName, opts.expiry, opts.bucket)
+            .then((url) => ({ type: 'uploadUrl', value: url }))
+            .catch((error) => ({
+              type: 'uploadUrl',
+              error: error.message,
+            })),
+        );
+      }
+
+      // 获取文件元数据
+      if (opts.includeMetadata) {
+        operations.push(
+          this.getFileInfo(objectName, opts.bucket)
+            .then((fileInfo) => ({
+              type: 'metadata',
+              value: {
+                size: fileInfo.size,
+                lastModified: fileInfo.lastModified,
+                etag: fileInfo.etag,
+                contentType: fileInfo.contentType,
+              },
+            }))
+            .catch((error) => ({
+              type: 'metadata',
+              error: error.message,
+            })),
+        );
+      }
+
+      // 等待所有操作完成
+      const operationResults = await Promise.all(operations);
+      const errors: string[] = [];
+
+      // 处理结果
+      for (const opResult of operationResults) {
+        if (opResult.error) {
+          errors.push(`${opResult.type} failed: ${opResult.error}`);
+        } else {
+          if (opResult.type === 'downloadUrl') {
+            result.downloadUrl = opResult.value;
+          } else if (opResult.type === 'uploadUrl') {
+            result.uploadUrl = opResult.value;
+          } else if (opResult.type === 'metadata') {
+            result.metadata = opResult.value;
+          }
+        }
+      }
+
+      if (errors.length > 0) {
+        result.error = errors.join('; ');
+        console.error(
+          `✗ Some operations failed for: ${objectName} - ${result.error}`,
+        );
+      } else {
+        console.log(`✓ Generated URLs for: ${objectName}`);
+      }
+
+      return result;
+    } catch (error: any) {
+      const errorResult = {
+        objectName,
+        error: error.message,
+      };
+      console.error(
+        `✗ Failed to generate URLs for: ${objectName} - ${error.message}`,
+      );
+      return errorResult;
+    }
+  }
+
   // 批量生成特定文件列表的signed URL（支持批处理和简化模式）
   async generateSignedUrlsForFiles(
     objectNames: string[],
@@ -2615,5 +2792,97 @@ export class S3Helper {
     if (summary.failed > 0) console.log(`✗ Failed: ${summary.failed}`);
     if (summary.dryRun)
       console.log(`🔍 Mode: DRY RUN (no actual changes made)`);
+  }
+
+  // 删除过期文件
+  async deleteExpire(
+    expireSeconds: number,
+    bucket?: string,
+    prefix?: string,
+  ): Promise<{
+    totalFiles: number;
+    expiredFiles: number;
+    deletedFiles: number;
+    failedFiles: number;
+    errors: Array<{ objectName: string; error: string }>;
+  }> {
+    try {
+      const bucketName = this.getBucketName(bucket);
+
+      console.log(
+        `🔍 Scanning for files older than ${expireSeconds} seconds...`,
+      );
+      console.log(
+        `🪣 Bucket: ${bucketName}${prefix ? ` (prefix: ${prefix})` : ''}`,
+      );
+
+      // 获取所有文件列表
+      const allFiles = await this.listFiles(prefix, bucketName, true);
+      const fileObjects = allFiles.filter(
+        (f) => f.name && !f.name.endsWith('/'),
+      );
+
+      console.log(`📁 Found ${fileObjects.length} files to check`);
+
+      // 计算过期时间阈值
+      const expireTime = new Date(Date.now() - expireSeconds * 1000);
+      console.log(
+        `⏰ Files older than ${expireTime.toISOString()} will be deleted`,
+      );
+
+      // 过滤出过期的文件
+      const expiredFiles: string[] = [];
+
+      for (const file of fileObjects) {
+        if (file.name && file.lastModified && file.lastModified < expireTime) {
+          expiredFiles.push(file.name);
+          console.log(
+            `🕒 Expired: ${file.name} (modified: ${file.lastModified.toISOString()})`,
+          );
+        }
+      }
+
+      const result = {
+        totalFiles: fileObjects.length,
+        expiredFiles: expiredFiles.length,
+        deletedFiles: 0,
+        failedFiles: 0,
+        errors: [] as Array<{ objectName: string; error: string }>,
+      };
+
+      if (expiredFiles.length === 0) {
+        console.log('✨ No expired files found');
+        return result;
+      }
+
+      console.log(`🗑️ Found ${expiredFiles.length} expired files to delete`);
+
+      // 批量删除过期文件
+      const deleteResult = await this.deleteFiles(expiredFiles, bucketName);
+
+      result.deletedFiles = deleteResult.successful.length;
+      result.failedFiles = deleteResult.failed.length;
+      result.errors = deleteResult.failed.map((f) => ({
+        objectName: f.item,
+        error: f.error,
+      }));
+
+      // 输出删除结果
+      console.log(`\n📊 Delete Expire Summary:`);
+      console.log(`Total files checked: ${result.totalFiles}`);
+      console.log(`Expired files found: ${result.expiredFiles}`);
+      console.log(`✓ Successfully deleted: ${result.deletedFiles}`);
+
+      if (result.failedFiles > 0) {
+        console.log(`✗ Failed to delete: ${result.failedFiles}`);
+        result.errors.forEach((error) => {
+          console.error(`  - ${error.objectName}: ${error.error}`);
+        });
+      }
+
+      return result;
+    } catch (error: any) {
+      throw new Error(`删除过期文件失败: ${error.message}`);
+    }
   }
 }

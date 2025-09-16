@@ -13,7 +13,9 @@ export class SlackMessage {
   constructor(webhookUrl: string) {
     this.blocks = [];
     this.webhookUrl = webhookUrl;
-    this.host = `Message from ${process.env.HOST_NAME}` || '';
+    this.host = process.env.HOST_NAME
+      ? `Message from ${process.env.HOST_NAME}`
+      : undefined;
   }
 
   // 设置发送者名称
@@ -109,16 +111,36 @@ export class SlackMessage {
           : this.host
         : text;
 
-      const payload = messageWithHost
-        ? { text: messageWithHost, ...this.getMessage() }
-        : this.getMessage();
+      const payload = {
+        text: messageWithHost || '',
+      };
 
-      const response = await axios.post(this.webhookUrl, payload);
+      const response = await axios.post(this.webhookUrl, payload, {
+        // 避免通过系统代理转发到 Slack（代理会导致 400 Proxy error）
+        proxy: false,
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 10000,
+      });
       console.log('Message sent to Slack successfully');
       return response.status === 200;
     } catch (error) {
       console.error('Failed to send message to Slack:', error);
       return false;
     }
+  }
+
+  // 检查配置状态
+  getConfigStatus(): {
+    hasWebhook: boolean;
+    canSendText: boolean;
+    channel?: string;
+  } {
+    const hasWebhook = !!this.webhookUrl;
+
+    return {
+      hasWebhook,
+      canSendText: hasWebhook,
+      channel: this.channel,
+    };
   }
 }

@@ -127,6 +127,32 @@ export class SqliteKVDatabase {
     });
   }
 
+  private async _withRetry<T>(
+    operation: () => Promise<T>,
+    retries: number = 2,
+    delayMs: number = 100,
+  ): Promise<T> {
+    for (let i = 0; i < retries; i++) {
+      try {
+        return await operation();
+      } catch (error: any) {
+        if (error.message.includes('SQLITE_BUSY') && i < retries - 1) {
+          console.warn(
+            `SQLITE_BUSY encountered for ${this.tableName}, retrying in ${delayMs}ms... (Attempt ${
+              i + 1
+            }/${retries})`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        } else {
+          throw error;
+        }
+      }
+    }
+    throw new Error(
+      'Operation failed after multiple retries due to SQLITE_BUSY',
+    );
+  }
+
   private async ensureInitialized(): Promise<void> {
     if (this.initialized && this.dataSource?.isInitialized && this.db) {
       return;
@@ -140,6 +166,8 @@ export class SqliteKVDatabase {
     this.initializingPromise = (async () => {
       if (!this.dataSource.isInitialized) {
         await this.dataSource.initialize();
+        // Enable WAL mode for better concurrency
+        await this.dataSource.query('PRAGMA journal_mode=WAL;');
       }
 
       this.db = this.dataSource.getRepository(this.CustomKVStore);
@@ -197,10 +225,12 @@ export class SqliteKVDatabase {
   async put(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
 
-    await this.db.save({
-      key,
-      value: this.typeHandler.serialize(value),
-    });
+    await this._withRetry(() =>
+      this.db.save({
+        key,
+        value: this.typeHandler.serialize(value),
+      }),
+    );
   }
 
   // 方法重载以保持向后兼容性
@@ -299,12 +329,12 @@ export class SqliteKVDatabase {
     }
 
     // 存储合并后的值
-    await this.put(key, mergedValue);
+    await this._withRetry(() => this.put(key, mergedValue));
   }
 
   async delete(key: string): Promise<boolean> {
     await this.ensureInitialized();
-    const result = await this.db.delete({ key });
+    const result = await this._withRetry(() => this.db.delete({ key }));
     return !!result.affected && result.affected > 0;
   }
 
@@ -314,10 +344,12 @@ export class SqliteKVDatabase {
     if (existing) {
       throw new Error(`Key "${key}" already exists`);
     }
-    await this.db.save({
-      key,
-      value: this.typeHandler.serialize(value),
-    });
+    await this._withRetry(() =>
+      this.db.save({
+        key,
+        value: this.typeHandler.serialize(value),
+      }),
+    );
   }
 
   async close(): Promise<void> {
@@ -474,10 +506,12 @@ export class SqliteKVDatabase {
       for (let i = 0; i < keys.length; i += batchSize) {
         const batch = keys.slice(i, i + batchSize);
         try {
-          const batchRecords = await this.db.find({
-            where: { key: In(batch) },
-            cache: true, // 启用查询缓存
-          });
+          const batchRecords = await this._withRetry(() =>
+            this.db.find({
+              where: { key: In(batch) },
+              cache: true, // 启用查询缓存
+            }),
+          );
           allRecords.push(...batchRecords);
         } catch (error: any) {
           console.warn(
@@ -489,10 +523,12 @@ export class SqliteKVDatabase {
       records = allRecords;
     } else {
       // 小批量直接查询
-      records = await this.db.find({
-        where: { key: In(keys) },
-        cache: true, // 启用查询缓存
-      });
+      records = await this._withRetry(() =>
+        this.db.find({
+          where: { key: In(keys) },
+          cache: true, // 启用查询缓存
+        }),
+      );
     }
 
     // 使用Map提高查找性能，避免O(n²)复杂度
@@ -600,27 +636,29 @@ export class SqliteKVDatabase {
         key,
         value: this.typeHandler.serialize(value),
       }));
-      await this.db.save(entities);
+      await this._withRetry(() => this.db.save(entities));
     }
   }
 
   // 批量删除键
   async deleteMany(keys: string[]): Promise<number> {
     await this.ensureInitialized();
-    const result = await this.db.delete({ key: In(keys) });
+    const result = await this._withRetry(() =>
+      this.db.delete({ key: In(keys) }),
+    );
     return result.affected || 0;
   }
 
   // 清空数据库
   async clear(): Promise<void> {
     await this.ensureInitialized();
-    await this.db.clear();
+    await this._withRetry(() => this.db.clear());
   }
 
   // 获取数据库中的记录数量
   async count(): Promise<number> {
     await this.ensureInitialized();
-    return await this.db.count();
+    return await this._withRetry(() => this.db.count());
   }
 
   /**

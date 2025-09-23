@@ -1,398 +1,454 @@
 #!/bin/bash
 
-# Function to check and install pm2
-check_and_install_pm2() {
-    if ! command -v pm2 &> /dev/null; then
-        echo "pm2 未安装。尝试使用 npm 进行全局安装..."
-        if command -v npm &> /dev/null; then
-            npm install pm2 -g
-            if [ $? -ne 0 ]; then
-                echo "npm 安装 pm2 失败。尝试使用 yarn..."
-                if command -v yarn &> /dev/null; then
-                    yarn global add pm2
-                    if [ $? -ne 0 ]; then
-                        echo "yarn 安装 pm2 失败。尝试使用 pnpm..."
-                        if command -v pnpm &> /dev/null; then
-                            pnpm install pm2 -g
-                            if [ $? -ne 0 ]; then
-                                echo "pnpm 安装 pm2 失败。请手动安装 pm2 (npm install -g pm2, yarn global add pm2, 或 pnpm install -g pm2)。"
-                                exit 1
-                            fi
-                        else
-                            echo "未找到 pnpm 命令。请手动安装 pm2。"
-                            exit 1
-                        fi
-                    fi
-                else
-                    echo "未找到 yarn 命令。请手动安装 pm2。"
-                    exit 1
-                fi
-            fi
-        else
-            echo "未找到 npm 命令。请手动安装 pm2。"
-            exit 1
-        fi
-        # 再次检查是否安装成功
-        if ! command -v pm2 &> /dev/null; then
-            echo "pm2 安装失败，请手动安装。"
-            exit 1
-        fi
-        echo "pm2 安装成功！"
-    fi
-}
+set -e
 
-# Function to read environment variables from .env file
-read_env_vars() {
-    if [ -f ".env" ]; then
-        # Read PORT
-        PORT=$(grep "^PORT=" .env 2>/dev/null | cut -d '=' -f2 | tr -d '"' | tr -d "'")
-        
-        # Read PM2_INSTANCES (for -i parameter)
-        PM2_INSTANCES=$(grep "^PM2_INSTANCES=" .env 2>/dev/null | cut -d '=' -f2 | tr -d '"' | tr -d "'")
-        
-        # Read NODE_ENV
-        NODE_ENV=$(grep "^NODE_ENV=" .env 2>/dev/null | cut -d '=' -f2 | tr -d '"' | tr -d "'")
-        
-        # Read other PM2 related configurations
-        PM2_MAX_MEMORY=$(grep "^PM2_MAX_MEMORY=" .env 2>/dev/null | cut -d '=' -f2 | tr -d '"' | tr -d "'")
-        PM2_LOG_FILE=$(grep "^PM2_LOG_FILE=" .env 2>/dev/null | cut -d '=' -f2 | tr -d '"' | tr -d "'")
-        PM2_ERROR_FILE=$(grep "^PM2_ERROR_FILE=" .env 2>/dev/null | cut -d '=' -f2 | tr -d '"' | tr -d "'")
-        PM2_OUT_FILE=$(grep "^PM2_OUT_FILE=" .env 2>/dev/null | cut -d '=' -f2 | tr -d '"' | tr -d "'")
-    fi
-    
-    # Set defaults if not found
-    if [ -z "$PORT" ]; then
-        PORT="3000"
-        echo "未找到 PORT 环境变量，使用默认端口: $PORT"
-    fi
-    
-    if [ -z "$PM2_INSTANCES" ]; then
-        PM2_INSTANCES="1"
-        echo "未找到 PM2_INSTANCES 环境变量，使用默认实例数: $PM2_INSTANCES"
-    fi
-    
-    if [ -z "$NODE_ENV" ]; then
-        NODE_ENV="production"
-        echo "未找到 NODE_ENV 环境变量，使用默认环境: $NODE_ENV"
-    fi
-    
-    if [ -z "$PM2_MAX_MEMORY" ]; then
-        PM2_MAX_MEMORY="4096M"
-    fi
-    
-    # Validate PORT
-    if ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
-        echo "错误：无效的端口号 '$PORT'"
-        exit 1
-    fi
-    
-    # Validate PM2_INSTANCES
-    if ! [[ "$PM2_INSTANCES" =~ ^[0-9]+$|^max$ ]]; then
-        echo "错误：无效的 PM2_INSTANCES 值 '$PM2_INSTANCES'，应该是数字或 'max'"
-        exit 1
-    fi
-    
-    echo "配置信息："
-    echo "  PORT: $PORT"
-    echo "  PM2_INSTANCES: $PM2_INSTANCES"
-    echo "  NODE_ENV: $NODE_ENV"
-    echo "  PM2_MAX_MEMORY: $PM2_MAX_MEMORY"
-}
-
-# Function to build PM2 start command
-build_pm2_command() {
-    local app_name="$1"
-    local app_path="$2"
-    local cmd="pm2 start \"$app_path\" --name \"$app_name\""
-    
-    # 根据实例数选择模式
-    if [ "$PM2_INSTANCES" = "1" ]; then
-        # 单实例使用 fork 模式（不添加 -i 参数）
-        echo "使用 Fork 模式 (单进程)" >&2
-    else
-        # 多实例使用 cluster 模式
-        cmd="$cmd -i $PM2_INSTANCES"
-        if [ "$PM2_INSTANCES" = "max" ]; then
-            echo "使用 Cluster 模式 (最大CPU核心数)" >&2
-        else
-            echo "使用 Cluster 模式 (${PM2_INSTANCES}个进程)" >&2
-        fi
-    fi
-    
-    # Add node arguments
-    cmd="$cmd --node-args=\"--max-old-space-size=${PM2_MAX_MEMORY%M}\""
-    
-    # Add environment variables
-    cmd="$cmd --env NODE_ENV=$NODE_ENV,PORT=$PORT"
-    
-    # Add log files if specified
-    if [ -n "$PM2_LOG_FILE" ]; then
-        cmd="$cmd --log \"$PM2_LOG_FILE\""
-    fi
-    
-    if [ -n "$PM2_ERROR_FILE" ]; then
-        cmd="$cmd --error \"$PM2_ERROR_FILE\""
-    fi
-    
-    if [ -n "$PM2_OUT_FILE" ]; then
-        cmd="$cmd --output \"$PM2_OUT_FILE\""
-    fi
-    
-    echo "$cmd"
-}
-
-# Parse command line arguments
-BUILD_FLAG=false
-COMMAND=""
-APP_PATH="dist/main.js"  # Default path
-
-# Parse arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --start|--stop|--restart|--status)
-            COMMAND="$1"
-            shift
-            ;;
-        --build)
-            BUILD_FLAG=true
-            shift
-            ;;
-        --path)
-            if [[ -n "$2" && "$2" != --* ]]; then
-                APP_PATH="$2"
-                shift 2
-            else
-                echo "错误：--path 参数需要指定路径值"
-                exit 1
-            fi
-            ;;
-        *)
-            echo "未知参数: $1"
-            exit 1
-            ;;
-    esac
-done
-
-# Check if parameters are provided
-if [ -z "$COMMAND" ]; then
-    echo "请提供参数: --start 或 --stop 或 --restart 或 --status"
-    echo ""
-    echo "用法:"
-    echo "  $0 --start                       启动应用 (不构建)"
-    echo "  $0 --start --build               启动应用 (先构建)"
-    echo "  $0 --start --path <文件路径>      启动指定路径的应用"
-    echo "  $0 --start --build --path <路径>  构建并启动指定路径的应用"
-    echo "  $0 --stop                        停止应用"
-    echo "  $0 --restart                     重启应用 (不构建，除非应用文件不存在)"
-    echo "  $0 --restart --build             重启应用 (强制构建)"
-    echo "  $0 --status                      查看应用状态"
-    echo ""
-    echo "支持的 .env 配置:"
-    echo "  PORT=3000                    # 应用端口"
-    echo "  PM2_INSTANCES=1              # PM2 实例数 (数字或 'max')"
-    echo "  NODE_ENV=production          # 运行环境"
-    echo "  PM2_MAX_MEMORY=4096M         # 最大内存限制"
-    echo "  PM2_LOG_FILE=logs/app.log    # 日志文件路径"
-    echo "  PM2_ERROR_FILE=logs/error.log # 错误日志文件路径"
-    echo "  PM2_OUT_FILE=logs/out.log    # 输出日志文件路径"
-    exit 1
-fi
-
-# Get current directory name
+# -----------------------------
+# 全局变量
+# -----------------------------
 CURRENT_DIR=$(pwd)
 DIR_NAME=$(basename "$CURRENT_DIR")
 APP_NAME_FILE="app.name"
+APP_PATH="dist/main.js"
+BUILD_FLAG=false
+COMMAND=""
 
-# Read environment variables
-read_env_vars
-
-case "$COMMAND" in
-    --start)
-        # Check and install pm2
-        check_and_install_pm2
-
-        # Check if port is occupied
-        if lsof -i:$PORT > /dev/null 2>&1; then
-            echo "端口 $PORT 已被占用，请先停止现有服务或检查是否已有同名 pm2 进程。"
-            # Check if the existing process is the one we expect
-            if [ -f "$APP_NAME_FILE" ]; then
-                 EXISTING_NAME=$(cat "$APP_NAME_FILE")
-                 if pm2 list | grep -q "$EXISTING_NAME"; then
-                     echo "检测到正在运行的同名 pm2 进程: $EXISTING_NAME"
-                     echo "使用 '$0 --stop' 停止现有进程，或使用 '$0 --restart' 重启"
-                 fi
+# -----------------------------
+# 安全读取 .env 文件
+# -----------------------------
+read_env_vars() {
+    if [ -f ".env" ]; then
+        echo "正在读取 .env 配置..."
+        # 安全地读取环境变量，避免代码注入
+        while IFS='=' read -r key value; do
+            # 跳过注释和空行
+            [[ $key =~ ^[[:space:]]*# ]] && continue
+            [[ -z $key ]] && continue
+            
+            # 去除引号和空格
+            key=$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"\(.*\)"$/\1/;s/^'"'"'\(.*\)'"'"'$/\1/')
+            
+            # 导出有效的环境变量
+            if [[ $key =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+                export "$key"="$value"
             fi
-            exit 1
-        fi
+        done < .env
+    fi
+    
+    # 设置默认值
+    export PORT="${PORT:-3000}"
+    export PM2_INSTANCES="${PM2_INSTANCES:-1}"
+    export NODE_ENV="${NODE_ENV:-production}"
+    export PM2_MAX_MEMORY="${PM2_MAX_MEMORY:-4096M}"
+    export PM2_LOG_FILE="${PM2_LOG_FILE:-}"
+    export PM2_ERROR_FILE="${PM2_ERROR_FILE:-}"
+    export PM2_OUT_FILE="${PM2_OUT_FILE:-}"
+    
+    # 验证配置
+    [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "❌ 错误：无效的端口号 '$PORT'"; exit 1; }
+    [[ "$PM2_INSTANCES" =~ ^([0-9]+|max)$ ]] || { echo "❌ 错误：无效的 PM2_INSTANCES 值 '$PM2_INSTANCES'"; exit 1; }
+    
+    echo "✅ 配置加载完成："
+    echo "   PORT: $PORT"
+    echo "   PM2_INSTANCES: $PM2_INSTANCES" 
+    echo "   NODE_ENV: $NODE_ENV"
+    echo "   PM2_MAX_MEMORY: $PM2_MAX_MEMORY"
+}
 
-        # Check if app is already running
-        if [ -f "$APP_NAME_FILE" ]; then
-            EXISTING_NAME=$(cat "$APP_NAME_FILE")
-            if pm2 list | grep -q "$EXISTING_NAME"; then
-                echo "应用 $EXISTING_NAME 已在运行中。"
-                echo "使用 '$0 --stop' 停止，或使用 '$0 --restart' 重启"
-                exit 1
-            fi
-        fi
-
-        # Run build command if --build flag is provided
-        if [ "$BUILD_FLAG" = true ]; then
-            echo "运行 npm run build..."
-            npm run build
-            if [ $? -ne 0 ]; then
-                echo "构建失败，启动终止。"
-                exit 1
-            fi
-            echo "构建完成。"
-        fi
-
-        # Check if app file exists
-        if [ ! -f "$APP_PATH" ]; then
-            if [ "$BUILD_FLAG" = true ]; then
-                echo "错误：找不到应用文件 $APP_PATH，请确保构建成功。"
-            else
-                echo "错误：找不到应用文件 $APP_PATH，请先构建项目或使用 --build 参数。"
-                echo "使用方法: $0 --start --build --path $APP_PATH"
-            fi
-            exit 1
-        fi
-
-        # Generate dynamic name and save it
-        TIMESTAMP=$(date '+%Y%m%d%H%M%S')
-        APP_NAME="${DIR_NAME}-${TIMESTAMP}"
-        echo "$APP_NAME" > "$APP_NAME_FILE"
-        echo "应用名称已记录到 $APP_NAME_FILE: $APP_NAME"
-
-        # Build and execute PM2 command
-        PM2_CMD=$(build_pm2_command "$APP_NAME" "$APP_PATH")
-        echo "执行命令: $PM2_CMD"
-        eval "$PM2_CMD"
+# -----------------------------
+# 检查并安装 pm2
+# -----------------------------
+check_and_install_pm2() {
+    if ! command -v pm2 &> /dev/null; then
+        echo "🔧 pm2 未安装，正在尝试安装..."
         
-        if [ $? -eq 0 ]; then
-            echo "Nest.js 应用已使用 pm2 启动："
-            echo "  名称: $APP_NAME"
-            echo "  文件路径: $APP_PATH"
-            echo "  端口: $PORT"
-            echo "  实例数: $PM2_INSTANCES"
-            echo "  环境: $NODE_ENV"
-            echo ""
-            pm2 list
-        else
-            echo "pm2 启动应用失败。"
-            rm "$APP_NAME_FILE" # Clean up name file if start fails
+        # 按优先级尝试安装
+        for manager in npm yarn pnpm; do
+            if command -v "$manager" &> /dev/null; then
+                echo "使用 $manager 安装 pm2..."
+                case "$manager" in
+                    npm) npm install -g pm2 ;;
+                    yarn) yarn global add pm2 ;;
+                    pnpm) /usr/local/bin/pnpm install -g pm2 || pnpm install -g pm2 ;;
+                esac
+                break
+            fi
+        done
+        
+        # 验证安装结果
+        if ! command -v pm2 &> /dev/null; then
+            echo "❌ pm2 安装失败，请手动安装：npm install -g pm2"
             exit 1
         fi
-        ;;
+        echo "✅ pm2 安装成功！"
+    fi
+}
 
-    --stop)
-        # Check if name file exists
-        if [ ! -f "$APP_NAME_FILE" ]; then
-            echo "找不到应用名称文件 ($APP_NAME_FILE)。"
-            echo "请手动查找并停止 pm2 进程:"
-            echo "  pm2 list"
-            echo "  pm2 stop <name|id>"
-            echo "  pm2 delete <name|id>"
-            exit 1
-        fi
+# -----------------------------
+# 构建 pm2 启动命令
+# -----------------------------
+build_pm2_command() {
+    local app_name="$1"
+    local app_path="$2"
+    local cmd=(pm2 start "$app_path" --name "$app_name")
 
-        # Read application name from file
-        APP_NAME=$(cat "$APP_NAME_FILE")
+    # 实例模式配置
+    if [ "$PM2_INSTANCES" != "1" ]; then
+        cmd+=(-i "$PM2_INSTANCES")
+        echo "🚀 使用 Cluster 模式 ($PM2_INSTANCES 个实例)"
+    else
+        echo "🚀 使用 Fork 模式 (单实例)"
+    fi
 
-        # Check if the process exists in pm2 list
-        if ! pm2 list | grep -q "$APP_NAME"; then
-            echo "警告：pm2 列表中找不到名为 $APP_NAME 的进程。"
-            echo "可能已经被手动停止，清理名称文件..."
-            rm "$APP_NAME_FILE"
-            exit 0
-        fi
+    # Node.js 参数
+    cmd+=(--node-args="--max-old-space-size=${PM2_MAX_MEMORY%M}")
+    
+    # 环境变量
+    cmd+=(--env NODE_ENV="$NODE_ENV",PORT="$PORT")
+    
+    # 日志配置
+    [ -n "$PM2_LOG_FILE" ] && cmd+=(--log "$PM2_LOG_FILE")
+    [ -n "$PM2_ERROR_FILE" ] && cmd+=(--error "$PM2_ERROR_FILE") 
+    [ -n "$PM2_OUT_FILE" ] && cmd+=(--output "$PM2_OUT_FILE")
 
-        # Stop application with pm2
-        echo "正在停止 pm2 应用: $APP_NAME..."
-        pm2 stop "$APP_NAME"
-        pm2 delete "$APP_NAME" # Delete from pm2 list after stopping
+    echo "${cmd[@]}"
+}
 
-        # Remove name file
-        rm "$APP_NAME_FILE"
-        echo "pm2 应用 $APP_NAME 已停止并从 pm2 列表中移除。"
-        ;;
+# -----------------------------
+# 管理 pm2 开机自启
+# -----------------------------
+manage_pm2_startup() {
+    local action="$1"  # save 或 delete
+    
+    # 确保 pm2 startup 已配置
+    if ! pm2 startup | grep -q "PM2 resurrection"; then
+        echo "🔧 配置 pm2 开机自启..."
+        pm2 startup systemd -u "$(whoami)" --hp "$HOME" 2>/dev/null || {
+            echo "⚠️  警告：无法自动配置开机自启，请手动执行以下命令："
+            pm2 startup
+            return 1
+        }
+    fi
+    
+    case "$action" in
+        save)
+            echo "💾 保存当前 pm2 进程列表到启动配置..."
+            pm2 save
+            echo "✅ pm2 开机自启已更新"
+            ;;
+        delete)
+            echo "🗑️  清理 pm2 启动配置..."
+            pm2 save --force
+            echo "✅ pm2 开机自启已清理"
+            ;;
+    esac
+}
 
-    --restart)
-        # Check if name file exists
-        if [ ! -f "$APP_NAME_FILE" ]; then
-            echo "找不到应用名称文件 ($APP_NAME_FILE)。无法确定要重启哪个 pm2 进程。"
-            echo "请使用 '$0 --start' 启动新的应用实例。"
-            exit 1
-        fi
-
-        # Read application name from file
-        APP_NAME=$(cat "$APP_NAME_FILE")
-
-        # Check if the process is still in the pm2 list
-        if ! pm2 list | grep -q "$APP_NAME"; then
-             echo "pm2 列表中找不到名为 $APP_NAME 的进程。"
-             echo "应用可能已被手动停止，请使用 '$0 --start' 重新启动。"
-             rm "$APP_NAME_FILE"
-             exit 1
-        fi
-
-        # Run build command if --build flag is provided or if app file doesn't exist
-        if [ "$BUILD_FLAG" = true ] || [ ! -f "$APP_PATH" ]; then
-            echo "运行 npm run build..."
+# -----------------------------
+# 构建项目
+# -----------------------------
+build_project() {
+    echo "🔨 正在构建项目..."
+    
+    # 检查是否有构建命令
+    if [ -f "package.json" ]; then
+        if grep -q '"build"' package.json; then
             npm run build
-            if [ $? -ne 0 ]; then
-                echo "构建失败，重启终止。"
+        else
+            echo "⚠️  package.json 中未找到 build 脚本"
+            return 1
+        fi
+    else
+        echo "❌ 未找到 package.json 文件"
+        return 1
+    fi
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ 项目构建完成"
+    else
+        echo "❌ 项目构建失败"
+        exit 1
+    fi
+}
+
+# -----------------------------
+# 获取应用名称
+# -----------------------------
+get_app_name() {
+    if [ ! -f "$APP_NAME_FILE" ]; then
+        echo "❌ 找不到应用名称文件 ($APP_NAME_FILE)"
+        echo "   应用可能未通过此脚本启动"
+        return 1
+    fi
+    cat "$APP_NAME_FILE"
+}
+
+# -----------------------------
+# 检查端口占用
+# -----------------------------
+check_port_available() {
+    if command -v lsof &> /dev/null && lsof -i:"$PORT" &>/dev/null; then
+        echo "❌ 端口 $PORT 已被占用"
+        echo "   请先停止现有服务或使用其他端口"
+        lsof -i:"$PORT"
+        return 1
+    fi
+}
+
+# -----------------------------
+# 解析命令行参数
+# -----------------------------
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --start|--stop|--restart|--status|--logs)
+                COMMAND="$1"
+                shift
+                ;;
+            --build)
+                BUILD_FLAG=true
+                shift
+                ;;
+            --path)
+                if [[ -n "$2" && "$2" != --* ]]; then
+                    APP_PATH="$2"
+                    shift 2
+                else
+                    echo "❌ --path 参数需要指定路径值"
+                    exit 1
+                fi
+                ;;
+            --help|-h)
+                show_help
+                exit 0
+                ;;
+            *)
+                echo "❌ 未知参数: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+
+    if [ -z "$COMMAND" ]; then
+        echo "❌ 请提供操作命令"
+        show_help
+        exit 1
+    fi
+}
+
+# -----------------------------
+# 显示帮助信息
+# -----------------------------
+show_help() {
+    cat << EOF
+🚀 PM2 Nest.js 应用管理脚本
+
+用法:
+  $0 [命令] [选项]
+
+命令:
+  --start                    启动应用
+  --stop                     停止应用并清理启动项
+  --restart                  重启应用
+  --status                   查看应用状态
+  --logs                     查看应用日志
+
+选项:
+  --build                    执行构建操作
+  --path <文件路径>           指定应用文件路径 (默认: dist/main.js)
+  --help, -h                 显示帮助信息
+
+示例:
+  $0 --start                              # 启动应用
+  $0 --start --build                      # 构建并启动应用
+  $0 --start --path src/main.ts           # 启动指定文件
+  $0 --restart --build                    # 重新构建并重启
+  $0 --stop                               # 停止应用
+  $0 --logs                               # 查看日志
+
+支持的 .env 配置:
+  PORT=3000                    应用端口
+  PM2_INSTANCES=1              PM2 实例数 (数字或 'max')
+  NODE_ENV=production          运行环境
+  PM2_MAX_MEMORY=4096M         最大内存限制
+  PM2_LOG_FILE=logs/app.log    日志文件路径
+  PM2_ERROR_FILE=logs/error.log 错误日志文件路径
+  PM2_OUT_FILE=logs/out.log    输出日志文件路径
+EOF
+}
+
+# -----------------------------
+# 主逻辑
+# -----------------------------
+main() {
+    parse_arguments "$@"
+    read_env_vars
+    check_and_install_pm2
+
+    case "$COMMAND" in
+        --start)
+            echo "🚀 启动应用..."
+            
+            # 检查是否已有应用在运行
+            if [ -f "$APP_NAME_FILE" ]; then
+                EXISTING_NAME=$(cat "$APP_NAME_FILE")
+                if pm2 list 2>/dev/null | grep -q "$EXISTING_NAME"; then
+                    echo "⚠️  应用 $EXISTING_NAME 已在运行"
+                    echo "   使用 '$0 --restart' 重启或 '$0 --stop' 停止"
+                    exit 1
+                else
+                    # 清理过期的名称文件
+                    rm -f "$APP_NAME_FILE"
+                fi
+            fi
+            
+            # 检查端口
+            check_port_available || exit 1
+            
+            # 构建项目
+            [ "$BUILD_FLAG" = true ] && build_project
+            
+            # 检查应用文件
+            if [ ! -f "$APP_PATH" ]; then
+                echo "❌ 找不到应用文件: $APP_PATH"
+                if [ "$BUILD_FLAG" != true ]; then
+                    echo "   提示：使用 --build 参数先构建项目"
+                fi
                 exit 1
             fi
-            echo "构建完成。"
-        else
-            echo "跳过构建步骤（使用 --build 参数强制构建）"
-        fi
 
-        # Check if app file exists
-        if [ ! -f "$APP_PATH" ]; then
-            echo "错误：找不到应用文件 $APP_PATH，请确保构建成功。"
-            exit 1
-        fi
+            # 生成应用名称
+            TIMESTAMP=$(date '+%Y%m%d%H%M%S')
+            APP_NAME="${DIR_NAME}-${TIMESTAMP}"
+            echo "$APP_NAME" > "$APP_NAME_FILE"
 
-        # Restart application with pm2
-        echo "正在重启 pm2 应用: $APP_NAME..."
-        pm2 restart "$APP_NAME" --update-env
-
-        if [ $? -eq 0 ]; then
-            echo "pm2 应用 $APP_NAME 已重启。"
-            if [ "$BUILD_FLAG" = true ]; then
-                echo "  已执行构建"
-            fi
-            echo ""
-            pm2 list
-        else
-            echo "pm2 重启应用失败。"
-            exit 1
-        fi
-        ;;
-
-    --status)
-        if [ -f "$APP_NAME_FILE" ]; then
-            APP_NAME=$(cat "$APP_NAME_FILE")
-            echo "当前应用名称: $APP_NAME"
-            echo ""
-            if pm2 list | grep -q "$APP_NAME"; then
-                echo "应用状态:"
-                pm2 show "$APP_NAME"
+            # 启动应用
+            PM2_CMD=($(build_pm2_command "$APP_NAME" "$APP_PATH"))
+            echo "📋 执行命令: ${PM2_CMD[*]}"
+            
+            if "${PM2_CMD[@]}"; then
+                echo ""
+                echo "✅ 应用启动成功！"
+                echo "   名称: $APP_NAME"
+                echo "   文件: $APP_PATH"
+                echo "   端口: $PORT"
+                echo "   环境: $NODE_ENV"
+                echo ""
+                pm2 list
+                manage_pm2_startup save
             else
-                echo "应用未在 pm2 中运行。"
+                echo "❌ 应用启动失败"
+                rm -f "$APP_NAME_FILE"
+                exit 1
             fi
-        else
-            echo "未找到应用名称文件，可能没有通过此脚本启动的应用。"
-            echo ""
-            echo "所有 pm2 进程:"
-            pm2 list
-        fi
-        ;;
+            ;;
 
-    *)
-        echo "无效的命令。请使用 --start 或 --stop 或 --restart 或 --status"
-        echo "使用 '$0' 查看完整用法"
-        exit 1
-        ;;
-esac
+        --stop)
+            echo "🛑 停止应用..."
+            
+            if ! APP_NAME=$(get_app_name); then
+                echo "   尝试查找并停止所有相关进程..."
+                pm2 list 2>/dev/null | grep -E "${DIR_NAME}-[0-9]+" | awk '{print $2}' | while read -r name; do
+                    [ -n "$name" ] && pm2 delete "$name" 2>/dev/null && echo "   已停止: $name"
+                done
+                manage_pm2_startup delete
+                exit 0
+            fi
+
+            if pm2 list 2>/dev/null | grep -q "$APP_NAME"; then
+                pm2 stop "$APP_NAME" 2>/dev/null
+                pm2 delete "$APP_NAME" 2>/dev/null
+                echo "✅ 应用 $APP_NAME 已停止"
+            else
+                echo "⚠️  应用 $APP_NAME 未在 pm2 中运行"
+            fi
+            
+            rm -f "$APP_NAME_FILE"
+            manage_pm2_startup delete
+            ;;
+
+        --restart)
+            echo "🔄 重启应用..."
+            
+            if ! APP_NAME=$(get_app_name); then
+                echo "   请先使用 '$0 --start' 启动应用"
+                exit 1
+            fi
+
+            if ! pm2 list 2>/dev/null | grep -q "$APP_NAME"; then
+                echo "❌ 应用 $APP_NAME 未在 pm2 中运行"
+                echo "   请使用 '$0 --start' 重新启动"
+                rm -f "$APP_NAME_FILE"
+                exit 1
+            fi
+
+            # 构建项目
+            [ "$BUILD_FLAG" = true ] && build_project
+            
+            # 检查应用文件
+            if [ ! -f "$APP_PATH" ]; then
+                echo "❌ 找不到应用文件: $APP_PATH"
+                if [ "$BUILD_FLAG" != true ]; then
+                    echo "   提示：使用 --build 参数重新构建项目"
+                fi
+                exit 1
+            fi
+
+            if pm2 restart "$APP_NAME" --update-env 2>/dev/null; then
+                echo "✅ 应用 $APP_NAME 已重启"
+                [ "$BUILD_FLAG" = true ] && echo "   已执行构建"
+                echo ""
+                pm2 list
+                manage_pm2_startup save
+            else
+                echo "❌ 应用重启失败"
+                exit 1
+            fi
+            ;;
+
+        --status)
+            echo "📊 应用状态："
+            echo ""
+            
+            if [ -f "$APP_NAME_FILE" ]; then
+                APP_NAME=$(cat "$APP_NAME_FILE")
+                echo "当前记录的应用名称: $APP_NAME"
+                echo ""
+                
+                if pm2 list 2>/dev/null | grep -q "$APP_NAME"; then
+                    pm2 show "$APP_NAME" 2>/dev/null || pm2 list
+                else
+                    echo "⚠️  应用 $APP_NAME 未在 pm2 中运行"
+                    echo ""
+                    echo "所有 pm2 进程："
+                    pm2 list
+                fi
+            else
+                echo "未找到应用名称文件"
+                echo ""
+                echo "所有 pm2 进程："
+                pm2 list
+            fi
+            ;;
+
+        --logs)
+            if ! APP_NAME=$(get_app_name 2>/dev/null); then
+                echo "📋 显示所有 pm2 日志："
+                pm2 logs
+            else
+                echo "📋 显示 $APP_NAME 的日志："
+                pm2 logs "$APP_NAME"
+            fi
+            ;;
+
+        *)
+            echo "❌ 无效的命令: $COMMAND"
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# 执行主函数
+main "$@"

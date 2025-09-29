@@ -149,12 +149,15 @@ export class PGKVDatabase {
   private CustomKVStore: any;
 
   constructor(
-    datasourceOrUrl: string,
+    datasourceOrUrl?: string,
     tableName: string = 'kv_store',
     valueType: ValueType = 'jsonb',
   ) {
     this.tableName = tableName;
     this.valueType = valueType;
+    if (!datasourceOrUrl) {
+      throw new Error('datasourceOrUrl is required');
+    }
 
     @Entity(tableName)
     class CustomKVStore implements KVEntity {

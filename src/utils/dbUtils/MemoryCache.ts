@@ -58,6 +58,9 @@ export class MemoryKVDatabase<T = any> implements IKVDatabase<T> {
       this.cleanupTimers.delete(key);
     }, delayMs);
 
+    // 使用 unref() 让定时器不阻止进程退出
+    timer.unref();
+
     this.cleanupTimers.set(key, timer);
   }
 
@@ -142,6 +145,29 @@ export function createMemoryCacheDecorator<T = any>(
 
 // 导出一个全局的内存缓存实例
 export const memoryKVDatabase = new MemoryKVDatabase();
+
+// 全局清理函数
+export function clearMemoryCache(): void {
+  memoryKVDatabase.clear();
+}
+
+// 在进程退出时自动清理
+if (typeof process !== 'undefined' && process.on) {
+  process.on('exit', () => {
+    memoryKVDatabase.clear();
+  });
+
+  // 处理 SIGINT (Ctrl+C) 和 SIGTERM
+  process.on('SIGINT', () => {
+    memoryKVDatabase.clear();
+    process.exit(0);
+  });
+
+  process.on('SIGTERM', () => {
+    memoryKVDatabase.clear();
+    process.exit(0);
+  });
+}
 
 // 使用全局实例的装饰器
 export function memoryCache<T = any>(ttl: number = 60, prefix: string = '') {

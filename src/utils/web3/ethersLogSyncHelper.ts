@@ -106,7 +106,8 @@ export class EthersLogSyncHelper extends EthersLogHelper {
 
       // 存储每个日志
       for (const log of logs) {
-        const key = `${log.blockNumber}_${nonce}`;
+        const logName = 'name' in log ? log.name : 'unknown';
+        const key = `${logName}_${log.blockNumber}_${nonce}`;
         await db.put(key, log);
         nonce++;
       }
@@ -164,5 +165,135 @@ export class EthersLogSyncHelper extends EthersLogHelper {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     return true;
+  }
+
+  async getLogs(params: {
+    contract_address: string;
+    eventNames?: string;
+    start_block?: number;
+    end_block?: number;
+    limit?: number;
+    offset?: number;
+    args?: any[];
+  }) {
+    const {
+      contract_address,
+      eventNames,
+      start_block = 0,
+      end_block = 0,
+      limit,
+      offset,
+      args,
+    } = params;
+
+    const { db, metadata_db } = await this.getContractDB(contract_address);
+
+    try {
+      const metadata = await metadata_db.get(contract_address);
+
+      // 构建基础前缀，格式: eventName_
+      const base_prefix = eventNames ? `${eventNames}_` : '';
+
+      // 如果没有指定区块范围，使用基础前缀查询所有
+      if (start_block === 0 && end_block === 0) {
+        const allLogs = await db.getWithPrefix(base_prefix, {
+          limit,
+          offset,
+        });
+
+        // 如果传了 args 参数，需要过滤
+        let filteredLogs = allLogs;
+        if (args && args.length > 0) {
+          filteredLogs = allLogs.filter(({ value }) => {
+            const log = value;
+            return args.every((arg) => log.args.includes(arg));
+          });
+        }
+
+        return {
+          logs: filteredLogs.map(({ value }) => value),
+          total_count: filteredLogs.length,
+          contract_address,
+          eventNames,
+          start_block,
+          end_block,
+          limit,
+          offset,
+        };
+      }
+
+      // 计算共同前缀
+      // 例如：10231000 到 10235000，共同前缀是 1023
+      const commonPrefix = this.findCommonPrefix(start_block, end_block);
+      const key_prefix = `${base_prefix}${commonPrefix}`;
+
+      // 使用计算出的前缀查询
+      const logs = await db.getWithPrefix(key_prefix, {
+        limit,
+        offset,
+      });
+
+      // 过滤出在指定范围内的日志
+      const filteredLogs = logs.filter(({ value }) => {
+        const log = value;
+        const blockNumber = log.blockNumber || log.block_number;
+
+        // 首先检查 blockNumber 是否在范围内
+        const inBlockRange =
+          blockNumber >= start_block && blockNumber <= end_block;
+
+        // 如果不在 blockNumber 范围内，直接返回 false
+        if (!inBlockRange) {
+          return false;
+        }
+
+        // 如果在 blockNumber 范围内，再检查 args 参数
+        if (args && args.length > 0) {
+          return args.every((arg) => log.args.includes(arg));
+        }
+
+        // 如果没有 args 参数，只要在 blockNumber 范围内就返回 true
+        return true;
+      });
+
+      return {
+        logs: filteredLogs.map(({ value }) => value),
+        total_count: filteredLogs.length,
+        contract_address,
+        eventNames,
+        start_block,
+        end_block,
+        limit,
+        offset,
+      };
+    } finally {
+      // 确保数据库连接被关闭
+      try {
+        await db.close();
+        await metadata_db.close();
+      } catch (e) {
+        console.error('Error closing database connections:', e);
+      }
+    }
+  }
+
+  // 找到两个区块号的共同前缀
+  // 例如：10231000 和 10235000 的共同前缀是 1023
+  private findCommonPrefix(startBlock: number, endBlock: number): string {
+    const startStr = startBlock.toString();
+    const endStr = endBlock.toString();
+
+    let commonLength = 0;
+    const minLength = Math.min(startStr.length, endStr.length);
+
+    for (let i = 0; i < minLength; i++) {
+      if (startStr[i] === endStr[i]) {
+        commonLength++;
+      } else {
+        break;
+      }
+    }
+
+    return startStr.substring(0, commonLength);
   }
 }

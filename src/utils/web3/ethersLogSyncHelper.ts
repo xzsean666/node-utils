@@ -67,10 +67,10 @@ export class EthersLogSyncHelper extends EthersLogHelper {
   async syncLogs(params: {
     contract_address: string;
     abi: any[];
-    eventNames?: string | string[];
+    event_name?: string | string[];
     start_block?: number;
   }) {
-    const { contract_address, abi, eventNames, start_block = 0 } = params;
+    const { contract_address, abi, event_name, start_block = 0 } = params;
 
     const { db, metadata_db } = await this.getContractDB(contract_address);
     try {
@@ -96,7 +96,7 @@ export class EthersLogSyncHelper extends EthersLogHelper {
       // 获取日志
       const logs = await this.getContractLogs({
         contractAddresses: contract_address,
-        eventNames,
+        eventNames: event_name,
         abi,
         filter: {
           fromBlock: effective_start_block,
@@ -147,16 +147,16 @@ export class EthersLogSyncHelper extends EthersLogHelper {
   async syncLogsToCurrent(params: {
     contract_address: string;
     abi: any[];
-    eventNames?: string | string[];
+    event_name?: string | string[];
     start_block?: number;
   }) {
-    const { contract_address, abi, eventNames, start_block = 0 } = params;
+    const { contract_address, abi, event_name, start_block = 0 } = params;
     const current_block = await this.getCurrentBlock();
     while (true) {
       const result = await this.syncLogs({
         contract_address,
         abi,
-        eventNames,
+        event_name,
         start_block,
       });
       if (Math.abs(result.to_block - current_block) < 1000) {
@@ -167,35 +167,53 @@ export class EthersLogSyncHelper extends EthersLogHelper {
     return true;
   }
 
+  async getRecentLogs(params: {
+    contract_address: string;
+    event_name?: string;
+    block_range?: number;
+  }) {
+    const { contract_address, event_name, block_range } = params;
+    const { db, metadata_db } = await this.getContractDB(contract_address);
+    const metadata = await metadata_db.get(contract_address);
+    const to_block = metadata?.start_block || 0;
+    const start_block = to_block - (block_range || 10000);
+
+    const logs = await this.getLogs({
+      contract_address,
+      event_name,
+      start_block,
+      to_block,
+    });
+    return logs;
+  }
+
   async getLogs(params: {
     contract_address: string;
-    eventNames?: string;
+    event_name?: string;
     start_block?: number;
-    end_block?: number;
+    to_block?: number;
     limit?: number;
     offset?: number;
     args?: any[];
   }) {
     const {
       contract_address,
-      eventNames,
+      event_name,
       start_block = 0,
-      end_block = 0,
+      to_block = 0,
       limit,
       offset,
       args,
     } = params;
 
-    const { db, metadata_db } = await this.getContractDB(contract_address);
+    const { db } = await this.getContractDB(contract_address);
 
     try {
-      const metadata = await metadata_db.get(contract_address);
-
       // 构建基础前缀，格式: eventName_
-      const base_prefix = eventNames ? `${eventNames}_` : '';
+      const base_prefix = event_name ? `${event_name}_` : '';
 
       // 如果没有指定区块范围，使用基础前缀查询所有
-      if (start_block === 0 && end_block === 0) {
+      if (start_block === 0 && to_block === 0) {
         const allLogs = await db.getWithPrefix(base_prefix, {
           limit,
           offset,
@@ -214,9 +232,9 @@ export class EthersLogSyncHelper extends EthersLogHelper {
           logs: filteredLogs.map(({ value }) => value),
           total_count: filteredLogs.length,
           contract_address,
-          eventNames,
+          event_name,
           start_block,
-          end_block,
+          to_block,
           limit,
           offset,
         };
@@ -224,7 +242,7 @@ export class EthersLogSyncHelper extends EthersLogHelper {
 
       // 计算共同前缀
       // 例如：10231000 到 10235000，共同前缀是 1023
-      const commonPrefix = this.findCommonPrefix(start_block, end_block);
+      const commonPrefix = this.findCommonPrefix(start_block, to_block);
       const key_prefix = `${base_prefix}${commonPrefix}`;
 
       // 使用计算出的前缀查询
@@ -240,7 +258,7 @@ export class EthersLogSyncHelper extends EthersLogHelper {
 
         // 首先检查 blockNumber 是否在范围内
         const inBlockRange =
-          blockNumber >= start_block && blockNumber <= end_block;
+          blockNumber >= start_block && blockNumber <= to_block;
 
         // 如果不在 blockNumber 范围内，直接返回 false
         if (!inBlockRange) {
@@ -260,9 +278,9 @@ export class EthersLogSyncHelper extends EthersLogHelper {
         logs: filteredLogs.map(({ value }) => value),
         total_count: filteredLogs.length,
         contract_address,
-        eventNames,
+        event_name,
         start_block,
-        end_block,
+        to_block,
         limit,
         offset,
       };
@@ -270,7 +288,6 @@ export class EthersLogSyncHelper extends EthersLogHelper {
       // 确保数据库连接被关闭
       try {
         await db.close();
-        await metadata_db.close();
       } catch (e) {
         console.error('Error closing database connections:', e);
       }
@@ -279,9 +296,9 @@ export class EthersLogSyncHelper extends EthersLogHelper {
 
   // 找到两个区块号的共同前缀
   // 例如：10231000 和 10235000 的共同前缀是 1023
-  private findCommonPrefix(startBlock: number, endBlock: number): string {
-    const startStr = startBlock.toString();
-    const endStr = endBlock.toString();
+  private findCommonPrefix(start_block: number, to_block: number): string {
+    const startStr = start_block.toString();
+    const endStr = to_block.toString();
 
     let commonLength = 0;
     const minLength = Math.min(startStr.length, endStr.length);

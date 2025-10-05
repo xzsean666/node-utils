@@ -1,4 +1,4 @@
-import { ethers } from "ethers";
+import { ethers } from 'ethers';
 
 interface TransferFromWithPKParams {
   fromAddressPK: string;
@@ -13,15 +13,15 @@ export class ERC20Utils {
   private contract: ethers.Contract;
 
   private static ERC20_ABI = [
-    "function name() view returns (string)",
-    "function symbol() view returns (string)",
-    "function decimals() view returns (uint8)",
-    "function totalSupply() view returns (uint256)",
-    "function balanceOf(address) view returns (uint256)",
-    "function transfer(address to, uint256 amount) returns (bool)",
-    "function allowance(address owner, address spender) view returns (uint256)",
-    "function approve(address spender, uint256 amount) returns (bool)",
-    "function transferFrom(address from, address to, uint256 amount) returns (bool)",
+    'function name() view returns (string)',
+    'function symbol() view returns (string)',
+    'function decimals() view returns (uint8)',
+    'function totalSupply() view returns (uint256)',
+    'function balanceOf(address) view returns (uint256)',
+    'function transfer(address to, uint256 amount) returns (bool)',
+    'function allowance(address owner, address spender) view returns (uint256)',
+    'function approve(address spender, uint256 amount) returns (bool)',
+    'function transferFrom(address from, address to, uint256 amount) returns (bool)',
   ];
 
   constructor(rpcUrl: string, tokenAddress: string, privateKey?: string) {
@@ -31,13 +31,13 @@ export class ERC20Utils {
       this.contract = new ethers.Contract(
         tokenAddress,
         ERC20Utils.ERC20_ABI,
-        this.wallet
+        this.wallet,
       );
     } else {
       this.contract = new ethers.Contract(
         tokenAddress,
         ERC20Utils.ERC20_ABI,
-        this.provider
+        this.provider,
       );
     }
   }
@@ -104,7 +104,7 @@ export class ERC20Utils {
   public async transfer(
     toAddress: string,
     amount: bigint,
-    fromAddressPK?: string
+    fromAddressPK?: string,
   ): Promise<ethers.ContractTransaction> {
     if (fromAddressPK) {
       // 使用提供的私钥创建新的钱包实例
@@ -112,14 +112,14 @@ export class ERC20Utils {
       const fromContract = new ethers.Contract(
         this.contract.target,
         ERC20Utils.ERC20_ABI,
-        fromWallet
+        fromWallet,
       );
       return await fromContract.transfer(toAddress, amount);
     }
 
     // 使用默认钱包
     if (!this.wallet) {
-      throw new Error("需要提供私钥才能执行转账操作");
+      throw new Error('需要提供私钥才能执行转账操作');
     }
     return await this.contract.transfer(toAddress, amount);
   }
@@ -130,13 +130,13 @@ export class ERC20Utils {
       : this.wallet;
 
     if (!activeWallet) {
-      throw new Error("需要提供私钥才能执行转账操作");
+      throw new Error('需要提供私钥才能执行转账操作');
     }
 
     // 获取当前授权额度
     const currentAllowance = await this.contract.allowance(
       activeWallet.address,
-      toAddress
+      toAddress,
     );
 
     if (amount) {
@@ -155,7 +155,7 @@ export class ERC20Utils {
     const activeContract = new ethers.Contract(
       this.contract.target,
       ERC20Utils.ERC20_ABI,
-      activeWallet
+      activeWallet,
     );
     return await activeContract.approve(toAddress, amount);
   }
@@ -168,10 +168,10 @@ export class ERC20Utils {
    */
   async approveAll(
     toAddress: string,
-    fromAddressPKs: string[]
+    fromAddressPKs: string[],
   ): Promise<any[]> {
     if (!this.wallet) {
-      throw new Error("需要提供主钱包私钥");
+      throw new Error('需要提供主钱包私钥');
     }
     // 估算每个approve操作需要的gas费用
     const estimatedGasCost = await this.getHistoricalApproveGasCost();
@@ -185,17 +185,17 @@ export class ERC20Utils {
         const subContract = new ethers.Contract(
           this.contract.target,
           ERC20Utils.ERC20_ABI,
-          subWallet
+          subWallet,
         );
         const currentAllowance = await this.contract.allowance(
           subWallet.address,
-          toAddress
+          toAddress,
         );
         const amount = ethers.MaxUint256 / 2n; // 确保这个值是合理的
         if (currentAllowance < amount) {
           const approveTX = await subContract.approve(
             toAddress,
-            ethers.MaxUint256
+            ethers.MaxUint256,
           );
           await approveTX.wait(1);
           // 转移剩余的 ETH 到下一个地址
@@ -209,7 +209,7 @@ export class ERC20Utils {
             try {
               await this.transferAllNative(
                 nextWallet.address,
-                subWallet.privateKey
+                subWallet.privateKey,
               );
             } catch (error) {
               break;
@@ -222,7 +222,7 @@ export class ERC20Utils {
             try {
               await this.transferAllNative(
                 this.wallet.address,
-                subWallet.privateKey
+                subWallet.privateKey,
               );
             } catch (error) {
               break;
@@ -244,11 +244,11 @@ export class ERC20Utils {
    * @returns 平均 gas 使用量和当前 gas 价格的乘积
    */
   public async getHistoricalTransferGasCost(
-    count: number = 10
+    count: number = 10,
   ): Promise<bigint> {
     // Transfer 事件的 topic
     const transferEventTopic =
-      "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+      '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 
     // 获取最近的区块
     const currentBlock = await this.provider.getBlockNumber();
@@ -259,27 +259,27 @@ export class ERC20Utils {
       address: this.contract.target,
       topics: [transferEventTopic],
       fromBlock,
-      toBlock: "latest",
+      toBlock: 'latest',
     });
 
     // 获取最近的 count 个转账记录
     const recentTransfers = logs.slice(-count);
 
     if (recentTransfers.length === 0) {
-      throw new Error("没有找到最近的转账记录");
+      throw new Error('没有找到最近的转账记录');
     }
 
     // 获取这些交易的 gas 使用量
     const gasUsages = await Promise.all(
       recentTransfers.map((log) =>
-        this.provider.getTransactionReceipt(log.transactionHash)
-      )
+        this.provider.getTransactionReceipt(log.transactionHash),
+      ),
     );
 
     // 计算平均 gas 使用量
     const totalGasUsed = gasUsages.reduce(
       (sum, receipt) => sum + receipt!.gasUsed,
-      0n
+      0n,
     );
     const averageGasUsed = totalGasUsed / BigInt(gasUsages.length);
 
@@ -291,7 +291,7 @@ export class ERC20Utils {
 
   public async estimateTransferGasCost(
     toAddress: string,
-    amount: bigint | number
+    amount: bigint | number,
   ): Promise<bigint> {
     try {
       // 首先尝试获取历史平均值
@@ -301,7 +301,7 @@ export class ERC20Utils {
       // 如果获取历史数据失败，回退到原来的估算方法
       const gasLimit = await this.contract.transfer.estimateGas(
         toAddress,
-        amount
+        amount,
       );
       const gasPrice = await this.provider.getFeeData();
       return gasLimit * gasPrice.gasPrice!;
@@ -310,7 +310,7 @@ export class ERC20Utils {
 
   async transferFromWithPK(params: TransferFromWithPKParams): Promise<any> {
     if (!this.wallet) {
-      throw new Error("需要提供主钱包私钥用于补充gas费");
+      throw new Error('需要提供主钱包私钥用于补充gas费');
     }
 
     const { fromAddressPK, toAddress, amount, threshold } = params;
@@ -331,14 +331,14 @@ export class ERC20Utils {
     // 检查余额是否超过阈值
     if (transferAmount <= actualThreshold) {
       throw new Error(
-        `余额 ${transferAmount} 低于设定阈值 ${actualThreshold}，不执行转账`
+        `余额 ${transferAmount} 低于设定阈值 ${actualThreshold}，不执行转账`,
       );
     }
 
     // 估算gas费用
     let estimatedGasCost = await this.estimateTransferGasCost(
       toAddress,
-      transferAmount
+      transferAmount,
     );
     estimatedGasCost = (estimatedGasCost * BigInt(150)) / BigInt(100);
 
@@ -359,8 +359,8 @@ export class ERC20Utils {
         await tx.wait(1);
         await new Promise((resolve) => setTimeout(resolve, 2000));
       } catch (error: any) {
-        if (error?.error?.message === "already known") {
-          console.log("ETH补充交易已经在进行中...");
+        if (error?.error?.message === 'already known') {
+          console.log('ETH补充交易已经在进行中...');
           await new Promise((resolve) => setTimeout(resolve, 5000));
         } else {
           throw error;
@@ -369,7 +369,7 @@ export class ERC20Utils {
       const fromContract = new ethers.Contract(
         this.contract.target,
         ERC20Utils.ERC20_ABI,
-        fromWallet
+        fromWallet,
       );
       const tx = await fromContract.transfer(toAddress, transferAmount);
       await tx.wait(1);
@@ -384,7 +384,7 @@ export class ERC20Utils {
    */
   async transferAllNative(
     toAddress: string,
-    fromAddressPK?: string
+    fromAddressPK?: string,
   ): Promise<ethers.TransactionResponse> {
     // 确定使用哪个钱包
     const activeWallet = fromAddressPK
@@ -392,7 +392,7 @@ export class ERC20Utils {
       : this.wallet;
 
     if (!activeWallet) {
-      throw new Error("需要提供私钥才能执行转账操作");
+      throw new Error('需要提供私钥才能执行转账操作');
     }
 
     // 获取当前账户余额
@@ -408,7 +408,7 @@ export class ERC20Utils {
 
     // 检查是否有足够的余额支付 gas
     if (transferAmount <= 0n) {
-      throw new Error("余额不足以支付 gas 费用");
+      throw new Error('余额不足以支付 gas 费用');
     }
 
     // 发送交易
@@ -425,11 +425,11 @@ export class ERC20Utils {
    * @returns 平均 gas 使用量和当前 gas 价格的乘积
    */
   public async getHistoricalApproveGasCost(
-    count: number = 10
+    count: number = 10,
   ): Promise<bigint> {
     // Approve 事件的 topic
     const approveEventTopic =
-      "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925";
+      '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925';
 
     // 获取最近的区块
     const currentBlock = await this.provider.getBlockNumber();
@@ -439,27 +439,27 @@ export class ERC20Utils {
     const logs = await this.provider.getLogs({
       topics: [approveEventTopic],
       fromBlock,
-      toBlock: "latest",
+      toBlock: 'latest',
     });
 
     // 获取最近的 count 个授权记录
     const recentApprovals = logs.slice(-count);
 
     if (recentApprovals.length === 0) {
-      throw new Error("没有找到最近的授权记录");
+      throw new Error('没有找到最近的授权记录');
     }
 
     // 获取这些交易的 gas 使用量
     const gasUsages = await Promise.all(
       recentApprovals.map((log) =>
-        this.provider.getTransactionReceipt(log.transactionHash)
-      )
+        this.provider.getTransactionReceipt(log.transactionHash),
+      ),
     );
 
     // 计算平均 gas 使用量
     const totalGasUsed = gasUsages.reduce(
       (sum, receipt) => sum + receipt!.gasUsed,
-      0n
+      0n,
     );
     const averageGasUsed = totalGasUsed / BigInt(gasUsages.length);
 
@@ -479,7 +479,7 @@ export class ERC20Utils {
       // 如果获取历史数据失败，回退到原来的估算方法
       const gasLimit = await this.contract.approve.estimateGas(
         toAddress,
-        ethers.MaxUint256
+        ethers.MaxUint256,
       );
       const gasPrice = await this.provider.getFeeData();
       return BigInt(gasLimit * gasPrice.gasPrice!);

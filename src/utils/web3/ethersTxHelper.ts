@@ -82,6 +82,12 @@ export class EthersTxHelper {
     const decodedData = iface.decodeFunctionResult(function_name, data);
     return decodedData;
   }
+  async transferNative(to_address: string, amount: bigint) {
+    return await this.sendTransaction({
+      target: to_address,
+      value: amount.toString(),
+    });
+  }
 
   async callContract(params: {
     target: string;

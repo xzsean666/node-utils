@@ -120,8 +120,11 @@ export class EthersTxHelper {
 
     try {
       const fn = contract.getFunction(function_name);
-      const options = blockTag !== undefined ? { blockTag } : undefined;
-      return (await fn(...args, options)) as T;
+      if (blockTag !== undefined) {
+        return (await fn(...args, { blockTag })) as T;
+      } else {
+        return (await fn(...args)) as T;
+      }
     } catch (error: any) {
       throw new Error(
         '读取合约失败 (' +

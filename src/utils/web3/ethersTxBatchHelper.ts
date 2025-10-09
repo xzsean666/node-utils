@@ -3,7 +3,7 @@ import { EthersTxHelper } from './ethersTxHelper';
 import { ethers } from 'ethers';
 
 export class EthersTxBatchHelper extends EthersTxHelper {
-  private batchCallAddress;
+  public batchCallAddress;
   constructor(NODE_PROVIDER: string | ethers.BrowserProvider, config?: any) {
     super(NODE_PROVIDER, config);
     this.batchCallAddress = config?.batchCallAddress;

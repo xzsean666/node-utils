@@ -58,7 +58,7 @@ export class UniswapHelper extends ERC20Helper {
   async getAmountsOutV2(params: {
     amountIn: bigint | string;
     path: string[];
-  }): Promise<bigint[]> {
+  }): Promise<bigint> {
     if (!this.uniswapV2RouterAddress) {
       throw new Error('Uniswap V2 Router address not set');
     }
@@ -72,7 +72,7 @@ export class UniswapHelper extends ERC20Helper {
       args: [amountIn, path],
     });
 
-    return amounts;
+    return amounts[1];
   }
 
   /**
@@ -85,7 +85,7 @@ export class UniswapHelper extends ERC20Helper {
   async getAmountsInV2(params: {
     amountOut: bigint | string;
     path: string[];
-  }): Promise<bigint[]> {
+  }): Promise<bigint> {
     if (!this.uniswapV2RouterAddress) {
       throw new Error('Uniswap V2 Router address not set');
     }
@@ -99,7 +99,7 @@ export class UniswapHelper extends ERC20Helper {
       args: [amountOut, path],
     });
 
-    return amounts;
+    return amounts[0];
   }
 
   /**

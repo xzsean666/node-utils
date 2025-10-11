@@ -3,11 +3,11 @@ import { ethers } from 'ethers';
 export class EthersTxHelper {
   web3!: ethers.JsonRpcProvider | ethers.BrowserProvider;
   NODE_PROVIDER?: string | ethers.BrowserProvider;
-  private privateKey?: string;
+  private private_key?: string;
 
   constructor(NODE_PROVIDER: string | ethers.BrowserProvider, config?: any) {
     this.NODE_PROVIDER = NODE_PROVIDER;
-    this.privateKey = config?.privateKey;
+    this.private_key = config?.privateKey;
 
     if (typeof NODE_PROVIDER == 'string') {
       this.web3 = new ethers.JsonRpcProvider(NODE_PROVIDER);
@@ -30,7 +30,7 @@ export class EthersTxHelper {
   }
   public async deployContract(abi: any[], bytecode: string): Promise<any> {
     try {
-      const signer = new ethers.Wallet(this.privateKey || '', this.web3);
+      const signer = new ethers.Wallet(this.private_key || '', this.web3);
       const factory = new ethers.ContractFactory(abi, bytecode, signer);
       const contract = await factory.deploy();
       await contract.waitForDeployment();
@@ -67,8 +67,8 @@ export class EthersTxHelper {
     const { abi, function_name, data } = params;
     const iface = new ethers.Interface(abi);
     // 解返回数据
-    const decodedData = iface.decodeFunctionResult(function_name, data);
-    return decodedData;
+    const decoded_data = iface.decodeFunctionResult(function_name, data);
+    return decoded_data;
   }
 
   decodeResultDataByABI(params: {
@@ -79,8 +79,8 @@ export class EthersTxHelper {
     const { abi, function_name, data } = params;
     const iface = new ethers.Interface(abi);
     // 解返回数据
-    const decodedData = iface.decodeFunctionResult(function_name, data);
-    return decodedData;
+    const decoded_data = iface.decodeFunctionResult(function_name, data);
+    return decoded_data;
   }
   async sendEther(to_address: string, amount: string) {
     return await this.sendTransaction({
@@ -104,8 +104,8 @@ export class EthersTxHelper {
       target,
       value,
     });
-    const txResult = await this.sendTransaction(data);
-    return txResult;
+    const tx_result = await this.sendTransaction(data);
+    return tx_result;
   }
 
   async callReadContract<T = unknown>(opts: {
@@ -198,10 +198,10 @@ export class EthersTxHelper {
     data?: string,
     value: string = '0',
   ): Promise<ethers.TransactionResponse> {
-    if (!this.privateKey) {
+    if (!this.private_key) {
       throw new Error('Private key is required');
     }
-    const signer = new ethers.Wallet(this.privateKey, this.web3);
+    const signer = new ethers.Wallet(this.private_key, this.web3);
     const tx_response = await signer.sendTransaction({
       to,
       data: this.normalizeHexData(data),
@@ -227,7 +227,7 @@ export class EthersTxHelper {
     try {
       let tx_response: ethers.TransactionResponse;
       // 保留原有的 Provider 判断逻辑
-      if (this.privateKey && this.web3 instanceof ethers.JsonRpcProvider) {
+      if (this.private_key && this.web3 instanceof ethers.JsonRpcProvider) {
         tx_response = await this.sendWithPrivateKey(
           call.target,
           call.data,

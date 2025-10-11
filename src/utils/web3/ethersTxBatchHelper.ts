@@ -3,10 +3,10 @@ import { EthersTxHelper } from './ethersTxHelper';
 import { ethers } from 'ethers';
 
 export class EthersTxBatchHelper extends EthersTxHelper {
-  public batchCallAddress;
+  public batch_call_address;
   constructor(NODE_PROVIDER: string | ethers.BrowserProvider, config?: any) {
     super(NODE_PROVIDER, config);
-    this.batchCallAddress = config?.batchCallAddress;
+    this.batch_call_address = config?.batchCallAddress;
   }
   async deployBatchCallContract() {
     const result = await this.deployContract(batchCallABI, batchCallBytesCode);
@@ -18,14 +18,14 @@ export class EthersTxBatchHelper extends EthersTxHelper {
       data: string;
       abi: any[];
       function_name: string;
-      executeArgs: any[];
+      execute_args: any[];
     }>,
     blockNumber?: number,
     batchLimit: number = 200,
   ) {
-    const IBatchCallABI = batchCallABI;
+    const i_batch_call_abi = batchCallABI;
 
-    if (!this.batchCallAddress) {
+    if (!this.batch_call_address) {
       throw new Error('BatchCallAddress not provided!');
     }
 
@@ -38,18 +38,20 @@ export class EthersTxBatchHelper extends EthersTxHelper {
     }> = [];
     // 按batchLimit分批处理
     for (let i = 0; i < calls.length; i += batchLimit) {
-      const batchCalls = calls.slice(i, i + batchLimit);
-      console.log(`处理批次 ${i / batchLimit + 1}, 大小: ${batchCalls.length}`);
+      const batch_calls = calls.slice(i, i + batchLimit);
+      console.log(
+        `处理批次 ${i / batchLimit + 1}, 大小: ${batch_calls.length}`,
+      );
 
       // 执行批量调用
-      const [successes, returnData] = await this.callReadContract<
+      const [successes, return_data] = await this.callReadContract<
         [boolean[], string[]]
       >({
-        target: this.batchCallAddress,
-        abi: IBatchCallABI,
+        target: this.batch_call_address,
+        abi: i_batch_call_abi,
         function_name: 'batchStaticCall',
         args: [
-          batchCalls.map((call) => ({
+          batch_calls.map((call) => ({
             target: call.target,
             callData: call.data,
           })),
@@ -58,8 +60,8 @@ export class EthersTxBatchHelper extends EthersTxHelper {
       });
 
       // 解码返回结果
-      const batchResults = returnData.map((data: string, index: number) => {
-        const call = batchCalls[index];
+      const batch_results = return_data.map((data: string, index: number) => {
+        const call = batch_calls[index];
 
         if (!successes[index]) {
           return {
@@ -67,12 +69,12 @@ export class EthersTxBatchHelper extends EthersTxHelper {
             success: false,
             decodedData: null,
             function: call.function_name,
-            args: call.executeArgs,
+            args: call.execute_args,
           };
         }
 
         try {
-          const decodedData = this.decodeResultDataByABI({
+          const decoded_data = this.decodeResultDataByABI({
             abi: call.abi,
             function_name: call.function_name,
             data,
@@ -80,9 +82,9 @@ export class EthersTxBatchHelper extends EthersTxHelper {
           return {
             target: call.target,
             success: true,
-            decodedData,
+            decodedData: decoded_data,
             function: call.function_name,
-            args: call.executeArgs,
+            args: call.execute_args,
           };
         } catch (error) {
           console.warn(`解码数据失败 (${call.function_name}):`, error);
@@ -91,12 +93,12 @@ export class EthersTxBatchHelper extends EthersTxHelper {
             success: true,
             decodedData: data,
             function: call.function_name,
-            args: call.executeArgs,
+            args: call.execute_args,
           };
         }
       });
 
-      results.push(...batchResults);
+      results.push(...batch_results);
     }
     return results;
   }
@@ -106,13 +108,13 @@ export class EthersTxBatchHelper extends EthersTxHelper {
       data: string;
       abi: any[];
       function_name: string;
-      executeArgs: any[];
+      execute_args: any[];
     }>,
     batchLimit: number = 200,
   ) {
-    const IBatchCallABI = batchCallABI;
+    const i_batch_call_abi = batchCallABI;
 
-    if (!this.batchCallAddress) {
+    if (!this.batch_call_address) {
       throw new Error('BatchCallAddress未提供！');
     }
 
@@ -125,41 +127,43 @@ export class EthersTxBatchHelper extends EthersTxHelper {
     }> = [];
 
     for (let i = 0; i < calls.length; i += batchLimit) {
-      const batchCalls = calls.slice(i, i + batchLimit);
-      console.log(`处理批次 ${i / batchLimit + 1}, 大小: ${batchCalls.length}`);
+      const batch_calls = calls.slice(i, i + batchLimit);
+      console.log(
+        `处理批次 ${i / batchLimit + 1}, 大小: ${batch_calls.length}`,
+      );
 
       try {
         const tx_response = await this.callContract({
-          target: this.batchCallAddress,
-          abi: IBatchCallABI,
+          target: this.batch_call_address,
+          abi: i_batch_call_abi,
           function_name: 'batchCall',
           execute_args: [
-            batchCalls.map((call) => ({
+            batch_calls.map((call) => ({
               target: call.target,
               callData: call.data,
             })),
           ],
         });
 
-        const batchResults = batchCalls.map((call) => ({
+        const batch_results = batch_calls.map((call) => ({
           target: call.target,
           success: true,
           transactionHash: tx_response.hash,
           function: call.function_name,
-          args: call.executeArgs,
+          args: call.execute_args,
         }));
 
-        results.push(...batchResults);
+        results.push(...batch_results);
       } catch (error: any) {
         console.error(`批量写入调用失败:`, error);
-        const failedResults = batchCalls.map((call) => ({
+        const failed_results = batch_calls.map((call) => ({
           target: call.target,
           success: false,
           transactionHash: '',
           function: call.function_name,
-          args: call.executeArgs,
+          args: call.execute_args,
         }));
-        results.push(...failedResults);
+        results.push(...failed_results);
         throw new Error(`批量写入调用失败: ${error.message}`);
       }
     }

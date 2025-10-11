@@ -186,6 +186,36 @@ export class EthersLogSyncHelper extends EthersLogHelper {
     });
     return logs;
   }
+  async getAllLogs(params: {
+    contract_address: string;
+    event_name?: string;
+    start_block?: number;
+    limit?: number;
+    offset?: number;
+  }) {
+    const {
+      contract_address,
+      event_name,
+      start_block = 0,
+      limit,
+      offset,
+    } = params;
+    const { db, metadata_db } = await this.getContractDB(contract_address);
+    const metadata = await metadata_db.get(contract_address);
+    const to_block = metadata?.start_block;
+    if (!to_block) {
+      return [];
+    }
+    const logs = await this.getLogs({
+      contract_address,
+      event_name,
+      start_block,
+      to_block,
+      limit,
+      offset,
+    });
+    return logs;
+  }
 
   async getLogs(params: {
     contract_address: string;
@@ -214,23 +244,23 @@ export class EthersLogSyncHelper extends EthersLogHelper {
 
       // 如果没有指定区块范围，使用基础前缀查询所有
       if (start_block === 0 && to_block === 0) {
-        const allLogs = await db.getWithPrefix(base_prefix, {
+        const all_logs = await db.getWithPrefix(base_prefix, {
           limit,
           offset,
         });
 
         // 如果传了 args 参数，需要过滤
-        let filteredLogs = allLogs;
+        let filtered_logs = all_logs;
         if (args && args.length > 0) {
-          filteredLogs = allLogs.filter(({ value }) => {
+          filtered_logs = all_logs.filter(({ value }) => {
             const log = value;
             return args.every((arg) => log.args.includes(arg));
           });
         }
 
         return {
-          logs: filteredLogs.map(({ value }) => value),
-          total_count: filteredLogs.length,
+          logs: filtered_logs.map(({ value }) => value),
+          total_count: filtered_logs.length,
           contract_address,
           event_name,
           start_block,
@@ -242,8 +272,8 @@ export class EthersLogSyncHelper extends EthersLogHelper {
 
       // 计算共同前缀
       // 例如：10231000 到 10235000，共同前缀是 1023
-      const commonPrefix = this.findCommonPrefix(start_block, to_block);
-      const key_prefix = `${base_prefix}${commonPrefix}`;
+      const common_prefix = this.findCommonPrefix(start_block, to_block);
+      const key_prefix = `${base_prefix}${common_prefix}`;
 
       // 使用计算出的前缀查询
       const logs = await db.getWithPrefix(key_prefix, {
@@ -252,31 +282,31 @@ export class EthersLogSyncHelper extends EthersLogHelper {
       });
 
       // 过滤出在指定范围内的日志
-      const filteredLogs = logs.filter(({ value }) => {
+      const filtered_logs = logs.filter(({ value }) => {
         const log = value;
-        const blockNumber = log.blockNumber || log.block_number;
+        const block_number = log.blockNumber || log.block_number;
 
-        // 首先检查 blockNumber 是否在范围内
-        const inBlockRange =
-          blockNumber >= start_block && blockNumber <= to_block;
+        // 首先检查 block_number 是否在范围内
+        const in_block_range =
+          block_number >= start_block && block_number <= to_block;
 
-        // 如果不在 blockNumber 范围内，直接返回 false
-        if (!inBlockRange) {
+        // 如果不在 block_number 范围内，直接返回 false
+        if (!in_block_range) {
           return false;
         }
 
-        // 如果在 blockNumber 范围内，再检查 args 参数
+        // 如果在 block_number 范围内，再检查 args 参数
         if (args && args.length > 0) {
           return args.every((arg) => log.args.includes(arg));
         }
 
-        // 如果没有 args 参数，只要在 blockNumber 范围内就返回 true
+        // 如果没有 args 参数，只要在 block_number 范围内就返回 true
         return true;
       });
 
       return {
-        logs: filteredLogs.map(({ value }) => value),
-        total_count: filteredLogs.length,
+        logs: filtered_logs.map(({ value }) => value),
+        total_count: filtered_logs.length,
         contract_address,
         event_name,
         start_block,
@@ -297,20 +327,20 @@ export class EthersLogSyncHelper extends EthersLogHelper {
   // 找到两个区块号的共同前缀
   // 例如：10231000 和 10235000 的共同前缀是 1023
   private findCommonPrefix(start_block: number, to_block: number): string {
-    const startStr = start_block.toString();
-    const endStr = to_block.toString();
+    const start_str = start_block.toString();
+    const end_str = to_block.toString();
 
-    let commonLength = 0;
-    const minLength = Math.min(startStr.length, endStr.length);
+    let common_length = 0;
+    const min_length = Math.min(start_str.length, end_str.length);
 
-    for (let i = 0; i < minLength; i++) {
-      if (startStr[i] === endStr[i]) {
-        commonLength++;
+    for (let i = 0; i < min_length; i++) {
+      if (start_str[i] === end_str[i]) {
+        common_length++;
       } else {
         break;
       }
     }
 
-    return startStr.substring(0, commonLength);
+    return start_str.substring(0, common_length);
   }
 }

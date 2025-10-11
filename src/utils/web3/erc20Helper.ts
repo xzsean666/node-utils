@@ -231,7 +231,7 @@ export class ERC20Helper extends EthersTxBatchHelper {
       }).data,
       abi: ERC20_ABI,
       function_name: 'balanceOf',
-      executeArgs: [address],
+      execute_args: [address],
     }));
 
     // 执行批量调用
@@ -277,7 +277,7 @@ export class ERC20Helper extends EthersTxBatchHelper {
       }).data,
       abi: ERC20_ABI,
       function_name: 'balanceOf',
-      executeArgs: [query.address],
+      execute_args: [query.address],
     }));
 
     // 执行批量调用

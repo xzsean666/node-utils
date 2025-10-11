@@ -37,18 +37,18 @@ export class EthersLogHelper {
    * 获取事件主题哈希
    */
   getEventTopics(events: any[]) {
-    const processType = (input: any): string => {
+    const process_type = (input: any): string => {
       // 处理基础 tuple 类型
       if (input.type === 'tuple') {
         const components = input.components
-          .map((comp: any) => processType(comp))
+          .map((comp: any) => process_type(comp))
           .join(',');
         return `(${components})`;
       }
       // 处理 tuple 数组
       if (input.type === 'tuple[]') {
         const components = input.components
-          .map((comp: any) => processType(comp))
+          .map((comp: any) => process_type(comp))
           .join(',');
         return `(${components})[]`;
       }
@@ -58,7 +58,7 @@ export class EthersLogHelper {
 
     return events.map((event) => {
       const signature = `${event.name}(${event.inputs
-        .map((input: any) => processType(input))
+        .map((input: any) => process_type(input))
         .join(',')})`;
       return ethers.id(signature);
     });
@@ -116,125 +116,127 @@ export class EthersLogHelper {
         : [contractAddresses];
 
       // 2. 获取所有事件ABI
-      const allEventAbis = abi.filter((item: any) => item.type === 'event');
+      const all_event_abis = abi.filter((item: any) => item.type === 'event');
 
       // 如果未指定eventNames，则使用所有事件，否则过滤指定的事件
-      const eventAbis = eventNames
-        ? allEventAbis.filter((item: any) =>
+      const event_abis = eventNames
+        ? all_event_abis.filter((item: any) =>
             Array.isArray(eventNames)
               ? eventNames.includes(item.name)
               : item.name === eventNames,
           )
-        : allEventAbis;
+        : all_event_abis;
 
       // 检查是否有匹配的事件ABI
-      if (eventAbis.length === 0) {
-        const availableEvents = allEventAbis.map((e: any) => e.name).join(', ');
+      if (event_abis.length === 0) {
+        const available_events = all_event_abis
+          .map((e: any) => e.name)
+          .join(', ');
         throw new Error(
           eventNames
-            ? `未找到指定的事件定义。可用事件: ${availableEvents}`
+            ? `未找到指定的事件定义。可用事件: ${available_events}`
             : 'ABI中未找到任何事件定义',
         );
       }
 
       // 3. 生成事件topics
-      const eventTopics = this.getEventTopics(eventAbis);
+      const event_topics = this.getEventTopics(event_abis);
 
       // 4. 获取区块范围
-      const currentBlockNumber = await this.web3.getBlockNumber();
-      const fromBlock = BigInt(filter.fromBlock || 0);
-      const toBlock =
+      const current_block_number = await this.web3.getBlockNumber();
+      const from_block = BigInt(filter.fromBlock || 0);
+      const to_block =
         filter.toBlock === 'latest'
-          ? BigInt(currentBlockNumber)
-          : BigInt(filter.toBlock || currentBlockNumber);
+          ? BigInt(current_block_number)
+          : BigInt(filter.toBlock || current_block_number);
 
       // 检查区块范围是否合理
-      if (fromBlock > toBlock) {
+      if (from_block > to_block) {
         throw new Error(
-          `起始区块 (${fromBlock}) 不能大于结束区块 (${toBlock})`,
+          `起始区块 (${from_block}) 不能大于结束区块 (${to_block})`,
         );
       }
 
       // 5. 批量处理设置
-      let batchSize = initialBatchSize;
+      let batch_size = initialBatchSize;
       const MIN_BATCH_SIZE = 100;
-      let currentBlock = fromBlock;
-      const allLogs: Log[] = [];
+      let current_block = from_block;
+      const all_logs: Log[] = [];
 
       // 在循环外创建合约实例，避免重复创建
-      const contractInterface = new ethers.Interface(abi);
+      const contract_interface = new ethers.Interface(abi);
 
       // 6. 批量获取日志
-      while (currentBlock <= toBlock) {
-        const endBlock = BigInt(
-          Math.min(Number(currentBlock) + batchSize - 1, Number(toBlock)),
+      while (current_block <= to_block) {
+        const end_block = BigInt(
+          Math.min(Number(current_block) + batch_size - 1, Number(to_block)),
         );
 
-        console.log(`获取日志: ${currentBlock} 至 ${endBlock}`);
+        console.log(`获取日志: ${current_block} 至 ${end_block}`);
 
         try {
           const logs = await this.web3.getLogs({
             address: addresses,
-            topics: [eventTopics, ...(filter.topics || [])],
-            fromBlock: currentBlock,
-            toBlock: endBlock,
+            topics: [event_topics, ...(filter.topics || [])],
+            fromBlock: current_block,
+            toBlock: end_block,
           });
 
-          allLogs.push(...logs);
-          currentBlock = endBlock + BigInt(1);
+          all_logs.push(...logs);
+          current_block = end_block + BigInt(1);
 
           // 如果成功了，可以尝试增加批次大小
-          if (batchSize < initialBatchSize) {
-            batchSize = Math.min(batchSize * 2, initialBatchSize);
+          if (batch_size < initialBatchSize) {
+            batch_size = Math.min(batch_size * 2, initialBatchSize);
           }
         } catch (error: any) {
           console.warn(
-            `获取区块 ${currentBlock} 至 ${endBlock} 的日志失败: ${error.message}`,
+            `获取区块 ${current_block} 至 ${end_block} 的日志失败: ${error.message}`,
           );
 
           // 减小批次大小并重试
-          batchSize = Math.floor(batchSize / 2);
+          batch_size = Math.floor(batch_size / 2);
 
-          if (batchSize < MIN_BATCH_SIZE) {
+          if (batch_size < MIN_BATCH_SIZE) {
             // 如果批次大小太小，尝试处理单个区块
-            if (currentBlock === endBlock) {
-              console.error(`无法处理单个区块 ${currentBlock}，跳过`);
-              currentBlock = currentBlock + BigInt(1);
-              batchSize = initialBatchSize; // 重置批次大小
+            if (current_block === end_block) {
+              console.error(`无法处理单个区块 ${current_block}，跳过`);
+              current_block = current_block + BigInt(1);
+              batch_size = initialBatchSize; // 重置批次大小
               continue;
             } else {
               // 重置为最小批次大小
-              batchSize = MIN_BATCH_SIZE;
+              batch_size = MIN_BATCH_SIZE;
             }
           }
 
-          console.log(`减小批次大小至 ${batchSize} 并重试`);
-          // 注意：这里不移动 currentBlock，让它重试当前批次
+          console.log(`减小批次大小至 ${batch_size} 并重试`);
+          // 注意：这里不移动 current_block，让它重试当前批次
         }
       }
 
       // 7. 解析日志
-      return allLogs
+      return all_logs
         .map((log: Log) => {
           try {
-            const parsedLog = contractInterface.parseLog({
+            const parsed_log = contract_interface.parseLog({
               topics: [...log.topics],
               data: log.data,
             });
 
             if (
-              !parsedLog ||
-              !eventAbis.some((abi) => abi.name === parsedLog.name)
+              !parsed_log ||
+              !event_abis.some((abi) => abi.name === parsed_log.name)
             ) {
               return null;
             }
 
             return {
               ...log,
-              args: parsedLog.args,
-              name: parsedLog.name,
-              signature: parsedLog.signature,
-              eventFragment: parsedLog.fragment,
+              args: parsed_log.args,
+              name: parsed_log.name,
+              signature: parsed_log.signature,
+              eventFragment: parsed_log.fragment,
             };
           } catch (error) {
             console.warn(
@@ -266,7 +268,7 @@ export class EthersLogHelper {
       return receipt.logs;
     }
     const iface = new ethers.Interface(abi);
-    const parsedLogs = receipt.logs
+    const parsed_logs = receipt.logs
       .map((log) => {
         try {
           return iface.parseLog({
@@ -279,6 +281,6 @@ export class EthersLogHelper {
         }
       })
       .filter(Boolean);
-    return parsedLogs;
+    return parsed_logs;
   }
 }

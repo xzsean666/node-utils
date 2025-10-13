@@ -72,8 +72,15 @@ export class EthersLogSyncHelper extends EthersLogHelper {
     abi: any[];
     event_name?: string | string[];
     start_block?: number;
+    filter?: any;
   }) {
-    const { contract_address, abi, event_name, start_block = 0 } = params;
+    const {
+      contract_address,
+      abi,
+      event_name,
+      start_block = 0,
+      filter,
+    } = params;
 
     const { db, metadata_db } = await this.getContractDB(contract_address);
     try {
@@ -104,6 +111,7 @@ export class EthersLogSyncHelper extends EthersLogHelper {
         filter: {
           fromBlock: effective_start_block,
           toBlock: to_block,
+          ...filter,
         },
       });
 

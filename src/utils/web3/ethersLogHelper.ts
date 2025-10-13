@@ -3,7 +3,9 @@ import { ethers, Log } from 'ethers';
 interface LogFilter {
   fromBlock?: number | string;
   toBlock?: number | string;
-  topics?: (string | string[] | null)[];
+  topics?:
+    | (string | string[] | null)[]
+    | Record<string, (string | number | null)[]>;
 }
 
 interface GetRawContractLogsParams {
@@ -129,9 +131,11 @@ export class EthersLogHelper {
   buildFullTopicsForEvents(
     abi: any[],
     event_names?: string | string[],
-    filterTopics?: (string | string[] | null)[],
+    filterTopics?:
+      | (string | string[] | null)[]
+      | Record<string, (string | number | null)[]>,
   ): (string | string[] | null)[] | undefined {
-    if (!filterTopics || filterTopics.length === 0) {
+    if (!filterTopics) {
       return undefined;
     }
 
@@ -151,6 +155,12 @@ export class EthersLogHelper {
       return undefined;
     }
 
+    // 如果filterTopics是对象格式（按事件名分组）
+    if (typeof filterTopics === 'object' && !Array.isArray(filterTopics)) {
+      return this.buildTopicsFromEventMap(abi, event_names, filterTopics);
+    }
+
+    // 原有的数组格式处理（向后兼容）
     // 对于多个事件，我们需要找到共同的indexed参数结构
     // 这里简化处理：假设所有事件有相同的indexed参数结构
     const firstEvent = event_abis[0];
@@ -179,50 +189,9 @@ export class EthersLogHelper {
       if (arg === null) {
         processedIndexedArgs.push(null);
       } else {
-        if (input.type === 'address') {
-          // address类型：转换为32字节
-          processedIndexedArgs.push(ethers.zeroPadValue(arg.toString(), 32));
-        } else if (
-          input.type.startsWith('uint') ||
-          input.type.startsWith('int')
-        ) {
-          // 数值类型：编码为对应类型
-          const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
-            [input.type],
-            [arg],
-          );
-          processedIndexedArgs.push(encoded);
-        } else if (input.type === 'bool') {
-          // 布尔类型
-          const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
-            ['bool'],
-            [arg],
-          );
-          processedIndexedArgs.push(encoded);
-        } else if (input.type.startsWith('bytes')) {
-          // bytes类型：如果已经是0x开头，直接使用，否则编码
-          if (typeof arg === 'string' && arg.startsWith('0x')) {
-            processedIndexedArgs.push(ethers.zeroPadValue(arg, 32));
-          } else {
-            const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
-              [input.type],
-              [arg],
-            );
-            processedIndexedArgs.push(encoded);
-          }
-        } else {
-          // 其他类型：尝试编码
-          try {
-            const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
-              [input.type],
-              [arg],
-            );
-            processedIndexedArgs.push(encoded);
-          } catch {
-            // 如果编码失败，直接转换为字符串
-            processedIndexedArgs.push(arg.toString());
-          }
-        }
+        processedIndexedArgs.push(
+          this.encodeIndexedArg(arg as string | number, input.type),
+        );
       }
     }
 
@@ -234,6 +203,157 @@ export class EthersLogHelper {
       ...processedIndexedArgs,
     ];
     return fullTopics;
+  }
+
+  /**
+   * 从事件映射构建topics（支持多个不同事件的过滤）
+   */
+  private buildTopicsFromEventMap(
+    abi: any[],
+    event_names: string | string[] | undefined,
+    eventFilters: Record<string, (string | number | null)[]>,
+  ): (string | string[] | null)[] | undefined {
+    const all_event_abis = abi.filter((item: any) => item.type === 'event');
+
+    // 获取要过滤的事件
+    const targetEvents = Object.keys(eventFilters);
+    const event_abis = all_event_abis.filter((event: any) =>
+      targetEvents.includes(event.name),
+    );
+
+    if (event_abis.length === 0) {
+      return undefined;
+    }
+
+    // 为每个事件构建完整的topics
+    const eventTopicsList: (string | string[] | null)[][] = [];
+
+    for (const eventAbi of event_abis) {
+      const eventName = eventAbi.name;
+      const filterArgs = eventFilters[eventName];
+
+      if (!filterArgs || filterArgs.length === 0) {
+        continue;
+      }
+
+      // 获取该事件的indexed参数
+      const indexedInputs = eventAbi.inputs.filter(
+        (input: any) => input.indexed,
+      );
+
+      // 生成该事件的topic0
+      const eventTopic0 = ethers.id(
+        `${eventName}(${eventAbi.inputs
+          .map((input: any) => this.processType(input))
+          .join(',')})`,
+      );
+
+      // 处理indexed参数
+      const processedArgs: (string | null)[] = [];
+
+      for (
+        let i = 0;
+        i < Math.min(filterArgs.length, indexedInputs.length);
+        i++
+      ) {
+        const arg = filterArgs[i];
+        const input = indexedInputs[i];
+
+        if (arg === null) {
+          processedArgs.push(null);
+        } else {
+          processedArgs.push(this.encodeIndexedArg(arg, input.type));
+        }
+      }
+
+      // 构建该事件的完整topics: [topic0, ...indexedArgs]
+      const eventTopics: (string | string[] | null)[] = [
+        eventTopic0,
+        ...processedArgs,
+      ];
+
+      eventTopicsList.push(eventTopics);
+    }
+
+    if (eventTopicsList.length === 0) {
+      return undefined;
+    }
+
+    // 如果只有一个事件，直接返回
+    if (eventTopicsList.length === 1) {
+      return eventTopicsList[0];
+    }
+
+    // 如果有多个事件，需要合并topics
+    // 对于每个topic位置，如果所有事件在该位置都有相同的值，则保留，否则设为null
+    const maxLength = Math.max(
+      ...eventTopicsList.map((topics) => topics.length),
+    );
+    const mergedTopics: (string | string[] | null)[] = [];
+
+    for (let i = 0; i < maxLength; i++) {
+      const valuesAtPosition = eventTopicsList
+        .map((topics) => topics[i])
+        .filter((val) => val !== undefined);
+
+      // 如果所有事件在该位置都有相同的值，保留该值
+      const firstValue = valuesAtPosition[0];
+      const allSame = valuesAtPosition.every((val) => val === firstValue);
+
+      mergedTopics.push(allSame ? firstValue : null);
+    }
+
+    return mergedTopics;
+  }
+
+  /**
+   * 编码indexed参数
+   */
+  private encodeIndexedArg(arg: string | number, type: string): string {
+    if (type === 'address') {
+      // address类型：转换为32字节
+      return ethers.zeroPadValue(arg.toString(), 32);
+    } else if (type.startsWith('uint') || type.startsWith('int')) {
+      // 数值类型：编码为对应类型
+      return ethers.AbiCoder.defaultAbiCoder().encode([type], [arg]);
+    } else if (type === 'bool') {
+      // 布尔类型
+      return ethers.AbiCoder.defaultAbiCoder().encode(['bool'], [arg]);
+    } else if (type.startsWith('bytes')) {
+      // bytes类型：如果已经是0x开头，直接使用，否则编码
+      if (typeof arg === 'string' && arg.startsWith('0x')) {
+        return ethers.zeroPadValue(arg, 32);
+      } else {
+        return ethers.AbiCoder.defaultAbiCoder().encode([type], [arg]);
+      }
+    } else {
+      // 其他类型：尝试编码
+      try {
+        return ethers.AbiCoder.defaultAbiCoder().encode([type], [arg]);
+      } catch {
+        // 如果编码失败，直接转换为字符串
+        return arg.toString();
+      }
+    }
+  }
+
+  /**
+   * 处理类型定义（用于生成事件签名）
+   */
+  private processType(input: any): string {
+    if (input.type === 'tuple') {
+      const components = input.components
+        .map((comp: any) => this.processType(comp))
+        .join(',');
+      return `(${components})`;
+    }
+    if (input.type === 'tuple[]') {
+      const components = input.components
+        .map((comp: any) => this.processType(comp))
+        .join(',');
+      return `(${components})[]`;
+    }
+    return input.type;
   }
 
   /**
@@ -331,7 +451,7 @@ export class EthersLogHelper {
         try {
           const logs = await this.web3.getLogs({
             address: addresses,
-            topics: processedFilter.topics || [event_topics],
+            topics: (processedFilter.topics as any) || [event_topics],
             fromBlock: current_block,
             toBlock: end_block,
           });

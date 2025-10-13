@@ -85,11 +85,89 @@ async function smartFilterExample() {
   console.log(`找到 ${stakingLogs.length} 笔质押记录`);
 }
 
+// 🎯 高级用法：同时过滤多个不同事件的logs
+async function advancedMultiEventFilterExample() {
+  const helper = new EthersLogHelper('https://your-rpc-url');
+
+  // ERC20合约的完整ABI（包含Transfer和Approval事件）
+  const erc20ABI = [
+    {
+      anonymous: false,
+      inputs: [
+        { indexed: true, name: 'from', type: 'address' },
+        { indexed: true, name: 'to', type: 'address' },
+        { indexed: false, name: 'value', type: 'uint256' },
+      ],
+      name: 'Transfer',
+      type: 'event',
+    },
+    {
+      anonymous: false,
+      inputs: [
+        { indexed: true, name: 'owner', type: 'address' },
+        { indexed: true, name: 'spender', type: 'address' },
+        { indexed: false, name: 'value', type: 'uint256' },
+      ],
+      name: 'Approval',
+      type: 'event',
+    },
+  ];
+
+  // 🔥 同时过滤多个事件的logs！
+  // key是事件名，value是对应的indexed参数数组
+  const logs = await helper.getContractLogs({
+    contract_addresses: '0xA0b86a33E6441fCE4A4EA8c9a6c2b3E6F8C8F6E5',
+    abi: erc20ABI,
+    event_names: ['Transfer', 'Approval'], // 获取多个事件
+    filter: {
+      topics: {
+        // Transfer(from, to, value) 事件：只过滤from地址
+        Transfer: [
+          '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', // from地址
+          null, // to地址（不过滤）
+        ],
+        // Approval(owner, spender, value) 事件：只过滤owner地址
+        Approval: [
+          '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', // owner地址
+          null, // spender地址（不过滤）
+        ],
+      },
+      fromBlock: 18000000,
+      toBlock: 19000000,
+    },
+  });
+
+  console.log(`找到 ${logs.length} 笔 Transfer 或 Approval 事件`);
+
+  // 更复杂的过滤：同时过滤Transfer的from和to，以及Approval的owner
+  const complexLogs = await helper.getContractLogs({
+    contract_addresses: '0xA0b86a33E6441fCE4A4EA8c9a6c2b3E6F8C8F6E5',
+    abi: erc20ABI,
+    event_names: ['Transfer', 'Approval'],
+    filter: {
+      topics: {
+        Transfer: [
+          '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', // from
+          '0xF977814e90dA44bFA03b6295A0616a897441aceC', // to
+        ],
+        Approval: [
+          '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', // owner
+        ],
+      },
+    },
+  });
+
+  console.log(`找到 ${complexLogs.length} 笔复杂的过滤结果`);
+}
+
 // 使用说明：
 // 1. 你只需要传入 ABI 和 event_names
-// 2. filter.topics 直接传入 indexed 参数的原始值
+// 2. filter.topics 支持两种格式：
+//    a) 数组格式（向后兼容）：直接传入indexed参数数组
+//    b) 对象格式（新功能）：key是事件名，value是对应的indexed参数数组
 // 3. address 直接传字符串，数值类型传字符串或数字
 // 4. null 表示跳过该参数的过滤
 // 5. 程序会根据 ABI 中的类型定义自动转换格式
 
 smartFilterExample().catch(console.error);
+advancedMultiEventFilterExample().catch(console.error);

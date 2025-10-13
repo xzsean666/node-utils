@@ -10,13 +10,13 @@ export class EthersLogSyncHelper extends EthersLogHelper {
   private postgres_path?: string;
 
   constructor(
-    NODE_PROVIDER: string,
+    node_provider: string,
     configs?: {
       sqlite_path?: string;
       postgres_path?: string;
     },
   ) {
-    super(NODE_PROVIDER);
+    super(node_provider);
     this.sqlite_path = configs?.sqlite_path;
     this.postgres_path = configs?.postgres_path;
 
@@ -43,15 +43,18 @@ export class EthersLogSyncHelper extends EthersLogHelper {
       return new PGKVDatabase(this.postgres_path, table);
     }
     if (this.sqlite_path) {
-      let sqlitePath = this.sqlite_path;
+      let sqlite_path = this.sqlite_path;
       // 如果不是以 .db 结尾，则加上 .db
-      if (!sqlitePath.endsWith('.db')) {
-        sqlitePath = `${sqlitePath}.db`;
+      if (!sqlite_path.endsWith('.db')) {
+        sqlite_path = `${sqlite_path}.db`;
       }
       const chain_id = await this.getChainId();
       // 在 path 中加入 chainid，格式为 _chainid.db
-      const pathWithChainId = sqlitePath.replace(/(\.db)$/, `_${chain_id}.db`);
-      return new SqliteKVDatabase(pathWithChainId, table);
+      const path_with_chain_id = sqlite_path.replace(
+        /(\.db)$/,
+        `_${chain_id}.db`,
+      );
+      return new SqliteKVDatabase(path_with_chain_id, table);
     }
     throw new Error('database is not initialized');
   }
@@ -95,8 +98,8 @@ export class EthersLogSyncHelper extends EthersLogHelper {
 
       // 获取日志
       const logs = await this.getContractLogs({
-        contractAddresses: contract_address,
-        eventNames: event_name,
+        contract_addresses: contract_address,
+        event_names: event_name,
         abi,
         filter: {
           fromBlock: effective_start_block,
@@ -106,8 +109,8 @@ export class EthersLogSyncHelper extends EthersLogHelper {
 
       // 存储每个日志
       for (const log of logs) {
-        const logName = 'name' in log ? log.name : 'unknown';
-        const key = `${logName}_${log.blockNumber}_${nonce}`;
+        const log_name = 'name' in log ? log.name : 'unknown';
+        const key = `${log_name}_${log.blockNumber}_${nonce}`;
         await db.put(key, log);
         nonce++;
       }

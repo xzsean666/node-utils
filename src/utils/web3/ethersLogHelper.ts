@@ -3,25 +3,25 @@ import { ethers, Log } from 'ethers';
 interface LogFilter {
   fromBlock?: number | string;
   toBlock?: number | string;
-  topics?: string[];
+  topics?: (string | string[] | null)[];
 }
 
 interface GetRawContractLogsParams {
-  contractAddresses: string | string[];
-  eventSignatures: string | string[];
+  contract_addresses: string | string[];
+  event_signatures: string | string[];
   filter?: {
     fromBlock?: number | string;
     toBlock?: number | string;
-    topics?: string[];
+    topics?: (string | string[] | null)[];
   };
 }
 
 interface GetContractLogsParams {
-  contractAddresses: string | string[];
-  eventNames?: string | string[];
+  contract_addresses: string | string[];
+  event_names?: string | string[];
   abi: any[];
   filter?: LogFilter;
-  initialBatchSize?: number;
+  initial_batch_size?: number;
 }
 
 export { LogFilter, GetRawContractLogsParams, GetContractLogsParams };
@@ -29,8 +29,8 @@ export { LogFilter, GetRawContractLogsParams, GetContractLogsParams };
 export class EthersLogHelper {
   public web3: ethers.JsonRpcProvider;
 
-  constructor(NODE_PROVIDER: string) {
-    this.web3 = new ethers.JsonRpcProvider(NODE_PROVIDER);
+  constructor(node_provider: string) {
+    this.web3 = new ethers.JsonRpcProvider(node_provider);
   }
 
   /**
@@ -68,16 +68,16 @@ export class EthersLogHelper {
    * 获取原始合约日志（未解析）
    */
   async getRawContractLogs(params: GetRawContractLogsParams) {
-    const { contractAddresses, eventSignatures, filter = {} } = params;
+    const { contract_addresses, event_signatures, filter = {} } = params;
 
     try {
       // 确保地址和事件签名都是数组格式
-      const addresses = Array.isArray(contractAddresses)
-        ? contractAddresses
-        : [contractAddresses];
-      const signatures = Array.isArray(eventSignatures)
-        ? eventSignatures
-        : [eventSignatures];
+      const addresses = Array.isArray(contract_addresses)
+        ? contract_addresses
+        : [contract_addresses];
+      const signatures = Array.isArray(event_signatures)
+        ? event_signatures
+        : [event_signatures];
 
       const topics = signatures.map((signature) => ethers.id(signature));
       const logs = await this.web3.getLogs({
@@ -94,36 +94,190 @@ export class EthersLogHelper {
   }
 
   /**
+   * 构建完整的topics数组
+   */
+  buildTopics(
+    eventSignature: string,
+    indexedArgs?: (string | number | null)[],
+  ): (string | null)[] {
+    const topics: (string | null)[] = [ethers.id(eventSignature)]; // topic0: 事件签名哈希
+
+    if (indexedArgs && indexedArgs.length > 0) {
+      for (const arg of indexedArgs) {
+        if (arg === null) {
+          topics.push(null); // null表示不过滤这个位置
+        } else if (typeof arg === 'string' && arg.startsWith('0x')) {
+          // 如果是地址或bytes32，直接使用（假设已经正确格式化）
+          topics.push(arg);
+        } else {
+          // 对于其他类型的值，编码为bytes32
+          const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
+            ['uint256'],
+            [arg],
+          );
+          topics.push(encoded);
+        }
+      }
+    }
+
+    return topics;
+  }
+
+  /**
+   * 根据ABI和事件名称构建完整的topics数组（智能处理filter.topics）
+   */
+  buildFullTopicsForEvents(
+    abi: any[],
+    event_names?: string | string[],
+    filterTopics?: (string | string[] | null)[],
+  ): (string | string[] | null)[] | undefined {
+    if (!filterTopics || filterTopics.length === 0) {
+      return undefined;
+    }
+
+    // 获取所有事件ABI
+    const all_event_abis = abi.filter((item: any) => item.type === 'event');
+
+    // 如果指定了event_names，则过滤相应的事件
+    const event_abis = event_names
+      ? all_event_abis.filter((item: any) =>
+          Array.isArray(event_names)
+            ? event_names.includes(item.name)
+            : item.name === event_names,
+        )
+      : all_event_abis;
+
+    if (event_abis.length === 0) {
+      return undefined;
+    }
+
+    // 对于多个事件，我们需要找到共同的indexed参数结构
+    // 这里简化处理：假设所有事件有相同的indexed参数结构
+    const firstEvent = event_abis[0];
+    const indexedInputs = firstEvent.inputs.filter(
+      (input: any) => input.indexed,
+    );
+
+    if (indexedInputs.length === 0) {
+      return undefined;
+    }
+
+    // 生成事件topics (topic0)
+    const event_topics = this.getEventTopics(event_abis);
+
+    // 处理indexed参数
+    const processedIndexedArgs: (string | null)[] = [];
+
+    for (
+      let i = 0;
+      i < Math.min(filterTopics.length, indexedInputs.length);
+      i++
+    ) {
+      const arg = filterTopics[i];
+      const input = indexedInputs[i];
+
+      if (arg === null) {
+        processedIndexedArgs.push(null);
+      } else {
+        if (input.type === 'address') {
+          // address类型：转换为32字节
+          processedIndexedArgs.push(ethers.zeroPadValue(arg.toString(), 32));
+        } else if (
+          input.type.startsWith('uint') ||
+          input.type.startsWith('int')
+        ) {
+          // 数值类型：编码为对应类型
+          const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
+            [input.type],
+            [arg],
+          );
+          processedIndexedArgs.push(encoded);
+        } else if (input.type === 'bool') {
+          // 布尔类型
+          const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
+            ['bool'],
+            [arg],
+          );
+          processedIndexedArgs.push(encoded);
+        } else if (input.type.startsWith('bytes')) {
+          // bytes类型：如果已经是0x开头，直接使用，否则编码
+          if (typeof arg === 'string' && arg.startsWith('0x')) {
+            processedIndexedArgs.push(ethers.zeroPadValue(arg, 32));
+          } else {
+            const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
+              [input.type],
+              [arg],
+            );
+            processedIndexedArgs.push(encoded);
+          }
+        } else {
+          // 其他类型：尝试编码
+          try {
+            const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
+              [input.type],
+              [arg],
+            );
+            processedIndexedArgs.push(encoded);
+          } catch {
+            // 如果编码失败，直接转换为字符串
+            processedIndexedArgs.push(arg.toString());
+          }
+        }
+      }
+    }
+
+    // 构建完整的topics: [event_topics, ...processedIndexedArgs]
+    // event_topics 是 topic0（可能包含多个事件签名）
+    // processedIndexedArgs 是 topic1, topic2, topic3 等
+    const fullTopics: (string | string[] | null)[] = [
+      event_topics,
+      ...processedIndexedArgs,
+    ];
+    return fullTopics;
+  }
+
+  /**
    * 获取解析后的合约日志
    */
   async getContractLogs(params: GetContractLogsParams) {
     const {
-      contractAddresses,
-      eventNames,
+      contract_addresses,
+      event_names,
       abi,
       filter = {},
-      initialBatchSize = 50000,
+      initial_batch_size = 50000,
     } = params;
+
+    // 如果filter.topics是简单的数组（只有indexed参数），自动构建完整的topics
+    let processedFilter = { ...filter };
+    if (filter.topics && Array.isArray(filter.topics)) {
+      const fullTopics = this.buildFullTopicsForEvents(
+        abi,
+        event_names,
+        filter.topics,
+      );
+      processedFilter.topics = fullTopics;
+    }
 
     try {
       // 1. 基础验证
-      if (!contractAddresses || !abi || !Array.isArray(abi)) {
+      if (!contract_addresses || !abi || !Array.isArray(abi)) {
         throw new Error('合约地址和ABI数组是必需的');
       }
 
-      const addresses = Array.isArray(contractAddresses)
-        ? contractAddresses
-        : [contractAddresses];
+      const addresses = Array.isArray(contract_addresses)
+        ? contract_addresses
+        : [contract_addresses];
 
       // 2. 获取所有事件ABI
       const all_event_abis = abi.filter((item: any) => item.type === 'event');
 
-      // 如果未指定eventNames，则使用所有事件，否则过滤指定的事件
-      const event_abis = eventNames
+      // 如果未指定event_names，则使用所有事件，否则过滤指定的事件
+      const event_abis = event_names
         ? all_event_abis.filter((item: any) =>
-            Array.isArray(eventNames)
-              ? eventNames.includes(item.name)
-              : item.name === eventNames,
+            Array.isArray(event_names)
+              ? event_names.includes(item.name)
+              : item.name === event_names,
           )
         : all_event_abis;
 
@@ -133,7 +287,7 @@ export class EthersLogHelper {
           .map((e: any) => e.name)
           .join(', ');
         throw new Error(
-          eventNames
+          event_names
             ? `未找到指定的事件定义。可用事件: ${available_events}`
             : 'ABI中未找到任何事件定义',
         );
@@ -158,8 +312,8 @@ export class EthersLogHelper {
       }
 
       // 5. 批量处理设置
-      let batch_size = initialBatchSize;
-      const MIN_BATCH_SIZE = 100;
+      let batch_size = initial_batch_size;
+      const min_batch_size = 100;
       let current_block = from_block;
       const all_logs: Log[] = [];
 
@@ -177,7 +331,7 @@ export class EthersLogHelper {
         try {
           const logs = await this.web3.getLogs({
             address: addresses,
-            topics: [event_topics, ...(filter.topics || [])],
+            topics: processedFilter.topics || [event_topics],
             fromBlock: current_block,
             toBlock: end_block,
           });
@@ -186,8 +340,8 @@ export class EthersLogHelper {
           current_block = end_block + BigInt(1);
 
           // 如果成功了，可以尝试增加批次大小
-          if (batch_size < initialBatchSize) {
-            batch_size = Math.min(batch_size * 2, initialBatchSize);
+          if (batch_size < initial_batch_size) {
+            batch_size = Math.min(batch_size * 2, initial_batch_size);
           }
         } catch (error: any) {
           console.warn(
@@ -197,16 +351,16 @@ export class EthersLogHelper {
           // 减小批次大小并重试
           batch_size = Math.floor(batch_size / 2);
 
-          if (batch_size < MIN_BATCH_SIZE) {
+          if (batch_size < min_batch_size) {
             // 如果批次大小太小，尝试处理单个区块
             if (current_block === end_block) {
               console.error(`无法处理单个区块 ${current_block}，跳过`);
               current_block = current_block + BigInt(1);
-              batch_size = initialBatchSize; // 重置批次大小
+              batch_size = initial_batch_size; // 重置批次大小
               continue;
             } else {
               // 重置为最小批次大小
-              batch_size = MIN_BATCH_SIZE;
+              batch_size = min_batch_size;
             }
           }
 
@@ -259,8 +413,8 @@ export class EthersLogHelper {
   /**
    * 根据交易哈希获取日志
    */
-  async getLogByTxHash(txHash: string, abi?: any) {
-    const receipt = await this.web3.getTransactionReceipt(txHash);
+  async getLogByTxHash(tx_hash: string, abi?: any) {
+    const receipt = await this.web3.getTransactionReceipt(tx_hash);
     if (!receipt) {
       throw new Error('Transaction receipt not found');
     }

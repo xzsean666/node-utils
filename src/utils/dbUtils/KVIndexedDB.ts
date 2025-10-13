@@ -1,21 +1,21 @@
 class EnhancedIndexedDB {
   private db: IDBDatabase | null = null;
-  private dbName: string;
-  private storeName: string;
+  private db_name: string;
+  private store_name: string;
   private version: number;
-  private keyPath: string;
+  private key_path: string;
   private initialized = false;
 
   constructor(
-    dbName = "LocalCache",
-    storeName = "LocalCache",
+    db_name = 'LocalCache',
+    store_name = 'LocalCache',
     version = 1,
-    keyPath = "key"
+    key_path = 'key',
   ) {
-    this.dbName = dbName;
-    this.storeName = storeName;
+    this.db_name = db_name;
+    this.store_name = store_name;
     this.version = version;
-    this.keyPath = keyPath;
+    this.key_path = key_path;
   }
 
   /**
@@ -24,7 +24,7 @@ class EnhancedIndexedDB {
   async initialize(): Promise<void> {
     if (this.initialized && this.db) return;
 
-    this.db = await this.openIndexDB(this.dbName, this.version, this.keyPath);
+    this.db = await this.openIndexDB(this.db_name, this.version, this.key_path);
     this.initialized = true;
   }
 
@@ -32,13 +32,13 @@ class EnhancedIndexedDB {
    * Opens the IndexedDB database
    */
   private async openIndexDB(
-    dbName: string,
+    db_name: string,
     version = 1,
-    keyPath = "key"
+    key_path = 'key',
   ): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
       const indexedDB = window.indexedDB;
-      const request = indexedDB.open(dbName, version);
+      const request = indexedDB.open(db_name, version);
 
       request.onsuccess = () => {
         resolve(request.result);
@@ -47,8 +47,8 @@ class EnhancedIndexedDB {
       request.onerror = (event) => {
         reject(
           new Error(
-            `Failed to open IndexedDB: ${(event.target as IDBRequest).error}`
-          )
+            `Failed to open IndexedDB: ${(event.target as IDBRequest).error}`,
+          ),
         );
       };
 
@@ -56,17 +56,17 @@ class EnhancedIndexedDB {
         const db = (event.target as IDBOpenDBRequest).result;
 
         // Create the main object store
-        if (!db.objectStoreNames.contains(this.storeName)) {
-          db.createObjectStore(this.storeName, { keyPath });
+        if (!db.objectStoreNames.contains(this.store_name)) {
+          db.createObjectStore(this.store_name, { keyPath: key_path });
         }
 
         // Create a timestamp index to support time-based queries
-        const store = request.transaction!.objectStore(this.storeName);
-        if (!store.indexNames.contains("updated_at")) {
-          store.createIndex("updated_at", "updated_at", { unique: false });
+        const store = request.transaction!.objectStore(this.store_name);
+        if (!store.indexNames.contains('updated_at')) {
+          store.createIndex('updated_at', 'updated_at', { unique: false });
         }
-        if (!store.indexNames.contains("created_at")) {
-          store.createIndex("created_at", "created_at", { unique: false });
+        if (!store.indexNames.contains('created_at')) {
+          store.createIndex('created_at', 'created_at', { unique: false });
         }
       };
     });
@@ -81,7 +81,7 @@ class EnhancedIndexedDB {
     }
 
     if (!this.db) {
-      throw new Error("Database initialization failed");
+      throw new Error('Database initialization failed');
     }
 
     return this.db;
@@ -94,8 +94,8 @@ class EnhancedIndexedDB {
     const db = await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readwrite");
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction([this.store_name], 'readwrite');
+      const store = transaction.objectStore(this.store_name);
 
       const data = {
         key,
@@ -105,63 +105,63 @@ class EnhancedIndexedDB {
       };
 
       // If the record exists, preserve its created_at date
-      const getRequest = store.get(key);
-      getRequest.onsuccess = () => {
-        if (getRequest.result) {
-          data.created_at = getRequest.result.created_at;
+      const get_request = store.get(key);
+      get_request.onsuccess = () => {
+        if (get_request.result) {
+          data.created_at = get_request.result.created_at;
         }
 
         const request = store.put(data);
 
         request.onsuccess = () => resolve();
-        request.onerror = () => reject(new Error("Failed to store data"));
+        request.onerror = () => reject(new Error('Failed to store data'));
       };
 
-      getRequest.onerror = () =>
-        reject(new Error("Failed to check existing data"));
-      transaction.onerror = () => reject(new Error("Transaction failed"));
+      get_request.onerror = () =>
+        reject(new Error('Failed to check existing data'));
+      transaction.onerror = () => reject(new Error('Transaction failed'));
     });
   }
 
   /**
    * Merges partial data with an existing object
    */
-  async merge(key: string, partialValue: any): Promise<boolean> {
+  async merge(key: string, partial_value: any): Promise<boolean> {
     const db = await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readwrite");
-      const store = transaction.objectStore(this.storeName);
-      const getRequest = store.get(key);
+      const transaction = db.transaction([this.store_name], 'readwrite');
+      const store = transaction.objectStore(this.store_name);
+      const get_request = store.get(key);
 
-      getRequest.onsuccess = () => {
-        const existingData = getRequest.result;
+      get_request.onsuccess = () => {
+        const existing_data = get_request.result;
         const now = new Date();
 
         let data;
-        if (existingData) {
+        if (existing_data) {
           data = {
             key,
-            value: { ...existingData.value, ...partialValue },
+            value: { ...existing_data.value, ...partial_value },
             updated_at: now,
-            created_at: existingData.created_at,
+            created_at: existing_data.created_at,
           };
         } else {
           data = {
             key,
-            value: partialValue,
+            value: partial_value,
             updated_at: now,
             created_at: now,
           };
         }
 
-        const putRequest = store.put(data);
-        putRequest.onsuccess = () => resolve(true);
-        putRequest.onerror = () => reject(new Error("Failed to merge data"));
+        const put_request = store.put(data);
+        put_request.onsuccess = () => resolve(true);
+        put_request.onerror = () => reject(new Error('Failed to merge data'));
       };
 
-      getRequest.onerror = () =>
-        reject(new Error("Failed to get existing data"));
+      get_request.onerror = () =>
+        reject(new Error('Failed to get existing data'));
     });
   }
 
@@ -172,8 +172,8 @@ class EnhancedIndexedDB {
     const db = await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readonly");
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction([this.store_name], 'readonly');
+      const store = transaction.objectStore(this.store_name);
       const request = store.get(key);
 
       request.onsuccess = () => {
@@ -186,10 +186,10 @@ class EnhancedIndexedDB {
 
         // Check expiration if provided
         if (expire !== undefined) {
-          const currentTime = Math.floor(Date.now() / 1000);
-          const createdTime = Math.floor(data.created_at.getTime() / 1000);
+          const current_time = Math.floor(Date.now() / 1000);
+          const created_time = Math.floor(data.created_at.getTime() / 1000);
 
-          if (currentTime - createdTime > expire) {
+          if (current_time - created_time > expire) {
             // Delete expired data
             this.delete(key).catch(console.error);
             resolve(null);
@@ -200,7 +200,7 @@ class EnhancedIndexedDB {
         resolve(data.value);
       };
 
-      request.onerror = () => reject(new Error("Failed to retrieve data"));
+      request.onerror = () => reject(new Error('Failed to retrieve data'));
     });
   }
 
@@ -231,14 +231,14 @@ class EnhancedIndexedDB {
    */
   private async findByValue(
     value: any,
-    firstOnly: boolean
+    first_only: boolean,
   ): Promise<any | any[]> {
     const db = await this.ensureInitialized();
     const valueStr = JSON.stringify(value);
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readonly");
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction([this.store_name], 'readonly');
+      const store = transaction.objectStore(this.store_name);
       const request = store.openCursor();
 
       const results: any[] = [];
@@ -249,7 +249,7 @@ class EnhancedIndexedDB {
 
         if (cursor) {
           if (JSON.stringify(cursor.value.value) === valueStr) {
-            if (firstOnly) {
+            if (first_only) {
               resolve(cursor.value);
               return;
             }
@@ -257,7 +257,7 @@ class EnhancedIndexedDB {
           }
           cursor.continue();
         } else {
-          if (firstOnly) {
+          if (first_only) {
             resolve(results.length > 0 ? results[0] : null);
           } else {
             resolve(results);
@@ -265,7 +265,7 @@ class EnhancedIndexedDB {
         }
       };
 
-      request.onerror = () => reject(new Error("Failed to search by value"));
+      request.onerror = () => reject(new Error('Failed to search by value'));
     });
   }
 
@@ -276,12 +276,12 @@ class EnhancedIndexedDB {
     const db = await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readwrite");
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction([this.store_name], 'readwrite');
+      const store = transaction.objectStore(this.store_name);
       const request = store.delete(key);
 
       request.onsuccess = () => resolve(true);
-      request.onerror = () => reject(new Error("Failed to delete data"));
+      request.onerror = () => reject(new Error('Failed to delete data'));
     });
   }
 
@@ -304,8 +304,8 @@ class EnhancedIndexedDB {
     const db = await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readwrite");
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction([this.store_name], 'readwrite');
+      const store = transaction.objectStore(this.store_name);
       const getRequest = store.get(key);
 
       getRequest.onsuccess = () => {
@@ -327,11 +327,11 @@ class EnhancedIndexedDB {
         const putRequest = store.put(newData);
         putRequest.onsuccess = () => resolve();
         putRequest.onerror = () =>
-          reject(new Error("Failed to add unique pair"));
+          reject(new Error('Failed to add unique pair'));
       };
 
       getRequest.onerror = () =>
-        reject(new Error("Failed to check existing data"));
+        reject(new Error('Failed to check existing data'));
     });
   }
 
@@ -366,8 +366,8 @@ class EnhancedIndexedDB {
     const db = await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readonly");
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction([this.store_name], 'readonly');
+      const store = transaction.objectStore(this.store_name);
       const request = store.openCursor();
 
       const results = new Map<string, any>();
@@ -378,13 +378,13 @@ class EnhancedIndexedDB {
           .result as IDBCursorWithValue;
 
         if (cursor) {
-          if (typeof offset === "number" && counter < offset) {
+          if (typeof offset === 'number' && counter < offset) {
             counter++;
             cursor.continue();
             return;
           }
 
-          if (typeof limit === "number" && results.size >= limit) {
+          if (typeof limit === 'number' && results.size >= limit) {
             resolve(results);
             return;
           }
@@ -397,7 +397,7 @@ class EnhancedIndexedDB {
         }
       };
 
-      request.onerror = () => reject(new Error("Failed to get all data"));
+      request.onerror = () => reject(new Error('Failed to get all data'));
     });
   }
 
@@ -408,15 +408,15 @@ class EnhancedIndexedDB {
     const db = await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readonly");
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction([this.store_name], 'readonly');
+      const store = transaction.objectStore(this.store_name);
       const request = store.getAllKeys();
 
       request.onsuccess = () => {
         resolve(request.result as string[]);
       };
 
-      request.onerror = () => reject(new Error("Failed to get keys"));
+      request.onerror = () => reject(new Error('Failed to get keys'));
     });
   }
 
@@ -427,8 +427,8 @@ class EnhancedIndexedDB {
     const db = await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readonly");
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction([this.store_name], 'readonly');
+      const store = transaction.objectStore(this.store_name);
       const request = store.count(key);
 
       request.onsuccess = () => {
@@ -436,7 +436,7 @@ class EnhancedIndexedDB {
       };
 
       request.onerror = () =>
-        reject(new Error("Failed to check key existence"));
+        reject(new Error('Failed to check key existence'));
     });
   }
 
@@ -445,16 +445,16 @@ class EnhancedIndexedDB {
    */
   async putMany(
     entries: Array<[string, any]>,
-    batchSize: number = 50
+    batch_size: number = 50,
   ): Promise<void> {
     const db = await this.ensureInitialized();
 
-    for (let i = 0; i < entries.length; i += batchSize) {
-      const batch = entries.slice(i, i + batchSize);
+    for (let i = 0; i < entries.length; i += batch_size) {
+      const batch = entries.slice(i, i + batch_size);
 
       await new Promise<void>((resolve, reject) => {
-        const transaction = db.transaction([this.storeName], "readwrite");
-        const store = transaction.objectStore(this.storeName);
+        const transaction = db.transaction([this.store_name], 'readwrite');
+        const store = transaction.objectStore(this.store_name);
         const now = new Date();
 
         let completed = 0;
@@ -483,15 +483,15 @@ class EnhancedIndexedDB {
             };
 
             putRequest.onerror = () =>
-              reject(new Error("Failed to store batch data"));
+              reject(new Error('Failed to store batch data'));
           };
 
           getRequest.onerror = () =>
-            reject(new Error("Failed to check existing data"));
+            reject(new Error('Failed to check existing data'));
         });
 
         transaction.onerror = () =>
-          reject(new Error("Batch transaction failed"));
+          reject(new Error('Batch transaction failed'));
       });
     }
   }
@@ -503,8 +503,8 @@ class EnhancedIndexedDB {
     const db = await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readwrite");
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction([this.store_name], 'readwrite');
+      const store = transaction.objectStore(this.store_name);
 
       let deleted = 0;
       let processed = 0;
@@ -529,7 +529,7 @@ class EnhancedIndexedDB {
       });
 
       transaction.onerror = () =>
-        reject(new Error("Failed to delete multiple keys"));
+        reject(new Error('Failed to delete multiple keys'));
     });
   }
 
@@ -540,12 +540,12 @@ class EnhancedIndexedDB {
     const db = await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readwrite");
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction([this.store_name], 'readwrite');
+      const store = transaction.objectStore(this.store_name);
       const request = store.clear();
 
       request.onsuccess = () => resolve();
-      request.onerror = () => reject(new Error("Failed to clear database"));
+      request.onerror = () => reject(new Error('Failed to clear database'));
     });
   }
 
@@ -556,12 +556,12 @@ class EnhancedIndexedDB {
     const db = await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readonly");
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction([this.store_name], 'readonly');
+      const store = transaction.objectStore(this.store_name);
       const request = store.count();
 
       request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(new Error("Failed to count records"));
+      request.onerror = () => reject(new Error('Failed to count records'));
     });
   }
 
@@ -569,15 +569,15 @@ class EnhancedIndexedDB {
    * Finds records with boolean values
    */
   async findBoolValues(
-    boolValue: boolean,
+    bool_value: boolean,
     first: boolean = true,
-    orderBy: "ASC" | "DESC" = "ASC"
+    order_by: 'ASC' | 'DESC' = 'ASC',
   ): Promise<string[] | string | null> {
     const db = await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readonly");
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction([this.store_name], 'readonly');
+      const store = transaction.objectStore(this.store_name);
       const request = store.openCursor();
 
       const results: string[] = [];
@@ -587,7 +587,7 @@ class EnhancedIndexedDB {
           .result as IDBCursorWithValue;
 
         if (cursor) {
-          if (cursor.value.value === boolValue) {
+          if (cursor.value.value === bool_value) {
             if (first) {
               resolve(cursor.value.key);
               return;
@@ -599,8 +599,8 @@ class EnhancedIndexedDB {
           if (first) {
             resolve(results.length > 0 ? results[0] : null);
           } else {
-            // Sort results based on orderBy parameter
-            if (orderBy === "DESC") {
+            // Sort results based on order_by parameter
+            if (order_by === 'DESC') {
               results.reverse();
             }
             resolve(results);
@@ -609,7 +609,7 @@ class EnhancedIndexedDB {
       };
 
       request.onerror = () =>
-        reject(new Error("Failed to find boolean values"));
+        reject(new Error('Failed to find boolean values'));
     });
   }
 
@@ -619,16 +619,16 @@ class EnhancedIndexedDB {
   async findByUpdateTime(
     timestamp: number,
     first: boolean = true,
-    type: "before" | "after" = "after",
-    orderBy: "ASC" | "DESC" = "ASC"
+    type: 'before' | 'after' = 'after',
+    order_by: 'ASC' | 'DESC' = 'ASC',
   ): Promise<string[] | string | null> {
     const db = await this.ensureInitialized();
     const compareDate = new Date(timestamp);
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readonly");
-      const store = transaction.objectStore(this.storeName);
-      const index = store.index("updated_at");
+      const transaction = db.transaction([this.store_name], 'readonly');
+      const store = transaction.objectStore(this.store_name);
+      const index = store.index('updated_at');
       const request = index.openCursor();
 
       const results: string[] = [];
@@ -641,9 +641,9 @@ class EnhancedIndexedDB {
           const recordDate = cursor.value.updated_at;
           let match = false;
 
-          if (type === "before" && recordDate < compareDate) {
+          if (type === 'before' && recordDate < compareDate) {
             match = true;
-          } else if (type === "after" && recordDate > compareDate) {
+          } else if (type === 'after' && recordDate > compareDate) {
             match = true;
           }
 
@@ -660,10 +660,10 @@ class EnhancedIndexedDB {
           if (first) {
             resolve(results.length > 0 ? results[0] : null);
           } else {
-            // Sort results based on orderBy parameter
+            // Sort results based on order_by parameter
             if (
-              (orderBy === "DESC" && type === "after") ||
-              (orderBy === "ASC" && type === "before")
+              (order_by === 'DESC' && type === 'after') ||
+              (order_by === 'ASC' && type === 'before')
             ) {
               results.reverse();
             }
@@ -673,7 +673,7 @@ class EnhancedIndexedDB {
       };
 
       request.onerror = () =>
-        reject(new Error("Failed to find by update time"));
+        reject(new Error('Failed to find by update time'));
     });
   }
 
@@ -683,20 +683,20 @@ class EnhancedIndexedDB {
   async searchByTime(params: {
     timestamp: number;
     take?: number;
-    type?: "before" | "after";
-    orderBy?: "ASC" | "DESC";
-    timeColumn?: "updated_at" | "created_at";
+    type?: 'before' | 'after';
+    order_by?: 'ASC' | 'DESC';
+    time_column?: 'updated_at' | 'created_at';
   }): Promise<Array<{ key: string; value: any }>> {
     const db = await this.ensureInitialized();
     const compareDate = new Date(params.timestamp);
-    const timeColumn = params.timeColumn || "updated_at";
-    const type = params.type || "after";
+    const time_column = params.time_column || 'updated_at';
+    const type = params.type || 'after';
     const take = params.take || 1;
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readonly");
-      const store = transaction.objectStore(this.storeName);
-      const index = store.index(timeColumn);
+      const transaction = db.transaction([this.store_name], 'readonly');
+      const store = transaction.objectStore(this.store_name);
+      const index = store.index(time_column);
       const request = index.openCursor();
 
       const results: Array<{ key: string; value: any }> = [];
@@ -706,12 +706,12 @@ class EnhancedIndexedDB {
           .result as IDBCursorWithValue;
 
         if (cursor) {
-          const recordDate = cursor.value[timeColumn];
+          const recordDate = cursor.value[time_column];
           let match = false;
 
-          if (type === "before" && recordDate < compareDate) {
+          if (type === 'before' && recordDate < compareDate) {
             match = true;
-          } else if (type === "after" && recordDate > compareDate) {
+          } else if (type === 'after' && recordDate > compareDate) {
             match = true;
           }
 
@@ -733,7 +733,7 @@ class EnhancedIndexedDB {
         }
       };
 
-      request.onerror = () => reject(new Error("Failed to search by time"));
+      request.onerror = () => reject(new Error('Failed to search by time'));
     });
   }
 
@@ -743,8 +743,8 @@ class EnhancedIndexedDB {
   async saveArray(
     key: string,
     array: any[],
-    batchSize: number = 1000,
-    forceUpdateBatchSize: boolean = false
+    batch_size: number = 1000,
+    force_update_batch_size: boolean = false,
   ): Promise<void> {
     // Get metadata if it exists
     const metaKey = `${key}_meta`;
@@ -754,13 +754,13 @@ class EnhancedIndexedDB {
     if (existingMeta && existingMeta.batchCount > 0) {
       const existingBatchCount = existingMeta.batchCount;
       const existingTotalItems = existingMeta.totalItems;
-      const storedBatchSize = existingMeta.batchSize || batchSize;
+      const stored_batch_size = existingMeta.batchSize || batch_size;
 
-      let activeBatchSize = storedBatchSize;
+      let active_batch_size = stored_batch_size;
 
       // Handle batch size change if requested
-      if (forceUpdateBatchSize && batchSize !== storedBatchSize) {
-        activeBatchSize = batchSize;
+      if (force_update_batch_size && batch_size !== stored_batch_size) {
+        active_batch_size = batch_size;
 
         // Need to rebalance all batches if the batch size changes
         if (existingTotalItems > 0) {
@@ -778,74 +778,74 @@ class EnhancedIndexedDB {
           array = [...allData, ...array];
 
           // Create a new array with the new batch size
-          return this.saveArray(key, array, batchSize);
+          return this.saveArray(key, array, batch_size);
         }
       }
 
       // Use the determined batch size
-      batchSize = activeBatchSize;
+      let batch_size_local = active_batch_size;
 
       // Get the last batch which might not be full
       const lastBatchKey = `${key}_${existingBatchCount - 1}`;
       const lastBatch = (await this.get(lastBatchKey)) || [];
 
       // Calculate how many more items can fit in the last batch
-      const remainingSpace = batchSize - lastBatch.length;
+      const remaining_space = batch_size_local - lastBatch.length;
 
       // Items to add to the last batch
-      const itemsForLastBatch =
-        remainingSpace > 0 ? array.slice(0, remainingSpace) : [];
+      const items_for_last_batch =
+        remaining_space > 0 ? array.slice(0, remaining_space) : [];
       // Items for new batches
-      const remainingItems =
-        remainingSpace > 0 ? array.slice(remainingSpace) : array;
+      const remaining_items =
+        remaining_space > 0 ? array.slice(remaining_space) : array;
 
       // Update the last batch if needed
-      if (itemsForLastBatch.length > 0) {
-        const updatedLastBatch = [...lastBatch, ...itemsForLastBatch];
-        await this.put(lastBatchKey, updatedLastBatch);
+      if (items_for_last_batch.length > 0) {
+        const updated_last_batch = [...lastBatch, ...items_for_last_batch];
+        await this.put(lastBatchKey, updated_last_batch);
       }
 
       // Create new batches for remaining items
-      let newBatchesCount = 0;
+      let new_batches_count = 0;
 
-      for (let i = 0; i < remainingItems.length; i += batchSize) {
-        const batchData = remainingItems.slice(i, i + batchSize);
-        const batchKey = `${key}_${existingBatchCount + newBatchesCount}`;
-        await this.put(batchKey, batchData);
-        newBatchesCount++;
+      for (let i = 0; i < remaining_items.length; i += batch_size_local) {
+        const batch_data = remaining_items.slice(i, i + batch_size_local);
+        const batch_key = `${key}_${existingBatchCount + new_batches_count}`;
+        await this.put(batch_key, batch_data);
+        new_batches_count++;
       }
 
       // Update metadata
       const newTotalItems = existingTotalItems + array.length;
-      const newBatchCount = existingBatchCount + newBatchesCount;
+      const new_batch_count = existingBatchCount + new_batches_count;
 
       await this.put(metaKey, {
-        batchCount: newBatchCount,
+        batchCount: new_batch_count,
         totalItems: newTotalItems,
-        batchSize: batchSize,
+        batchSize: batch_size_local,
         lastUpdated: new Date().toISOString(),
       });
     }
     // Key doesn't exist, create new array storage
     else {
       // Calculate batch count
-      const batchCount = Math.ceil(array.length / batchSize);
+      const batch_count = Math.ceil(array.length / batch_size);
 
       // Create metadata record
       await this.put(metaKey, {
-        batchCount,
+        batchCount: batch_count,
         totalItems: array.length,
-        batchSize: batchSize,
+        batchSize: batch_size,
         lastUpdated: new Date().toISOString(),
       });
 
       // Create batch records
-      for (let i = 0; i < batchCount; i++) {
-        const start = i * batchSize;
-        const end = Math.min(start + batchSize, array.length);
-        const batchData = array.slice(start, end);
-        const batchKey = `${key}_${i}`;
-        await this.put(batchKey, batchData);
+      for (let i = 0; i < batch_count; i++) {
+        const start = i * batch_size;
+        const end = Math.min(start + batch_size, array.length);
+        const batch_data = array.slice(start, end);
+        const batch_key = `${key}_${i}`;
+        await this.put(batch_key, batch_data);
       }
     }
   }
@@ -894,26 +894,26 @@ class EnhancedIndexedDB {
     const batchSize = meta.batchSize || 1000;
 
     // Calculate which batches we need
-    const recentItems: T[] = [];
-    let remainingCount = count;
+    const recent_items: T[] = [];
+    let remaining_count = count;
 
     // Start from the last batch and work backwards
-    for (let i = meta.batchCount - 1; i >= 0 && remainingCount > 0; i--) {
-      const batchKey = `${key}_${i}`;
-      const batch = (await this.get<T[]>(batchKey)) || [];
+    for (let i = meta.batchCount - 1; i >= 0 && remaining_count > 0; i--) {
+      const batch_key = `${key}_${i}`;
+      const batch = (await this.get<T[]>(batch_key)) || [];
 
-      if (batch.length <= remainingCount) {
-        recentItems.unshift(...batch);
-        remainingCount -= batch.length;
+      if (batch.length <= remaining_count) {
+        recent_items.unshift(...batch);
+        remaining_count -= batch.length;
       } else {
-        const startIndex = batch.length - remainingCount;
-        const recentFromBatch = batch.slice(startIndex);
-        recentItems.unshift(...recentFromBatch);
-        remainingCount = 0;
+        const start_index = batch.length - remaining_count;
+        const recent_from_batch = batch.slice(start_index);
+        recent_items.unshift(...recent_from_batch);
+        remaining_count = 0;
       }
     }
 
-    return recentItems;
+    return recent_items;
   }
 
   /**
@@ -921,11 +921,11 @@ class EnhancedIndexedDB {
    */
   async getArrayRange<T = any>(
     key: string,
-    startIndex: number,
-    endIndex: number
+    start_index: number,
+    end_index: number,
   ): Promise<T[]> {
     // Validate inputs
-    if (startIndex < 0 || endIndex <= startIndex) {
+    if (start_index < 0 || end_index <= start_index) {
       return [];
     }
 
@@ -938,9 +938,9 @@ class EnhancedIndexedDB {
     }
 
     // Adjust end index if it exceeds total items
-    endIndex = Math.min(endIndex, meta.totalItems);
+    end_index = Math.min(end_index, meta.totalItems);
 
-    if (startIndex >= meta.totalItems) {
+    if (start_index >= meta.totalItems) {
       return [];
     }
 
@@ -948,23 +948,26 @@ class EnhancedIndexedDB {
     const batchSize = meta.batchSize || 1000;
 
     // Calculate which batches we need
-    const startBatch = Math.floor(startIndex / batchSize);
-    const endBatch = Math.floor((endIndex - 1) / batchSize);
+    const start_batch = Math.floor(start_index / batchSize);
+    const end_batch = Math.floor((end_index - 1) / batchSize);
 
     // Process results
     const result: T[] = [];
-    for (let i = startBatch; i <= endBatch; i++) {
+    for (let i = start_batch; i <= end_batch; i++) {
       const batchKey = `${key}_${i}`;
       const batch = (await this.get<T[]>(batchKey)) || [];
 
       // Calculate start and end positions within this batch
-      const batchStartIndex = i * batchSize;
-      const localStartIndex = Math.max(0, startIndex - batchStartIndex);
-      const localEndIndex = Math.min(batch.length, endIndex - batchStartIndex);
+      const batch_start_index = i * batchSize;
+      const local_start_index = Math.max(0, start_index - batch_start_index);
+      const local_end_index = Math.min(
+        batch.length,
+        end_index - batch_start_index,
+      );
 
       // Add the relevant portion of this batch to our result
-      if (localStartIndex < localEndIndex) {
-        result.push(...batch.slice(localStartIndex, localEndIndex));
+      if (local_start_index < local_end_index) {
+        result.push(...batch.slice(local_start_index, local_end_index));
       }
     }
 
@@ -975,13 +978,13 @@ class EnhancedIndexedDB {
    * Get random records from the database
    */
   async getRandomData(
-    count: number = 1
+    count: number = 1,
   ): Promise<Array<{ key: string; value: any }>> {
     const db = await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readonly");
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction([this.store_name], 'readonly');
+      const store = transaction.objectStore(this.store_name);
       const request = store.getAll();
 
       request.onsuccess = () => {
@@ -1013,7 +1016,7 @@ class EnhancedIndexedDB {
         resolve(results);
       };
 
-      request.onerror = () => reject(new Error("Failed to get random data"));
+      request.onerror = () => reject(new Error('Failed to get random data'));
     });
   }
 }

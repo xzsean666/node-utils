@@ -1,12 +1,12 @@
-import { MongoClient, Collection } from "mongodb";
+import { MongoClient, Collection } from 'mongodb';
 
-export class MongoKVDB {
+export class MongoKVDatabase {
   private client: MongoClient;
   private collection: Collection;
   private initialized = false;
   private collectionName: string;
 
-  constructor(connectionString: string, collectionName: string = "kv_store") {
+  constructor(connectionString: string, collectionName: string = 'kv_store') {
     this.collectionName = collectionName;
     this.client = new MongoClient(connectionString, {
       maxPoolSize: 50,
@@ -48,7 +48,7 @@ export class MongoKVDB {
           created_at: now,
         },
       },
-      { upsert: true }
+      { upsert: true },
     );
   }
 
@@ -59,14 +59,14 @@ export class MongoKVDB {
       { key },
       {
         $set: {
-          value: { $mergeObjects: ["$value", partialValue] },
+          value: { $mergeObjects: ['$value', partialValue] },
           updated_at: now,
         },
         $setOnInsert: {
           created_at: now,
         },
       },
-      { upsert: true }
+      { upsert: true },
     );
     return result.acknowledged;
   }
@@ -74,7 +74,7 @@ export class MongoKVDB {
   async get<T = any>(
     key: string,
     expire?: number,
-    deleteExpired: boolean = true
+    deleteExpired: boolean = true,
   ): Promise<T | null> {
     await this.ensureInitialized();
     const record = await this.collection.findOne({ key });
@@ -180,17 +180,17 @@ export class MongoKVDB {
     await this.ensureInitialized();
     const cursor = this.collection.find().sort({ key: 1 });
 
-    if (typeof offset === "number") {
+    if (typeof offset === 'number') {
       cursor.skip(offset);
     }
 
-    if (typeof limit === "number") {
+    if (typeof limit === 'number') {
       cursor.limit(limit);
     }
 
     const records = await cursor.toArray();
     const batchMap = new Map<string, any[]>(
-      records.map((record) => [record.key, record.value])
+      records.map((record) => [record.key, record.value]),
     );
     return batchMap;
   }
@@ -211,7 +211,7 @@ export class MongoKVDB {
 
   async putMany(
     entries: Array<[string, any]>,
-    batchSize: number = 1000
+    batchSize: number = 1000,
   ): Promise<void> {
     await this.ensureInitialized();
     const now = new Date();
@@ -258,12 +258,12 @@ export class MongoKVDB {
   async findBoolValues(
     boolValue: boolean,
     first: boolean = true,
-    orderBy: "ASC" | "DESC" = "ASC"
+    orderBy: 'ASC' | 'DESC' = 'ASC',
   ): Promise<string[] | string | null> {
     await this.ensureInitialized();
     const cursor = this.collection
       .find({ value: boolValue })
-      .sort({ created_at: orderBy === "ASC" ? 1 : -1 });
+      .sort({ created_at: orderBy === 'ASC' ? 1 : -1 });
 
     if (first) {
       const result = await cursor.limit(1).toArray();
@@ -280,7 +280,7 @@ export class MongoKVDB {
     cursor?: string;
     compare?: Array<{
       path: string;
-      operator: ">" | "<" | ">=" | "<=" | "=" | "!=";
+      operator: '>' | '<' | '>=' | '<=' | '=' | '!=';
       value: number | string | Date;
     }>;
   }): Promise<{
@@ -302,7 +302,7 @@ export class MongoKVDB {
     if (searchOptions.compare) {
       searchOptions.compare.forEach((condition) => {
         const operator =
-          condition.operator === "!=" ? "$ne" : `$${condition.operator}`;
+          condition.operator === '!=' ? '$ne' : `$${condition.operator}`;
         query[`value.${condition.path}`] = { [operator]: condition.value };
       });
     }
@@ -331,14 +331,14 @@ export class MongoKVDB {
   async findByUpdateTime(
     timestamp: number,
     first: boolean = true,
-    type: "before" | "after" = "after",
-    orderBy: "ASC" | "DESC" = "ASC"
+    type: 'before' | 'after' = 'after',
+    orderBy: 'ASC' | 'DESC' = 'ASC',
   ): Promise<string[] | string | null> {
     await this.ensureInitialized();
-    const operator = type === "before" ? "$lt" : "$gt";
+    const operator = type === 'before' ? '$lt' : '$gt';
     const cursor = this.collection
       .find({ updated_at: { [operator]: new Date(timestamp) } })
-      .sort({ updated_at: orderBy === "ASC" ? 1 : -1 });
+      .sort({ updated_at: orderBy === 'ASC' ? 1 : -1 });
 
     if (first) {
       const result = await cursor.limit(1).toArray();
@@ -352,16 +352,16 @@ export class MongoKVDB {
   async searchByTime(params: {
     timestamp: number;
     take?: number;
-    type?: "before" | "after";
-    orderBy?: "ASC" | "DESC";
-    timeColumn?: "updated_at" | "created_at";
+    type?: 'before' | 'after';
+    orderBy?: 'ASC' | 'DESC';
+    timeColumn?: 'updated_at' | 'created_at';
   }): Promise<Array<{ key: string; value: any }>> {
     await this.ensureInitialized();
-    const timeColumn = params.timeColumn || "updated_at";
-    const operator = (params.type || "after") === "before" ? "$lt" : "$gt";
+    const timeColumn = params.timeColumn || 'updated_at';
+    const operator = (params.type || 'after') === 'before' ? '$lt' : '$gt';
     const cursor = this.collection
       .find({ [timeColumn]: { [operator]: new Date(params.timestamp) } })
-      .sort({ [timeColumn]: params.orderBy === "DESC" ? -1 : 1 })
+      .sort({ [timeColumn]: params.orderBy === 'DESC' ? -1 : 1 })
       .limit(params.take || 1);
 
     return await cursor.toArray();
@@ -377,14 +377,14 @@ export class MongoKVDB {
     timeOptions: {
       timestamp: number;
       take?: number;
-      type?: "before" | "after";
-      orderBy?: "ASC" | "DESC";
-      timeColumn?: "updated_at" | "created_at";
-    }
+      type?: 'before' | 'after';
+      orderBy?: 'ASC' | 'DESC';
+      timeColumn?: 'updated_at' | 'created_at';
+    },
   ): Promise<Array<{ key: string; value: any }>> {
     await this.ensureInitialized();
-    const timeColumn = timeOptions.timeColumn || "updated_at";
-    const operator = (timeOptions.type || "after") === "before" ? "$lt" : "$gt";
+    const timeColumn = timeOptions.timeColumn || 'updated_at';
+    const operator = (timeOptions.type || 'after') === 'before' ? '$lt' : '$gt';
 
     const query: any = {
       [timeColumn]: { [operator]: new Date(timeOptions.timestamp) },
@@ -408,7 +408,7 @@ export class MongoKVDB {
 
     const cursor = this.collection
       .find(query)
-      .sort({ [timeColumn]: timeOptions.orderBy === "DESC" ? -1 : 1 })
+      .sort({ [timeColumn]: timeOptions.orderBy === 'DESC' ? -1 : 1 })
       .limit(timeOptions.take || 1);
 
     return await cursor.toArray();
@@ -418,7 +418,7 @@ export class MongoKVDB {
     key: string,
     array: any[],
     batchSize: number = 1000,
-    forceUpdateBatchSize: boolean = false
+    forceUpdateBatchSize: boolean = false,
   ): Promise<void> {
     await this.ensureInitialized();
     const metaKey = `${key}_meta`;
@@ -505,7 +505,7 @@ export class MongoKVDB {
 
     const batchKeys = Array.from(
       { length: meta.batchCount },
-      (_, i) => `${key}_${i}`
+      (_, i) => `${key}_${i}`,
     );
     const records = await this.collection
       .find({ key: { $in: batchKeys } })
@@ -513,7 +513,7 @@ export class MongoKVDB {
       .toArray();
 
     const batchMap = new Map<string, any[]>(
-      records.map((record) => [record.key, record.value])
+      records.map((record) => [record.key, record.value]),
     );
     const allData: T[] = [];
 
@@ -583,7 +583,7 @@ export class MongoKVDB {
   async getArrayRange<T = any>(
     key: string,
     startIndex: number,
-    endIndex: number
+    endIndex: number,
   ): Promise<T[]> {
     await this.ensureInitialized();
 
@@ -610,7 +610,7 @@ export class MongoKVDB {
 
     const batchKeys = Array.from(
       { length: endBatch - startBatch + 1 },
-      (_, i) => `${key}_${startBatch + i}`
+      (_, i) => `${key}_${startBatch + i}`,
     );
 
     const records = await this.collection
@@ -619,7 +619,7 @@ export class MongoKVDB {
       .toArray();
 
     const batchMap = new Map<string, any[]>(
-      records.map((record) => [record.key, record.value])
+      records.map((record) => [record.key, record.value]),
     );
     const result: T[] = [];
 
@@ -639,7 +639,7 @@ export class MongoKVDB {
   }
 
   async getRandomData(
-    count: number = 1
+    count: number = 1,
   ): Promise<Array<{ key: string; value: any }>> {
     await this.ensureInitialized();
     return await this.collection

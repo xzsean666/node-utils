@@ -21,7 +21,7 @@ export enum SqliteValueType {
 interface TypeHandler {
   serialize(value: any): any;
   deserialize(value: any): any;
-  columnType: string;
+  column_type: string;
 }
 
 // 类型处理器实现
@@ -29,12 +29,12 @@ const TYPE_HANDLERS: Record<SqliteValueType, TypeHandler> = {
   [SqliteValueType.JSON]: {
     serialize: (value: any) => JSON.stringify(value, bigintHandler),
     deserialize: (value: any) => JSON.parse(value),
-    columnType: 'text',
+    column_type: 'text',
   },
   [SqliteValueType.TEXT]: {
     serialize: (value: any) => String(value),
     deserialize: (value: any) => value,
-    columnType: 'text',
+    column_type: 'text',
   },
   [SqliteValueType.BLOB]: {
     serialize: (value: any) => {
@@ -44,7 +44,7 @@ const TYPE_HANDLERS: Record<SqliteValueType, TypeHandler> = {
       throw new Error('BLOB type requires Buffer, Uint8Array, or string');
     },
     deserialize: (value: any) => value,
-    columnType: 'blob',
+    column_type: 'blob',
   },
   [SqliteValueType.INTEGER]: {
     serialize: (value: any) => {
@@ -54,17 +54,17 @@ const TYPE_HANDLERS: Record<SqliteValueType, TypeHandler> = {
       return num;
     },
     deserialize: (value: any) => Number(value),
-    columnType: 'integer',
+    column_type: 'integer',
   },
   [SqliteValueType.REAL]: {
     serialize: (value: any) => Number(value),
     deserialize: (value: any) => Number(value),
-    columnType: 'real',
+    column_type: 'real',
   },
   [SqliteValueType.BOOLEAN]: {
     serialize: (value: any) => (value ? 1 : 0),
     deserialize: (value: any) => Boolean(value),
-    columnType: 'integer',
+    column_type: 'integer',
   },
 };
 
@@ -85,29 +85,29 @@ function bigintHandler(key: string, val: any) {
 
 export class SqliteKVDatabase {
   private db: Repository<KVEntity>;
-  private dataSource: DataSource;
+  private data_source: DataSource;
   private initialized = false;
-  private initializingPromise: Promise<void> | null = null;
-  private tableName: string;
-  private CustomKVStore: any;
-  private valueType: SqliteValueType;
-  private typeHandler: TypeHandler;
+  private initializing_promise: Promise<void> | null = null;
+  private table_name: string;
+  private custom_kv_store: any;
+  private value_type: SqliteValueType;
+  private type_handler: TypeHandler;
 
   constructor(
-    datasourceOrUrl?: string,
-    tableName: string = 'kv_store',
-    valueType: SqliteValueType = SqliteValueType.JSON,
+    datasource_or_url?: string,
+    table_name: string = 'kv_store',
+    value_type: SqliteValueType = SqliteValueType.JSON,
   ) {
-    this.tableName = tableName;
-    this.valueType = valueType;
-    this.typeHandler = TYPE_HANDLERS[valueType];
+    this.table_name = table_name;
+    this.value_type = value_type;
+    this.type_handler = TYPE_HANDLERS[value_type];
 
-    @Entity(tableName)
+    @Entity(table_name)
     class CustomKVStore implements KVEntity {
       @PrimaryColumn('varchar', { length: 255 })
       key: string;
 
-      @Column(this.typeHandler.columnType as any)
+      @Column(this.type_handler.column_type as any)
       value: any;
 
       @CreateDateColumn({ type: 'datetime' })
@@ -117,11 +117,11 @@ export class SqliteKVDatabase {
       updated_at: Date;
     }
 
-    this.CustomKVStore = CustomKVStore;
+    this.custom_kv_store = CustomKVStore;
 
-    this.dataSource = new DataSource({
+    this.data_source = new DataSource({
       type: 'sqlite',
-      database: datasourceOrUrl || ':memory:',
+      database: datasource_or_url || ':memory:',
       entities: [CustomKVStore],
       synchronize: false,
     });
@@ -130,7 +130,7 @@ export class SqliteKVDatabase {
   private async _withRetry<T>(
     operation: () => Promise<T>,
     retries: number = 2,
-    delayMs: number = 100,
+    delay_ms: number = 100,
   ): Promise<T> {
     for (let i = 0; i < retries; i++) {
       try {
@@ -138,11 +138,11 @@ export class SqliteKVDatabase {
       } catch (error: any) {
         if (error.message.includes('SQLITE_BUSY') && i < retries - 1) {
           console.warn(
-            `SQLITE_BUSY encountered for ${this.tableName}, retrying in ${delayMs}ms... (Attempt ${
+            `SQLITE_BUSY encountered for ${this.table_name}, retrying in ${delay_ms}ms... (Attempt ${
               i + 1
             }/${retries})`,
           );
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          await new Promise((resolve) => setTimeout(resolve, delay_ms));
         } else {
           throw error;
         }
@@ -154,34 +154,34 @@ export class SqliteKVDatabase {
   }
 
   private async ensureInitialized(): Promise<void> {
-    if (this.initialized && this.dataSource?.isInitialized && this.db) {
+    if (this.initialized && this.data_source?.isInitialized && this.db) {
       return;
     }
 
-    if (this.initializingPromise) {
-      await this.initializingPromise;
+    if (this.initializing_promise) {
+      await this.initializing_promise;
       return;
     }
 
-    this.initializingPromise = (async () => {
-      if (!this.dataSource.isInitialized) {
-        await this.dataSource.initialize();
+    this.initializing_promise = (async () => {
+      if (!this.data_source.isInitialized) {
+        await this.data_source.initialize();
         // Enable WAL mode for better concurrency
-        await this.dataSource.query('PRAGMA journal_mode=WAL;');
+        await this.data_source.query('PRAGMA journal_mode=WAL;');
       }
 
-      this.db = this.dataSource.getRepository(this.CustomKVStore);
+      this.db = this.data_source.getRepository(this.custom_kv_store);
 
-      if (this.dataSource.options.synchronize) {
-        await this.dataSource.synchronize();
+      if (this.data_source.options.synchronize) {
+        await this.data_source.synchronize();
       } else {
-        const queryRunner = this.dataSource.createQueryRunner();
+        const query_runner = this.data_source.createQueryRunner();
         try {
-          const tableExists = await queryRunner.hasTable(this.tableName);
-          if (!tableExists) {
-            await queryRunner.createTable(
+          const table_exists = await query_runner.hasTable(this.table_name);
+          if (!table_exists) {
+            await query_runner.createTable(
               new Table({
-                name: this.tableName,
+                name: this.table_name,
                 columns: [
                   {
                     name: 'key',
@@ -191,7 +191,7 @@ export class SqliteKVDatabase {
                   },
                   {
                     name: 'value',
-                    type: this.typeHandler.columnType,
+                    type: this.type_handler.column_type,
                   },
                   {
                     name: 'created_at',
@@ -208,7 +208,7 @@ export class SqliteKVDatabase {
             );
           }
         } finally {
-          await queryRunner.release();
+          await query_runner.release();
         }
       }
 
@@ -216,9 +216,9 @@ export class SqliteKVDatabase {
     })();
 
     try {
-      await this.initializingPromise;
+      await this.initializing_promise;
     } finally {
-      this.initializingPromise = null;
+      this.initializing_promise = null;
     }
   }
 
@@ -228,7 +228,7 @@ export class SqliteKVDatabase {
     await this._withRetry(() =>
       this.db.save({
         key,
-        value: this.typeHandler.serialize(value),
+        value: this.type_handler.serialize(value),
       }),
     );
   }
@@ -239,16 +239,16 @@ export class SqliteKVDatabase {
     key: string,
     options?: {
       expire?: number;
-      includeTimestamps?: boolean;
+      include_timestamps?: boolean;
     },
   ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null>;
   async get<T = any>(
     key: string,
-    optionsOrExpire?:
+    options_or_expire?:
       | number
       | {
           expire?: number;
-          includeTimestamps?: boolean;
+          include_timestamps?: boolean;
         },
   ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null> {
     await this.ensureInitialized();
@@ -258,78 +258,78 @@ export class SqliteKVDatabase {
 
     // 处理参数类型 - 兼容旧的expire参数和新的options对象
     let expire: number | undefined;
-    let includeTimestamps = false;
+    let include_timestamps = false;
 
-    if (typeof optionsOrExpire === 'number') {
-      expire = optionsOrExpire;
-    } else if (optionsOrExpire && typeof optionsOrExpire === 'object') {
-      expire = optionsOrExpire.expire;
-      includeTimestamps = optionsOrExpire.includeTimestamps || false;
+    if (typeof options_or_expire === 'number') {
+      expire = options_or_expire;
+    } else if (options_or_expire && typeof options_or_expire === 'object') {
+      expire = options_or_expire.expire;
+      include_timestamps = options_or_expire.include_timestamps || false;
     }
 
     // 如果设置了过期时间，检查是否过期
     if (expire !== undefined) {
-      const currentTime = Math.floor(Date.now() / 1000);
-      const createdTime = Math.floor(record.created_at.getTime() / 1000);
+      const current_time = Math.floor(Date.now() / 1000);
+      const created_time = Math.floor(record.created_at.getTime() / 1000);
 
-      if (currentTime - createdTime > expire) {
+      if (current_time - created_time > expire) {
         // 过期数据自动删除
         await this.delete(key);
         return null;
       }
     }
 
-    const deserializedValue = this.typeHandler.deserialize(record.value);
+    const deserialized_value = this.type_handler.deserialize(record.value);
 
     // 如果需要包含时间戳，返回包含时间戳的对象
-    if (includeTimestamps) {
+    if (include_timestamps) {
       return {
-        value: deserializedValue,
+        value: deserialized_value,
         created_at: record.created_at,
         updated_at: record.updated_at,
       };
     }
 
-    return deserializedValue;
+    return deserialized_value;
   }
 
   async merge(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
 
     // 先判断是不是JSON类型，如果不是直接抛出错误
-    if (this.valueType !== SqliteValueType.JSON) {
+    if (this.value_type !== SqliteValueType.JSON) {
       throw new Error(
-        `Merge operation is only supported for JSON type, current type is: ${this.valueType}`,
+        `Merge operation is only supported for JSON type, current type is: ${this.value_type}`,
       );
     }
 
     // 如果是JSON，先把原有的value取出来
-    const existingValue = await this.get(key);
+    const existing_value = await this.get(key);
 
-    let mergedValue: any;
-    if (existingValue === null) {
+    let merged_value: any;
+    if (existing_value === null) {
       // 如果原来没有值，直接使用新值
-      mergedValue = value;
+      merged_value = value;
     } else {
       // 检查原有值和新值是否都是对象类型，才能进行合并
       if (
-        typeof existingValue === 'object' &&
-        existingValue !== null &&
+        typeof existing_value === 'object' &&
+        existing_value !== null &&
         typeof value === 'object' &&
         value !== null &&
-        !Array.isArray(existingValue) &&
+        !Array.isArray(existing_value) &&
         !Array.isArray(value)
       ) {
         // 将新值与原有值合并
-        mergedValue = { ...existingValue, ...value };
+        merged_value = { ...existing_value, ...value };
       } else {
         // 如果不是对象类型，直接替换
-        mergedValue = value;
+        merged_value = value;
       }
     }
 
     // 存储合并后的值
-    await this._withRetry(() => this.put(key, mergedValue));
+    await this._withRetry(() => this.put(key, merged_value));
   }
 
   async delete(key: string): Promise<boolean> {
@@ -347,101 +347,107 @@ export class SqliteKVDatabase {
     await this._withRetry(() =>
       this.db.save({
         key,
-        value: this.typeHandler.serialize(value),
+        value: this.type_handler.serialize(value),
       }),
     );
   }
 
   async close(): Promise<void> {
-    if (this.initialized && this.dataSource?.isInitialized) {
-      await this.dataSource.destroy();
+    if (this.initialized && this.data_source?.isInitialized) {
+      await this.data_source.destroy();
       this.initialized = false;
     }
   }
 
   // 获取所有键值对
   async getAll<T = any>(options?: {
-    includeTimestamps?: boolean;
-    createdAfter?: Date;
-    createdBefore?: Date;
-    updatedAfter?: Date;
-    updatedBefore?: Date;
+    include_timestamps?: boolean;
+    created_after?: Date;
+    created_before?: Date;
+    updated_after?: Date;
+    updated_before?: Date;
     offset?: number;
     limit?: number;
   }): Promise<
     Record<string, T | { value: T; created_at: Date; updated_at: Date }>
   > {
     await this.ensureInitialized();
-    const includeTimestamps = options?.includeTimestamps === true;
+    const include_timestamps = options?.include_timestamps === true;
     const offset = options?.offset;
     const limit = options?.limit;
 
     // 构建查询条件
-    const whereConditions: any = {};
+    const where_conditions: any = {};
 
-    if (options?.createdAfter) {
-      whereConditions.created_at = whereConditions.created_at || {};
-      whereConditions.created_at = {
-        ...whereConditions.created_at,
-        $gte: options.createdAfter,
+    if (options?.created_after) {
+      where_conditions.created_at = where_conditions.created_at || {};
+      where_conditions.created_at = {
+        ...where_conditions.created_at,
+        $gte: options.created_after,
       };
     }
 
-    if (options?.createdBefore) {
-      whereConditions.created_at = whereConditions.created_at || {};
-      whereConditions.created_at = {
-        ...whereConditions.created_at,
-        $lte: options.createdBefore,
+    if (options?.created_before) {
+      where_conditions.created_at = where_conditions.created_at || {};
+      where_conditions.created_at = {
+        ...where_conditions.created_at,
+        $lte: options.created_before,
       };
     }
 
-    if (options?.updatedAfter) {
-      whereConditions.updated_at = whereConditions.updated_at || {};
-      whereConditions.updated_at = {
-        ...whereConditions.updated_at,
-        $gte: options.updatedAfter,
+    if (options?.updated_after) {
+      where_conditions.updated_at = where_conditions.updated_at || {};
+      where_conditions.updated_at = {
+        ...where_conditions.updated_at,
+        $gte: options.updated_after,
       };
     }
 
-    if (options?.updatedBefore) {
-      whereConditions.updated_at = whereConditions.updated_at || {};
-      whereConditions.updated_at = {
-        ...whereConditions.updated_at,
-        $lte: options.updatedBefore,
+    if (options?.updated_before) {
+      where_conditions.updated_at = where_conditions.updated_at || {};
+      where_conditions.updated_at = {
+        ...where_conditions.updated_at,
+        $lte: options.updated_before,
       };
     }
 
     // 统一使用 queryBuilder 来支持分页
-    const queryBuilder = this.db.createQueryBuilder(this.tableName);
+    const query_builder = this.db.createQueryBuilder(this.table_name);
 
     // 添加时间筛选条件
-    if (whereConditions.created_at) {
-      if (whereConditions.created_at.$gte) {
-        queryBuilder.andWhere(`${this.tableName}.created_at >= :createdAfter`, {
-          createdAfter: whereConditions.created_at.$gte,
-        });
-      }
-      if (whereConditions.created_at.$lte) {
-        queryBuilder.andWhere(
-          `${this.tableName}.created_at <= :createdBefore`,
+    if (where_conditions.created_at) {
+      if (where_conditions.created_at.$gte) {
+        query_builder.andWhere(
+          `${this.table_name}.created_at >= :created_after`,
           {
-            createdBefore: whereConditions.created_at.$lte,
+            created_after: where_conditions.created_at.$gte,
+          },
+        );
+      }
+      if (where_conditions.created_at.$lte) {
+        query_builder.andWhere(
+          `${this.table_name}.created_at <= :created_before`,
+          {
+            created_before: where_conditions.created_at.$lte,
           },
         );
       }
     }
 
-    if (whereConditions.updated_at) {
-      if (whereConditions.updated_at.$gte) {
-        queryBuilder.andWhere(`${this.tableName}.updated_at >= :updatedAfter`, {
-          updatedAfter: whereConditions.updated_at.$gte,
-        });
-      }
-      if (whereConditions.updated_at.$lte) {
-        queryBuilder.andWhere(
-          `${this.tableName}.updated_at <= :updatedBefore`,
+    if (where_conditions.updated_at) {
+      if (where_conditions.updated_at.$gte) {
+        query_builder.andWhere(
+          `${this.table_name}.updated_at >= :updated_after`,
           {
-            updatedBefore: whereConditions.updated_at.$lte,
+            updated_after: where_conditions.updated_at.$gte,
+          },
+        );
+      }
+      if (where_conditions.updated_at.$lte) {
+        query_builder.andWhere(
+          `${this.table_name}.updated_at <= :updated_before`,
+          {
+            updated_before: where_conditions.updated_at.$lte,
           },
         );
       }
@@ -449,25 +455,25 @@ export class SqliteKVDatabase {
 
     // 添加分页支持
     if (offset !== undefined) {
-      queryBuilder.skip(offset);
+      query_builder.skip(offset);
     }
 
     if (limit !== undefined) {
-      queryBuilder.take(limit);
+      query_builder.take(limit);
     }
 
     // 添加排序以确保分页结果的一致性
-    queryBuilder.orderBy(`${this.tableName}.key`, 'ASC');
+    query_builder.orderBy(`${this.table_name}.key`, 'ASC');
 
-    const records = await queryBuilder.getMany();
+    const records = await query_builder.getMany();
 
     return records.reduce(
       (
         acc,
         record: { key: any; value: any; created_at: Date; updated_at: Date },
       ) => {
-        const deserialized = this.typeHandler.deserialize(record.value) as T;
-        acc[record.key] = includeTimestamps
+        const deserialized = this.type_handler.deserialize(record.value) as T;
+        acc[record.key] = include_timestamps
           ? {
               value: deserialized,
               created_at: record.created_at,
@@ -485,7 +491,7 @@ export class SqliteKVDatabase {
 
   async getMany<T = any>(
     keys: string[],
-    options?: { includeTimestamps?: boolean },
+    options?: { include_timestamps?: boolean },
   ): Promise<
     Record<string, T | { value: T; created_at: Date; updated_at: Date } | null>
   > {
@@ -494,33 +500,33 @@ export class SqliteKVDatabase {
       return {};
     }
 
-    const includeTimestamps = options?.includeTimestamps === true;
+    const include_timestamps = options?.include_timestamps === true;
 
     // 优化：对于大量键的查询，分批执行避免SQL过长和锁竞争
     let records: any[] = [];
     if (keys.length > 50) {
       // 分批查询，每批50个
-      const batchSize = 50;
-      const allRecords: any[] = [];
+      const batch_size = 50;
+      const all_records: any[] = [];
 
-      for (let i = 0; i < keys.length; i += batchSize) {
-        const batch = keys.slice(i, i + batchSize);
+      for (let i = 0; i < keys.length; i += batch_size) {
+        const batch = keys.slice(i, i + batch_size);
         try {
-          const batchRecords = await this._withRetry(() =>
+          const batch_records = await this._withRetry(() =>
             this.db.find({
               where: { key: In(batch) },
               cache: true, // 启用查询缓存
             }),
           );
-          allRecords.push(...batchRecords);
+          all_records.push(...batch_records);
         } catch (error: any) {
           console.warn(
-            `Batch query failed for keys ${i}-${i + batchSize}: ${error.message}`,
+            `Batch query failed for keys ${i}-${i + batch_size}: ${error.message}`,
           );
           // 继续执行其他批次
         }
       }
-      records = allRecords;
+      records = all_records;
     } else {
       // 小批量直接查询
       records = await this._withRetry(() =>
@@ -532,13 +538,13 @@ export class SqliteKVDatabase {
     }
 
     // 使用Map提高查找性能，避免O(n²)复杂度
-    const recordMap = new Map<string, any>();
+    const record_map = new Map<string, any>();
     for (const record of records) {
       try {
-        const deserialized = this.typeHandler.deserialize(record.value) as T;
-        recordMap.set(
+        const deserialized = this.type_handler.deserialize(record.value) as T;
+        record_map.set(
           record.key,
-          includeTimestamps
+          include_timestamps
             ? {
                 value: deserialized,
                 created_at: record.created_at,
@@ -546,12 +552,12 @@ export class SqliteKVDatabase {
               }
             : deserialized,
         );
-      } catch (deserializeError: any) {
+      } catch (deserialize_error: any) {
         console.warn(
-          `Failed to deserialize record for key ${record.key}: ${deserializeError.message}`,
+          `Failed to deserialize record for key ${record.key}: ${deserialize_error.message}`,
         );
         // 设置为null而不是抛出错误，保证其他数据正常返回
-        recordMap.set(record.key, null);
+        record_map.set(record.key, null);
       }
     }
 
@@ -561,7 +567,7 @@ export class SqliteKVDatabase {
       T | { value: T; created_at: Date; updated_at: Date } | null
     > = {};
     for (const key of keys) {
-      result[key] = recordMap.get(key) ?? null;
+      result[key] = record_map.get(key) ?? null;
     }
 
     return result;
@@ -570,31 +576,31 @@ export class SqliteKVDatabase {
   async getRecent<T = any>(
     limit: number = 100,
     seconds: number = 0,
-    options?: { includeTimestamps?: boolean },
+    options?: { include_timestamps?: boolean },
   ): Promise<
     Record<string, T | { value: T; created_at: Date; updated_at: Date }>
   > {
     await this.ensureInitialized();
-    const includeTimestamps = options?.includeTimestamps === true;
-    const baseOptions: any = {
+    const include_timestamps = options?.include_timestamps === true;
+    const base_options: any = {
       order: { created_at: 'DESC' },
       take: limit,
     };
 
     if (seconds > 0) {
-      baseOptions.where = {
+      base_options.where = {
         created_at: MoreThan(new Date(Date.now() - seconds * 1000)),
       };
     }
 
-    const records = await this.db.find(baseOptions);
+    const records = await this.db.find(base_options);
     return records.reduce(
       (
         acc,
         record: { key: any; value: any; created_at: Date; updated_at: Date },
       ) => {
-        const deserialized = this.typeHandler.deserialize(record.value) as T;
-        acc[record.key] = includeTimestamps
+        const deserialized = this.type_handler.deserialize(record.value) as T;
+        acc[record.key] = include_timestamps
           ? {
               value: deserialized,
               created_at: record.created_at,
@@ -625,16 +631,16 @@ export class SqliteKVDatabase {
   // 批量添加键值对
   async putMany(
     entries: Array<[string, any]>,
-    batchSize: number = 1000,
+    batch_size: number = 1000,
   ): Promise<void> {
     await this.ensureInitialized();
 
     // 分批处理大量数据
-    for (let i = 0; i < entries.length; i += batchSize) {
-      const batch = entries.slice(i, i + batchSize);
+    for (let i = 0; i < entries.length; i += batch_size) {
+      const batch = entries.slice(i, i + batch_size);
       const entities = batch.map(([key, value]) => ({
         key,
-        value: this.typeHandler.serialize(value),
+        value: this.type_handler.serialize(value),
       }));
       await this._withRetry(() => this.db.save(entities));
     }
@@ -670,31 +676,31 @@ export class SqliteKVDatabase {
   async findByValue(value: any, exact: boolean = true): Promise<string[]> {
     await this.ensureInitialized();
 
-    let queryBuilder = this.db.createQueryBuilder(this.tableName);
+    let query_builder = this.db.createQueryBuilder(this.table_name);
 
     if (exact) {
       // 根据数据类型进行精确匹配
-      queryBuilder = queryBuilder.where(`value = :value`, {
-        value: this.typeHandler.serialize(value),
+      query_builder = query_builder.where(`value = :value`, {
+        value: this.type_handler.serialize(value),
       });
     } else {
       // 文本搜索（仅适用于文本类型）
       if (
-        this.valueType === SqliteValueType.TEXT ||
-        this.valueType === SqliteValueType.JSON
+        this.value_type === SqliteValueType.TEXT ||
+        this.value_type === SqliteValueType.JSON
       ) {
-        const searchValue = this.typeHandler.serialize(value);
-        queryBuilder = queryBuilder.where(`value LIKE :value`, {
-          value: `%${searchValue}%`,
+        const search_value = this.type_handler.serialize(value);
+        query_builder = query_builder.where(`value LIKE :value`, {
+          value: `%${search_value}%`,
         });
       } else {
         throw new Error(
-          `Fuzzy search not supported for ${this.valueType} type`,
+          `Fuzzy search not supported for ${this.value_type} type`,
         );
       }
     }
 
-    const results = await queryBuilder.getMany();
+    const results = await query_builder.getMany();
     return results.map((record: { key: any }) => record.key);
   }
 
@@ -707,12 +713,12 @@ export class SqliteKVDatabase {
     condition: (value: any) => boolean,
   ): Promise<Map<string, any>> {
     await this.ensureInitialized();
-    const allRecords = await this.db.find();
-    const matchedRecords = allRecords.filter((record: { value: any }) =>
-      condition(this.typeHandler.deserialize(record.value)),
+    const all_records = await this.db.find();
+    const matched_records = all_records.filter((record: { value: any }) =>
+      condition(this.type_handler.deserialize(record.value)),
     );
-    return matchedRecords.reduce((acc, record: { key: any; value: any }) => {
-      acc.set(record.key, this.typeHandler.deserialize(record.value));
+    return matched_records.reduce((acc, record: { key: any; value: any }) => {
+      acc.set(record.key, this.type_handler.deserialize(record.value));
       return acc;
     }, new Map<string, any>());
   }
@@ -721,16 +727,16 @@ export class SqliteKVDatabase {
    * 获取当前使用的值类型
    */
   getValueType(): SqliteValueType {
-    return this.valueType;
+    return this.value_type;
   }
 
   /**
    * 获取类型处理器信息
    */
-  getTypeInfo(): { valueType: SqliteValueType; columnType: string } {
+  getTypeInfo(): { value_type: SqliteValueType; column_type: string } {
     return {
-      valueType: this.valueType,
-      columnType: this.typeHandler.columnType,
+      value_type: this.value_type,
+      column_type: this.type_handler.column_type,
     };
   }
 
@@ -746,8 +752,8 @@ export class SqliteKVDatabase {
     options?: {
       limit?: number;
       offset?: number;
-      orderBy?: 'ASC' | 'DESC';
-      includeTimestamps?: boolean;
+      order_by?: 'ASC' | 'DESC';
+      include_timestamps?: boolean;
     },
   ): Promise<
     Array<{
@@ -766,54 +772,56 @@ export class SqliteKVDatabase {
     const {
       limit,
       offset,
-      orderBy = 'ASC',
-      includeTimestamps = false,
+      order_by = 'ASC',
+      include_timestamps = false,
     } = options || {};
 
     // 根据是否需要时间戳选择字段
-    const selectFields = [
-      `${this.tableName}.key as "key"`,
-      `${this.tableName}.value as "value"`,
+    const select_fields = [
+      `${this.table_name}.key as "key"`,
+      `${this.table_name}.value as "value"`,
     ];
 
-    if (includeTimestamps) {
-      selectFields.push(
-        `${this.tableName}.created_at as "created_at"`,
-        `${this.tableName}.updated_at as "updated_at"`,
+    if (include_timestamps) {
+      select_fields.push(
+        `${this.table_name}.created_at as "created_at"`,
+        `${this.table_name}.updated_at as "updated_at"`,
       );
     }
 
     // 使用范围查询 - 这是最高效的前缀搜索方式
     // key >= 'prefix' AND key < 'prefix' + char(255)
     // 这样可以充分利用主键的索引
-    const queryBuilder = this.db
-      .createQueryBuilder(this.tableName)
-      .select(selectFields)
-      .where(`${this.tableName}.key >= :startPrefix`, { startPrefix: prefix })
-      .andWhere(`${this.tableName}.key < :endPrefix`, {
-        endPrefix: prefix + String.fromCharCode(255), // 使用 char(255) 作为范围上限
+    const query_builder = this.db
+      .createQueryBuilder(this.table_name)
+      .select(select_fields)
+      .where(`${this.table_name}.key >= :start_prefix`, {
+        start_prefix: prefix,
       })
-      .orderBy(`${this.tableName}.key`, orderBy);
+      .andWhere(`${this.table_name}.key < :end_prefix`, {
+        end_prefix: prefix + String.fromCharCode(255), // 使用 char(255) 作为范围上限
+      })
+      .orderBy(`${this.table_name}.key`, order_by);
 
     if (limit !== undefined) {
-      queryBuilder.limit(limit);
+      query_builder.limit(limit);
     }
 
     if (offset !== undefined) {
-      queryBuilder.offset(offset);
+      query_builder.offset(offset);
     }
 
     try {
-      const results = await queryBuilder.getRawMany();
+      const results = await query_builder.getRawMany();
 
       // 反序列化值并根据选项返回时间戳
       return results.map((record) => {
         const result: any = {
           key: record.key,
-          value: this.typeHandler.deserialize(record.value),
+          value: this.type_handler.deserialize(record.value),
         };
 
-        if (includeTimestamps) {
+        if (include_timestamps) {
           result.created_at = record.created_at;
           result.updated_at = record.updated_at;
         }

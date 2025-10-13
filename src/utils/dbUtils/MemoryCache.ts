@@ -7,7 +7,7 @@ interface CacheEntry<T> {
 
 export class MemoryKVDatabase<T = any> implements IKVDatabase<T> {
   private cache = new Map<string, CacheEntry<T>>();
-  private cleanupTimers = new Map<string, NodeJS.Timeout>();
+  private cleanup_timers = new Map<string, NodeJS.Timeout>();
 
   async get(key: string, ttl?: number): Promise<T | null> {
     const entry = this.cache.get(key);
@@ -42,33 +42,33 @@ export class MemoryKVDatabase<T = any> implements IKVDatabase<T> {
   }
 
   // Helper method to set value with TTL
-  async putWithTTL(key: string, value: T, ttlSeconds: number): Promise<void> {
+  async putWithTTL(key: string, value: T, ttl_seconds: number): Promise<void> {
     this.clearCleanupTimer(key);
 
-    const expiry = Date.now() + ttlSeconds * 1000;
+    const expiry = Date.now() + ttl_seconds * 1000;
     this.cache.set(key, { value, expiry });
 
-    this.scheduleCleanup(key, ttlSeconds * 1000);
+    this.scheduleCleanup(key, ttl_seconds * 1000);
     return Promise.resolve();
   }
 
-  private scheduleCleanup(key: string, delayMs: number): void {
+  private scheduleCleanup(key: string, delay_ms: number): void {
     const timer = setTimeout(() => {
       this.cache.delete(key);
-      this.cleanupTimers.delete(key);
-    }, delayMs);
+      this.cleanup_timers.delete(key);
+    }, delay_ms);
 
     // 使用 unref() 让定时器不阻止进程退出
     timer.unref();
 
-    this.cleanupTimers.set(key, timer);
+    this.cleanup_timers.set(key, timer);
   }
 
   private clearCleanupTimer(key: string): void {
-    const timer = this.cleanupTimers.get(key);
+    const timer = this.cleanup_timers.get(key);
     if (timer) {
       clearTimeout(timer);
-      this.cleanupTimers.delete(key);
+      this.cleanup_timers.delete(key);
     }
   }
 
@@ -80,10 +80,10 @@ export class MemoryKVDatabase<T = any> implements IKVDatabase<T> {
   // Additional utility methods
   clear(): void {
     this.cache.clear();
-    for (const timer of this.cleanupTimers.values()) {
+    for (const timer of this.cleanup_timers.values()) {
       clearTimeout(timer);
     }
-    this.cleanupTimers.clear();
+    this.cleanup_timers.clear();
   }
 
   size(): number {
@@ -105,36 +105,36 @@ export class MemoryKVDatabase<T = any> implements IKVDatabase<T> {
 
 // 创建内存缓存装饰器的工厂函数
 export function createMemoryCacheDecorator<T = any>(
-  defaultTTL: number = 60, // 默认60秒
+  default_ttl: number = 60, // 默认60秒
 ) {
   const db = new MemoryKVDatabase<T>();
 
-  return function cache(ttl: number = defaultTTL, prefix: string = '') {
+  return function cache(ttl: number = default_ttl, prefix: string = '') {
     return function (
       target: any,
-      propertyKey: string,
+      property_key: string,
       descriptor: PropertyDescriptor,
     ) {
-      const originalMethod = descriptor.value;
+      const original_method = descriptor.value;
 
       descriptor.value = async function (...args: any[]): Promise<T> {
         try {
-          const cacheKey = `${prefix}:${propertyKey}:${JSON.stringify(
+          const cache_key = `${prefix}:${property_key}:${JSON.stringify(
             args,
           )}`.slice(0, 255);
 
           // 使用内存KV存储接口
-          const cached = await db.get(cacheKey, ttl);
+          const cached = await db.get(cache_key, ttl);
           if (cached !== null) {
             return cached;
           }
 
-          const result = await originalMethod.apply(this, args);
-          await db.putWithTTL(cacheKey, result, ttl);
+          const result = await original_method.apply(this, args);
+          await db.putWithTTL(cache_key, result, ttl);
           return result;
         } catch (error) {
           // 如果缓存操作失败，直接执行原始方法
-          return originalMethod.apply(this, args);
+          return original_method.apply(this, args);
         }
       };
 
@@ -173,27 +173,27 @@ if (typeof process !== 'undefined' && process.on) {
 export function memoryCache<T = any>(ttl: number = 60, prefix: string = '') {
   return function (
     target: any,
-    propertyKey: string,
+    property_key: string,
     descriptor: PropertyDescriptor,
   ) {
-    const originalMethod = descriptor.value;
+    const original_method = descriptor.value;
 
     descriptor.value = async function (...args: any[]): Promise<T> {
       try {
-        const cacheKey = `${prefix}:${propertyKey}:${JSON.stringify(
+        const cache_key = `${prefix}:${property_key}:${JSON.stringify(
           args,
         )}`.slice(0, 255);
 
-        const cached = await memoryKVDatabase.get(cacheKey, ttl);
+        const cached = await memoryKVDatabase.get(cache_key, ttl);
         if (cached !== null) {
           return cached;
         }
 
-        const result = await originalMethod.apply(this, args);
-        await memoryKVDatabase.putWithTTL(cacheKey, result, ttl);
+        const result = await original_method.apply(this, args);
+        await memoryKVDatabase.putWithTTL(cache_key, result, ttl);
         return result;
       } catch (error) {
-        return originalMethod.apply(this, args);
+        return original_method.apply(this, args);
       }
     };
 

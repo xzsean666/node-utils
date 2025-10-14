@@ -16,8 +16,9 @@ export class CCIPLogHelper extends EthersLogSyncHelper {
 
   constructor(
     rpc_url: string,
-    router_address: string,
-    configs?: {
+
+    configs: {
+      router_address: string;
       destination_chain_selector?: string;
       source_chain_selector?: string;
       sqlite_path?: string;
@@ -29,12 +30,13 @@ export class CCIPLogHelper extends EthersLogSyncHelper {
       postgres_path: configs?.postgres_path,
     });
 
-    if (!ethers.isAddress(router_address)) {
-      const error_msg = 'Invalid router address: ' + String(router_address);
+    if (!ethers.isAddress(configs?.router_address)) {
+      const error_msg =
+        'Invalid router address: ' + String(configs?.router_address);
       throw new Error(error_msg);
     }
 
-    this.router_address = router_address;
+    this.router_address = configs?.router_address;
     this.destination_chain_selector = configs?.destination_chain_selector;
     this.source_chain_selector = configs?.source_chain_selector;
   }

@@ -1,4 +1,4 @@
-import { EthersUtils, ethers } from '../ethersUtils';
+import { EthersUtils, ethers } from '../deprecate/ethersUtils';
 import ERC20_ABI from './configs/abis/erc20.json';
 import BATCHCALL_ABI from './configs/abis/batchCall.json';
 import { PGKVDatabase } from '../../dbUtils/KVPostgresql';

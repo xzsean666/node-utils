@@ -73,6 +73,7 @@ export class EthersLogSyncHelper extends EthersLogHelper {
     event_name?: string | string[];
     start_block?: number;
     filter?: any;
+    key_generator?: (log: any, nonce: number) => string;
   }) {
     const {
       contract_address,
@@ -80,6 +81,7 @@ export class EthersLogSyncHelper extends EthersLogHelper {
       event_name,
       start_block = 0,
       filter,
+      key_generator,
     } = params;
 
     const { db, metadata_db } = await this.getContractDB(contract_address);
@@ -117,8 +119,15 @@ export class EthersLogSyncHelper extends EthersLogHelper {
 
       // 存储每个日志
       for (const log of logs) {
-        const log_name = 'name' in log ? log.name : 'unknown';
-        const key = `${log_name}_${log.blockNumber}_${nonce}`;
+        let key: string;
+        if (key_generator) {
+          // 使用自定义的key生成器
+          key = key_generator(log, nonce);
+        } else {
+          // 使用默认的key生成逻辑
+          const log_name = 'name' in log ? log.name : 'unknown';
+          key = `${log_name}_${log.blockNumber}_${nonce}`;
+        }
         await db.put(key, log);
         nonce++;
       }
@@ -131,6 +140,7 @@ export class EthersLogSyncHelper extends EthersLogHelper {
       });
 
       return {
+        logs,
         synced_logs: logs.length,
         from_block: effective_start_block,
         to_block: to_block,
@@ -160,8 +170,15 @@ export class EthersLogSyncHelper extends EthersLogHelper {
     abi: any[];
     event_name?: string | string[];
     start_block?: number;
+    key_generator?: (log: any, nonce: number) => string;
   }) {
-    const { contract_address, abi, event_name, start_block = 0 } = params;
+    const {
+      contract_address,
+      abi,
+      event_name,
+      start_block = 0,
+      key_generator,
+    } = params;
     const current_block = await this.getCurrentBlock();
     while (true) {
       const result = await this.syncLogs({
@@ -169,6 +186,7 @@ export class EthersLogSyncHelper extends EthersLogHelper {
         abi,
         event_name,
         start_block,
+        key_generator,
       });
       if (Math.abs(result.to_block - current_block) < 1000) {
         break;
@@ -204,24 +222,14 @@ export class EthersLogSyncHelper extends EthersLogHelper {
     limit?: number;
     offset?: number;
   }) {
-    const {
-      contract_address,
-      event_name,
-      start_block = 0,
-      limit,
-      offset,
-    } = params;
+    const { contract_address, event_name, limit, offset } = params;
     const { db, metadata_db } = await this.getContractDB(contract_address);
     const metadata = await metadata_db.get(contract_address);
     const to_block = metadata?.start_block;
     if (!to_block) {
       return [];
     }
-    const logs = await this.getLogs({
-      contract_address,
-      event_name,
-      start_block,
-      to_block,
+    const logs = await db.getWithPrefix(event_name ? `${event_name}_` : '', {
       limit,
       offset,
     });

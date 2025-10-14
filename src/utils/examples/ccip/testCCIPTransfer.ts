@@ -1,10 +1,10 @@
-import { CCIPLiteHelper } from "../../web3/CCIPLiteHelper";
-import { rpcs } from "./rpcs";
-import ccip from "./ccip.json";
+import { CCIPLiteHelper } from '../../web3/deprecate/CCIPLiteHelper';
+import { rpcs } from './rpcs';
+import ccip from './ccip.json';
 
 const ccipLiteHelper = new CCIPLiteHelper(rpcs.soneium);
 
-const ccipBridge = "0x6f9d07e9e974da5b3f57a6b092eb524f176162e4";
+const ccipBridge = '0x6f9d07e9e974da5b3f57a6b092eb524f176162e4';
 
 async function main() {
   const logs = await ccipLiteHelper.getAddressCCIPsendStatus({

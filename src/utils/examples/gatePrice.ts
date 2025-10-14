@@ -1,4 +1,4 @@
-import { GateioService } from "../web3/gateioService";
+import { GateioService } from '../web3/deprecate/gateioService';
 
 async function main() {
   // 创建 GateioService 实例
@@ -7,8 +7,8 @@ async function main() {
 
   // 2. 使用缓存的例子
   const serviceWithCache = new GateioService({
-    dbUrl: "postgres://sean:111111@localhost:5432/MyDB",
-    tableName: "price_cache",
+    dbUrl: 'postgres://sean:111111@localhost:5432/MyDB',
+    tableName: 'price_cache',
   });
 
   try {
@@ -22,11 +22,11 @@ async function main() {
     console.log(timestamp);
     timestamp = 1734582922;
     console.log(
-      `获取 ETH 在 ${new Date(timestamp * 1000).toLocaleString()} 的价格...`
+      `获取 ETH 在 ${new Date(timestamp * 1000).toLocaleString()} 的价格...`,
     );
     const ethHistoricalPrice = await serviceWithCache.getPrice(
-      "ETH",
-      timestamp
+      'ETH',
+      timestamp,
     );
     console.log(`ETH 历史价格: $${ethHistoricalPrice}`);
 
@@ -39,7 +39,7 @@ async function main() {
     // const usdtPrice = await serviceWithCache.getPrice("USDT");
     // console.log(`USDT 价格: $${usdtPrice}`); // 应该返回 1
   } catch (error) {
-    console.error("发生错误:", error);
+    console.error('发生错误:', error);
   }
 }
 

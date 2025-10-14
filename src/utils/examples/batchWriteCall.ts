@@ -1,5 +1,5 @@
-import { EthersUtils } from "../web3/ethersUtilsV2";
-import dotenv from "dotenv";
+import { EthersUtils } from '../web3/deprecate/ethersUtilsV2';
+import dotenv from 'dotenv';
 
 dotenv.config();
 
@@ -9,73 +9,73 @@ const ERC20_ABI = [
     constant: false,
     inputs: [
       {
-        name: "from",
-        type: "address",
+        name: 'from',
+        type: 'address',
       },
       {
-        name: "to",
-        type: "address",
+        name: 'to',
+        type: 'address',
       },
       {
-        name: "value",
-        type: "uint256",
+        name: 'value',
+        type: 'uint256',
       },
     ],
-    name: "transferFrom",
+    name: 'transferFrom',
     outputs: [
       {
-        name: "",
-        type: "bool",
+        name: '',
+        type: 'bool',
       },
     ],
     payable: false,
-    stateMutability: "nonpayable",
-    type: "function",
+    stateMutability: 'nonpayable',
+    type: 'function',
   },
   {
     constant: false,
     inputs: [
       {
-        name: "_to",
-        type: "address",
+        name: '_to',
+        type: 'address',
       },
       {
-        name: "_value",
-        type: "uint256",
+        name: '_value',
+        type: 'uint256',
       },
     ],
-    name: "transfer",
+    name: 'transfer',
     outputs: [
       {
-        name: "",
-        type: "bool",
+        name: '',
+        type: 'bool',
       },
     ],
     payable: false,
-    stateMutability: "nonpayable",
-    type: "function",
+    stateMutability: 'nonpayable',
+    type: 'function',
   },
   {
     constant: false,
     inputs: [
       {
-        name: "spender",
-        type: "address",
+        name: 'spender',
+        type: 'address',
       },
       {
-        name: "amount",
-        type: "uint256",
+        name: 'amount',
+        type: 'uint256',
       },
     ],
-    name: "approve",
+    name: 'approve',
     outputs: [
       {
-        name: "",
-        type: "bool",
+        name: '',
+        type: 'bool',
       },
     ],
-    stateMutability: "nonpayable",
-    type: "function",
+    stateMutability: 'nonpayable',
+    type: 'function',
   },
 ];
 
@@ -92,14 +92,14 @@ async function batchERC20Transfer() {
   try {
     // 初始化EthersUtils
     const ethersUtils = new EthersUtils(
-      "https://bsc-testnet-rpc.publicnode.com", // 替换为你的RPC URL
+      'https://bsc-testnet-rpc.publicnode.com', // 替换为你的RPC URL
       {
         privateKey: process.env.TEST_PRIVATE_KEY,
-        batchCallAddress: "0x6d8B018833495b79805171e716030b807e08090E", // 替换为你的BatchCall合约地址
-      }
+        batchCallAddress: '0x6d8B018833495b79805171e716030b807e08090E', // 替换为你的BatchCall合约地址
+      },
     );
-    const toRecipients = "0xD9Df2f0be7c8f42De89dDE8869D0090Af57490ce";
-    const testTokenAddress = "0x397E696881DA1b85834BD7b6289925f8B9a1ee8a";
+    const toRecipients = '0xD9Df2f0be7c8f42De89dDE8869D0090Af57490ce';
+    const testTokenAddress = '0x397E696881DA1b85834BD7b6289925f8B9a1ee8a';
     // 首先授权BatchCall合约
     // console.log("正在授权BatchCall合约...");
     // const approveData = await ethersUtils.encodeDataByABI(
@@ -122,17 +122,17 @@ async function batchERC20Transfer() {
       {
         tokenAddress: testTokenAddress, // 代币合约地址1
         to: toRecipients, // 接收地址1
-        amount: "6000000000000000000", // 1个代币（假设18位小数）
+        amount: '6000000000000000000', // 1个代币（假设18位小数）
       },
       {
-        tokenAddress: "0x285bd8C75C7647b7da1C1154776633804d4ff5eC", // 代币合约地址2
+        tokenAddress: '0x285bd8C75C7647b7da1C1154776633804d4ff5eC', // 代币合约地址2
         to: toRecipients, // 接收地址2
-        amount: "9000000000000000000", // 0.5个代币
+        amount: '9000000000000000000', // 0.5个代币
       },
       {
         tokenAddress: testTokenAddress, // 代币合约地址2
         to: toRecipients, // 接收地址2
-        amount: "7000000000000000000", // 0.5个代币
+        amount: '7000000000000000000', // 0.5个代币
       },
     ];
 
@@ -141,14 +141,14 @@ async function batchERC20Transfer() {
       transfers.map(async (transfer) => {
         // 编码 transferFrom 函数调用
         console.log(
-          "transfer",
+          'transfer',
           ethersUtils.getSignerAddress(), // from 参数，当前用户地址
           transfer.to, // to 参数
-          transfer.amount // amount 参数
+          transfer.amount, // amount 参数
         );
         const { data } = await ethersUtils.encodeDataByABI({
           abi: ERC20_ABI,
-          functionName: "transferFrom",
+          functionName: 'transferFrom',
           executeArgs: [
             ethersUtils.getSignerAddress(), // from 参数，当前用户地址
             transfer.to, // to 参数
@@ -161,17 +161,17 @@ async function batchERC20Transfer() {
           target: transfer.tokenAddress,
           data,
           abi: ERC20_ABI,
-          functionName: "transferFrom",
+          functionName: 'transferFrom',
           executeArgs: [
             ethersUtils.getSignerAddress(),
             transfer.to,
             transfer.amount,
           ],
         };
-      })
+      }),
     );
 
-    console.log("开始执行批量转账...");
+    console.log('开始执行批量转账...');
     // 执行批量转账
     const results = await ethersUtils.batchWriteCall(calls);
     console.log(results);
@@ -192,7 +192,7 @@ async function batchERC20Transfer() {
     //   }
     // });
   } catch (error: any) {
-    console.error("批量转账失败:", error.message);
+    console.error('批量转账失败:', error.message);
   }
 }
 

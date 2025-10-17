@@ -1,9 +1,9 @@
-import { ethers } from "ethers";
-import { EthersLogSyncHelper } from "./ethersLogSyncHelper";
-import IEVM2EVMOnRamp from "../web3config/abis/IEVM2EVMOnRamp.json";
-import IEVM2EVMOffRamp from "../web3config/abis/IEVM2EVMOffRamp.json";
-import IRouterClientABI from "../web3config/abis/IRouterClient.json";
-import { memoryCache } from "../dbUtils/MemoryCache";
+import { ethers } from 'ethers';
+import { EthersLogSyncHelper } from './ethersLogSyncHelper';
+import IEVM2EVMOnRamp from '../web3config/abis/IEVM2EVMOnRamp.json';
+import IEVM2EVMOffRamp from '../web3config/abis/IEVM2EVMOffRamp.json';
+import IRouterClientABI from '../web3config/abis/IRouterClient.json';
+import { memoryCache } from '../dbUtils/MemoryCache';
 
 /**
  * CCIP日志同步助手类
@@ -21,7 +21,7 @@ export class CCIPLogHelper extends EthersLogSyncHelper {
       chain_selector?: string;
       sqlite_path?: string;
       postgres_path?: string;
-    }
+    },
   ) {
     super(rpc_url, {
       sqlite_path: configs?.sqlite_path,
@@ -30,7 +30,7 @@ export class CCIPLogHelper extends EthersLogSyncHelper {
 
     if (!ethers.isAddress(configs?.router_address)) {
       const error_msg =
-        "Invalid router address: " + String(configs?.router_address);
+        'Invalid router address: ' + String(configs?.router_address);
       throw new Error(error_msg);
     }
 
@@ -42,16 +42,16 @@ export class CCIPLogHelper extends EthersLogSyncHelper {
    * 获取 OnRamp 地址
    * @private
    */
-  @memoryCache(60 * 60 * 24, "CCIPLogHelper")
+  @memoryCache(60 * 60 * 24, 'CCIPLogHelper')
   private async getOnRampAddress(): Promise<string> {
     if (!this.chain_selector) {
-      throw new Error("chain_selector is required for OnRamp");
+      throw new Error('chain_selector is required for OnRamp');
     }
 
     const router_contract = new ethers.Contract(
       this.router_address,
       IRouterClientABI,
-      this.web3
+      this.web3,
     );
 
     try {
@@ -59,12 +59,12 @@ export class CCIPLogHelper extends EthersLogSyncHelper {
 
       if (!on_ramp || on_ramp === ethers.ZeroAddress) {
         throw new Error(
-          `OnRamp not found for chain selector: ${this.chain_selector}`
+          `OnRamp not found for chain selector: ${this.chain_selector}`,
         );
       }
 
       console.log(
-        `OnRamp address for chain ${this.chain_selector}: ${on_ramp}`
+        `OnRamp address for chain ${this.chain_selector}: ${on_ramp}`,
       );
       return on_ramp;
     } catch (error: unknown) {
@@ -78,33 +78,33 @@ export class CCIPLogHelper extends EthersLogSyncHelper {
    * 获取 OffRamp 地址
    * @private
    */
-  @memoryCache(60 * 60 * 24, "CCIPLogHelper")
+  @memoryCache(60 * 60 * 24, 'CCIPLogHelper')
   private async getOffRampAddress(): Promise<string> {
     if (!this.chain_selector) {
-      throw new Error("chain_selector is required for OffRamp");
+      throw new Error('chain_selector is required for OffRamp');
     }
 
     const router_contract = new ethers.Contract(
       this.router_address,
       IRouterClientABI,
-      this.web3
+      this.web3,
     );
 
     try {
       const off_ramps = await router_contract.getOffRamps();
 
       const matching_off_ramp = off_ramps.find(
-        (off_ramp: any) => off_ramp[0].toString() === this.chain_selector
+        (off_ramp: any) => off_ramp[0].toString() === this.chain_selector,
       );
 
       if (!matching_off_ramp) {
         throw new Error(
-          `OffRamp not found for chain selector: ${this.chain_selector}`
+          `OffRamp not found for chain selector: ${this.chain_selector}`,
         );
       }
 
       console.log(
-        `OffRamp address for chain ${this.chain_selector}: ${matching_off_ramp[1]}`
+        `OffRamp address for chain ${this.chain_selector}: ${matching_off_ramp[1]}`,
       );
       return matching_off_ramp[1];
     } catch (error: unknown) {
@@ -123,7 +123,7 @@ export class CCIPLogHelper extends EthersLogSyncHelper {
     from_address?: string;
     to_address?: string;
   }) {
-    console.log("Syncing CCIPSendRequested events...");
+    console.log('Syncing CCIPSendRequested events...');
 
     const on_ramp = await this.getOnRampAddress();
 
@@ -141,14 +141,14 @@ export class CCIPLogHelper extends EthersLogSyncHelper {
           const receiver = message.receiver.toLowerCase();
           const sender = message.sender.toLowerCase();
 
-          return `${receiver}_${sender}_${nonce}`;
+          return `${receiver}_${log.blockNumber}_${nonce}`;
         }
         // 如果提取失败，回退到默认格式
-        const log_name = "name" in log ? log.name : "CCIPSendRequested";
+        const log_name = 'name' in log ? log.name : 'CCIPSendRequested';
         return `${log_name}_${log.blockNumber}_${nonce}`;
       } catch (error) {
         // 出错时使用默认格式
-        const log_name = "name" in log ? log.name : "CCIPSendRequested";
+        const log_name = 'name' in log ? log.name : 'CCIPSendRequested';
         return `${log_name}_${log.blockNumber}_${nonce}`;
       }
     };
@@ -156,14 +156,14 @@ export class CCIPLogHelper extends EthersLogSyncHelper {
     const result = await this.syncLogs({
       contract_address: on_ramp,
       abi: IEVM2EVMOnRamp,
-      event_name: "CCIPSendRequested",
+      event_name: 'CCIPSendRequested',
       start_block: params?.start_block,
       filter,
       key_generator,
     });
 
     console.log(
-      `Synced ${result.synced_logs} CCIPSendRequested events from block ${result.from_block} to ${result.to_block}`
+      `Synced ${result.synced_logs} CCIPSendRequested events from block ${result.from_block} to ${result.to_block}`,
     );
 
     return result;
@@ -177,7 +177,7 @@ export class CCIPLogHelper extends EthersLogSyncHelper {
     start_block?: number;
     message_id?: string;
   }) {
-    console.log("Syncing ExecutionStateChanged events...");
+    console.log('Syncing ExecutionStateChanged events...');
 
     const off_ramp = await this.getOffRampAddress();
 
@@ -201,11 +201,11 @@ export class CCIPLogHelper extends EthersLogSyncHelper {
           return message_id.toString();
         }
         // 如果提取失败，回退到默认格式
-        const log_name = "name" in log ? log.name : "ExecutionStateChanged";
+        const log_name = 'name' in log ? log.name : 'ExecutionStateChanged';
         return `${log_name}_${log.blockNumber}_${nonce}`;
       } catch (error) {
         // 出错时使用默认格式
-        const log_name = "name" in log ? log.name : "ExecutionStateChanged";
+        const log_name = 'name' in log ? log.name : 'ExecutionStateChanged';
         return `${log_name}_${log.blockNumber}_${nonce}`;
       }
     };
@@ -213,14 +213,14 @@ export class CCIPLogHelper extends EthersLogSyncHelper {
     const result = await this.syncLogs({
       contract_address: off_ramp,
       abi: IEVM2EVMOffRamp,
-      event_name: "ExecutionStateChanged",
+      event_name: 'ExecutionStateChanged',
       start_block: params?.start_block,
       filter,
       key_generator,
     });
 
     console.log(
-      `Synced ${result.synced_logs} ExecutionStateChanged events from block ${result.from_block} to ${result.to_block}`
+      `Synced ${result.synced_logs} ExecutionStateChanged events from block ${result.from_block} to ${result.to_block}`,
     );
 
     return result;
@@ -238,7 +238,7 @@ export class CCIPLogHelper extends EthersLogSyncHelper {
 
   async getRecentOffRampDBLogs(limit: number = 100) {
     const db = await this.getOffRampDB();
-    return db.getWithPrefix("ExecutionStateChanged", {
+    return db.getWithPrefix('ExecutionStateChanged', {
       limit,
     });
   }

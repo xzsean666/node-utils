@@ -3,72 +3,103 @@
 # Function to check and install pm2
 check_and_install_pm2() {
     if ! command -v pm2 &> /dev/null; then
-        echo "pm2 未安装。尝试使用 npm 进行全局安装..."
+        echo "pm2 not installed. Attempting global installation using npm..."
         if command -v npm &> /dev/null; then
             npm install pm2 -g
             if [ $? -ne 0 ]; then
-                echo "npm 安装 pm2 失败。尝试使用 yarn..."
+                echo "npm install pm2 failed. Trying yarn..."
                 if command -v yarn &> /dev/null; then
                     yarn global add pm2
                     if [ $? -ne 0 ]; then
-                        echo "yarn 安装 pm2 失败。尝试使用 pnpm..."
+                        echo "yarn install pm2 failed. Trying pnpm..."
                         if command -v pnpm &> /dev/null; then
                             pnpm install pm2 -g
                             if [ $? -ne 0 ]; then
-                                echo "pnpm 安装 pm2 失败。请手动安装 pm2 (npm install -g pm2, yarn global add pm2, 或 pnpm install -g pm2)。"
+                                echo "pnpm install pm2 failed. Please install pm2 manually (npm install -g pm2, yarn global add pm2, or pnpm install -g pm2)."
                                 exit 1
                             fi
                         else
-                            echo "未找到 pnpm 命令。请手动安装 pm2。"
+                            echo "pnpm command not found. Please install pm2 manually."
                             exit 1
                         fi
                     fi
                 else
-                    echo "未找到 yarn 命令。请手动安装 pm2。"
+                    echo "yarn command not found. Please install pm2 manually."
                     exit 1
                 fi
             fi
         else
-            echo "未找到 npm 命令。请手动安装 pm2。"
+            echo "npm command not found. Please install pm2 manually."
             exit 1
         fi
-        # 再次检查是否安装成功
+        # Check if installation was successful
         if ! command -v pm2 &> /dev/null; then
-            echo "pm2 安装失败，请手动安装。"
+            echo "pm2 installation failed, please install manually."
             exit 1
         fi
-        echo "pm2 安装成功！"
+        echo "pm2 installed successfully!"
+    fi
+}
+
+# Function to setup PM2 startup (run only once)
+setup_pm2_startup() {
+    # Check if pm2 startup is already configured
+    if ! pm2 startup 2>&1 | grep -q "already configured"; then
+        echo "Configuring pm2 startup script..."
+        echo "Note: You may need to run the following command with sudo if prompted:"
+        pm2 startup
+        
+        if [ $? -ne 0 ]; then
+            echo "Warning: pm2 startup configuration may require manual intervention."
+            echo "Please check the output above and run the suggested command if needed."
+        fi
     fi
 }
 
 # Function to build PM2 start command
 build_pm2_command() {
     local app_name="$1"
-    local start_path="$2"
-    local cmd="pm2 start \"$start_path\" --name \"$app_name\""
+    local start_command="$2"
+    local cmd=""
     
-    # Add basic node arguments
-    cmd="$cmd --node-args=\"--max-old-space-size=4096\""
+    # Check if command is a .js/.ts file (Node.js app)
+    if [[ "$start_command" =~ \.(js|ts|mjs|cjs)$ ]]; then
+        # Node.js application
+        cmd="pm2 start \"$start_command\" --name \"$app_name\" --node-args=\"--max-old-space-size=4096\""
+    else
+        # For binaries and scripts with arguments, extract the binary and args
+        local binary=$(echo "$start_command" | awk '{print $1}')
+        local args=$(echo "$start_command" | cut -d' ' -f2-)
+        
+        # Use -- to pass arguments to the binary itself
+        if [ -n "$args" ] && [ "$args" != "$binary" ]; then
+            cmd="pm2 start \"$binary\" --name \"$app_name\" -- $args"
+        else
+            cmd="pm2 start \"$binary\" --name \"$app_name\""
+        fi
+    fi
     
     echo "$cmd"
 }
 
 # Check if parameters are provided
 if [ $# -eq 0 ]; then
-    echo "请提供参数: --start <启动路径> 或 --stop 或 --restart [启动路径] 或 --status 或 --logs"
+    echo "Please provide parameters: --start <command> or --stop or --restart [command] or --status or --logs"
     echo ""
-    echo "用法:"
-    echo "  $0 --start <启动路径>      启动 bot (例如: $0 --start dist/main.js)"
-    echo "  $0 --stop                 停止 bot"
-    echo "  $0 --restart              重启已运行的 bot"
-    echo "  $0 --restart <启动路径>    重启 bot 或启动新 bot (如果未运行)"
-    echo "  $0 --status               查看 bot 状态"
-    echo "  $0 --logs [行数]           查看 bot 日志 (默认显示最近50行)"
+    echo "Usage:"
+    echo "  $0 --start <command>       Start bot (e.g.: $0 --start 'node dist/main.js')"
+    echo "  $0 --stop                  Stop bot and remove from startup"
+    echo "  $0 --restart               Restart running bot"
+    echo "  $0 --restart <command>     Restart bot or start new bot (if not running)"
+    echo "  $0 --status                Check bot status"
+    echo "  $0 --logs [lines]          View bot logs (default: last 50 lines)"
     echo ""
-    echo "示例:"
-    echo "  $0 --start dist/main.js"
-    echo "  $0 --start src/index.js"
-    echo "  $0 --start bot.js"
+    echo "Examples:"
+    echo "  $0 --start 'node dist/main.js'         # Node.js application"
+    echo "  $0 --start dist/main.js                # Auto-detect Node.js file"
+    echo "  $0 --start 'python3 bot.py'            # Python application"
+    echo "  $0 --start './my-script.sh'            # Bash script"
+    echo "  $0 --start 'npm run start'             # NPM script"
     echo "  $0 --logs"
     echo "  $0 --logs 100"
     exit 1
@@ -81,21 +112,15 @@ APP_NAME_FILE="bot.name"
 
 case "$1" in
     --start)
-        # Check if start path is provided
+        # Check if start command is provided
         if [ -z "$2" ]; then
-            echo "错误：请提供启动路径"
-            echo "用法: $0 --start <启动路径>"
-            echo "例如: $0 --start dist/main.js"
+            echo "Error: Please provide start command"
+            echo "Usage: $0 --start <command>"
+            echo "Example: $0 --start 'node dist/main.js'"
             exit 1
         fi
         
-        START_PATH="$2"
-        
-        # Check if start file exists
-        if [ ! -f "$START_PATH" ]; then
-            echo "错误：找不到启动文件 '$START_PATH'"
-            exit 1
-        fi
+        START_COMMAND="$2"
         
         # Check and install pm2
         check_and_install_pm2
@@ -104,8 +129,8 @@ case "$1" in
         if [ -f "$APP_NAME_FILE" ]; then
             EXISTING_NAME=$(cat "$APP_NAME_FILE")
             if pm2 list | grep -q "$EXISTING_NAME"; then
-                echo "Bot $EXISTING_NAME 已在运行中。"
-                echo "使用 '$0 --stop' 停止，或使用 '$0 --restart' 重启"
+                echo "Bot $EXISTING_NAME is already running."
+                echo "Use '$0 --stop' to stop, or '$0 --restart' to restart"
                 exit 1
             fi
         fi
@@ -114,22 +139,29 @@ case "$1" in
         TIMESTAMP=$(date '+%Y%m%d%H%M%S')
         APP_NAME="${DIR_NAME}-bot-${TIMESTAMP}"
         echo "$APP_NAME" > "$APP_NAME_FILE"
-        echo "Bot 名称已记录到 $APP_NAME_FILE: $APP_NAME"
+        echo "Bot name saved to $APP_NAME_FILE: $APP_NAME"
+
+        # Setup PM2 startup if not already configured
+        setup_pm2_startup
 
         # Build and execute PM2 command
-        PM2_CMD=$(build_pm2_command "$APP_NAME" "$START_PATH")
-        echo "执行命令: $PM2_CMD"
+        PM2_CMD=$(build_pm2_command "$APP_NAME" "$START_COMMAND")
+        echo "Executing command: $PM2_CMD"
         eval "$PM2_CMD"
         
         if [ $? -eq 0 ]; then
-            echo "Bot 已使用 pm2 启动："
-            echo "  名称: $APP_NAME"
-            echo "  启动文件: $START_PATH"
-            echo "  模式: fork"
+            # Save PM2 process list for auto-start on boot
+            echo "Saving PM2 process list for auto-start on boot..."
+            pm2 save
+            
+            echo "Bot started with pm2:"
+            echo "  Name: $APP_NAME"
+            echo "  Command: $START_COMMAND"
+            echo "  Auto-start: enabled"
             echo ""
             pm2 list
         else
-            echo "pm2 启动 bot 失败。"
+            echo "Failed to start bot with pm2."
             rm "$APP_NAME_FILE" # Clean up name file if start fails
             exit 1
         fi
@@ -138,8 +170,8 @@ case "$1" in
     --stop)
         # Check if name file exists
         if [ ! -f "$APP_NAME_FILE" ]; then
-            echo "找不到 bot 名称文件 ($APP_NAME_FILE)。"
-            echo "请手动查找并停止 pm2 进程:"
+            echo "Bot name file not found ($APP_NAME_FILE)."
+            echo "Please manually find and stop pm2 process:"
             echo "  pm2 list"
             echo "  pm2 stop <name|id>"
             echo "  pm2 delete <name|id>"
@@ -151,20 +183,24 @@ case "$1" in
 
         # Check if the process exists in pm2 list
         if ! pm2 list | grep -q "$APP_NAME"; then
-            echo "警告：pm2 列表中找不到名为 $APP_NAME 的进程。"
-            echo "可能已经被手动停止，清理名称文件..."
+            echo "Warning: Process $APP_NAME not found in pm2 list."
+            echo "It may have been stopped manually. Cleaning up name file..."
             rm "$APP_NAME_FILE"
             exit 0
         fi
 
         # Stop application with pm2
-        echo "正在停止 pm2 bot: $APP_NAME..."
+        echo "Stopping pm2 bot: $APP_NAME..."
         pm2 stop "$APP_NAME"
         pm2 delete "$APP_NAME" # Delete from pm2 list after stopping
 
+        # Update saved PM2 process list (removes from auto-start)
+        echo "Removing from auto-start list..."
+        pm2 save --force
+        
         # Remove name file
         rm "$APP_NAME_FILE"
-        echo "pm2 bot $APP_NAME 已停止并从 pm2 列表中移除。"
+        echo "pm2 bot $APP_NAME stopped and removed from pm2 list and auto-start."
         ;;
 
     --restart)
@@ -173,67 +209,71 @@ case "$1" in
             APP_NAME=$(cat "$APP_NAME_FILE")
             if pm2 list | grep -q "$APP_NAME"; then
                 # Bot is running, restart it
-                echo "正在重启 pm2 bot: $APP_NAME..."
+                echo "Restarting pm2 bot: $APP_NAME..."
                 pm2 restart "$APP_NAME" --update-env
 
                 if [ $? -eq 0 ]; then
-                    echo "pm2 bot $APP_NAME 已重启。"
+                    # Save PM2 process list to ensure auto-start is maintained
+                    pm2 save
+                    
+                    echo "pm2 bot $APP_NAME restarted."
                     echo ""
                     pm2 list
                 else
-                    echo "pm2 重启 bot 失败。"
+                    echo "Failed to restart pm2 bot."
                     exit 1
                 fi
                 exit 0
             else
                 # Bot name file exists but process not running
-                echo "警告：找到 bot 名称文件但进程未运行，清理旧的名称文件..."
+                echo "Warning: Bot name file found but process not running. Cleaning up old name file..."
                 rm "$APP_NAME_FILE"
             fi
         fi
 
-        # No running bot found, check if start path is provided
+        # No running bot found, check if start command is provided
         if [ -z "$2" ]; then
-            echo "未找到正在运行的 bot，且未提供启动路径。"
-            echo "请使用以下命令之一："
-            echo "  $0 --restart <启动路径>    # 启动新的 bot"
-            echo "  $0 --start <启动路径>      # 启动新的 bot"
+            echo "No running bot found and no start command provided."
+            echo "Please use one of the following commands:"
+            echo "  $0 --restart <command>    # Start new bot"
+            echo "  $0 --start <command>      # Start new bot"
             exit 1
         fi
 
-        START_PATH="$2"
-        
-        # Check if start file exists
-        if [ ! -f "$START_PATH" ]; then
-            echo "错误：找不到启动文件 '$START_PATH'"
-            exit 1
-        fi
+        START_COMMAND="$2"
 
         # Check and install pm2
         check_and_install_pm2
 
-        echo "未找到正在运行的 bot，启动新的 bot..."
+        echo "No running bot found, starting new bot..."
 
         # Generate dynamic name and save it
         TIMESTAMP=$(date '+%Y%m%d%H%M%S')
         APP_NAME="${DIR_NAME}-bot-${TIMESTAMP}"
         echo "$APP_NAME" > "$APP_NAME_FILE"
-        echo "Bot 名称已记录到 $APP_NAME_FILE: $APP_NAME"
+        echo "Bot name saved to $APP_NAME_FILE: $APP_NAME"
+
+        # Setup PM2 startup if not already configured
+        setup_pm2_startup
 
         # Build and execute PM2 command
-        PM2_CMD=$(build_pm2_command "$APP_NAME" "$START_PATH")
-        echo "执行命令: $PM2_CMD"
+        PM2_CMD=$(build_pm2_command "$APP_NAME" "$START_COMMAND")
+        echo "Executing command: $PM2_CMD"
         eval "$PM2_CMD"
         
         if [ $? -eq 0 ]; then
-            echo "Bot 已使用 pm2 启动："
-            echo "  名称: $APP_NAME"
-            echo "  启动文件: $START_PATH"
-            echo "  模式: fork"
+            # Save PM2 process list for auto-start on boot
+            echo "Saving PM2 process list for auto-start on boot..."
+            pm2 save
+            
+            echo "Bot started with pm2:"
+            echo "  Name: $APP_NAME"
+            echo "  Command: $START_COMMAND"
+            echo "  Auto-start: enabled"
             echo ""
             pm2 list
         else
-            echo "pm2 启动 bot 失败。"
+            echo "Failed to start bot with pm2."
             rm "$APP_NAME_FILE" # Clean up name file if start fails
             exit 1
         fi
@@ -242,18 +282,18 @@ case "$1" in
     --status)
         if [ -f "$APP_NAME_FILE" ]; then
             APP_NAME=$(cat "$APP_NAME_FILE")
-            echo "当前 bot 名称: $APP_NAME"
+            echo "Current bot name: $APP_NAME"
             echo ""
             if pm2 list | grep -q "$APP_NAME"; then
-                echo "Bot 状态:"
+                echo "Bot status:"
                 pm2 show "$APP_NAME"
             else
-                echo "Bot 未在 pm2 中运行。"
+                echo "Bot is not running in pm2."
             fi
         else
-            echo "未找到 bot 名称文件，可能没有通过此脚本启动的 bot。"
+            echo "Bot name file not found. No bot may have been started via this script."
             echo ""
-            echo "所有 pm2 进程:"
+            echo "All pm2 processes:"
             pm2 list
         fi
         ;;
@@ -265,24 +305,24 @@ case "$1" in
             if pm2 list | grep -q "$APP_NAME"; then
                 # Get lines parameter (default 50)
                 LINES="${2:-50}"
-                echo "显示 bot $APP_NAME 的最近 $LINES 行日志:"
+                echo "Showing last $LINES lines of logs for bot $APP_NAME:"
                 echo "======================================"
                 pm2 logs "$APP_NAME" --lines "$LINES"
             else
-                echo "Bot $APP_NAME 未在 pm2 中运行。"
+                echo "Bot $APP_NAME is not running in pm2."
                 echo ""
-                echo "所有 pm2 进程的日志:"
+                echo "All pm2 process logs:"
                 pm2 logs --lines "${2:-50}"
             fi
         else
-            echo "未找到 bot 名称文件，显示所有 pm2 进程的日志:"
+            echo "Bot name file not found. Showing all pm2 process logs:"
             echo "======================================"
             pm2 logs --lines "${2:-50}"
         fi
         ;;
 
     *)
-        echo "无效的参数。请使用 --start <启动路径> 或 --stop 或 --restart 或 --status 或 --logs"
+        echo "Invalid parameter. Please use --start <command> or --stop or --restart or --status or --logs"
         exit 1
         ;;
 esac

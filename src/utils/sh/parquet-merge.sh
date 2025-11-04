@@ -166,7 +166,7 @@ else
 fi
 
 if ! command -v duckdb >/dev/null 2>&1; then
-  echo "❌ 请先安装 duckdb (sudo apt install duckdb 或 brew install duckdb)"
+  echo "❌ 请先安装 duckdb (curl https://install.duckdb.org | sh)"
   exit 1
 fi
 

@@ -6,7 +6,7 @@ export class EthersTxBatchHelper extends EthersTxHelper {
   public batch_call_address;
   constructor(NODE_PROVIDER: string | ethers.BrowserProvider, config?: any) {
     super(NODE_PROVIDER, config);
-    this.batch_call_address = config?.batchCallAddress;
+    this.batch_call_address = config?.batch_call_address;
   }
   async deployBatchCallContract() {
     const result = await this.deployContract(batchCallABI, batchCallBytesCode);

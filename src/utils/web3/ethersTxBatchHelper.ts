@@ -170,6 +170,94 @@ export class EthersTxBatchHelper extends EthersTxHelper {
 
     return results;
   }
+
+  /**
+   * 通过合约批量查询多个地址的 ETH 原生代币余额（减少 RPC 调用）
+   * @param addresses 要查询的地址数组
+   * @param blockNumber 可选，指定区块号，默认为 'latest'
+   * @param batchLimit 可选，每批处理的地址数量，默认为 200
+   * @returns 返回每个地址的余额信息
+   */
+  async batchGetNativeBalances(
+    addresses: string[],
+    blockNumber?: number | 'latest',
+    batchLimit: number = 200,
+  ): Promise<
+    Array<{
+      address: string;
+      balance: bigint;
+      success: boolean;
+    }>
+  > {
+    if (!this.batch_call_address) {
+      throw new Error('BatchCallAddress not provided!');
+    }
+
+    const results: Array<{
+      address: string;
+      balance: bigint;
+      success: boolean;
+    }> = [];
+
+    // 按 batchLimit 分批处理
+    for (let i = 0; i < addresses.length; i += batchLimit) {
+      const batch_addresses = addresses.slice(i, i + batchLimit);
+      console.log(
+        `处理批次 ${Math.floor(i / batchLimit) + 1}, 大小: ${batch_addresses.length}`,
+      );
+
+      try {
+        // 调用合约的 batchGetBalances 方法
+        const balances = await this.callReadContract<bigint[]>({
+          target: this.batch_call_address,
+          abi: [
+            {
+              inputs: [
+                {
+                  internalType: 'address[]',
+                  name: 'addresses',
+                  type: 'address[]',
+                },
+              ],
+              name: 'batchGetBalances',
+              outputs: [
+                {
+                  internalType: 'uint256[]',
+                  name: 'balances',
+                  type: 'uint256[]',
+                },
+              ],
+              stateMutability: 'view',
+              type: 'function',
+            },
+          ],
+          function_name: 'batchGetBalances',
+          args: [batch_addresses],
+          blockTag: blockNumber,
+        });
+
+        // 格式化返回结果
+        const batch_results = batch_addresses.map((address, index) => ({
+          address,
+          balance: balances[index] || 0n,
+          success: true,
+        }));
+
+        results.push(...batch_results);
+      } catch (error: any) {
+        console.error(`批量查询余额失败:`, error);
+        // 如果批量查询失败，标记所有地址为失败
+        const failed_results = batch_addresses.map((address) => ({
+          address,
+          balance: 0n,
+          success: false,
+        }));
+        results.push(...failed_results);
+      }
+    }
+
+    return results;
+  }
 }
 
 export const batchCallABI = [
@@ -283,6 +371,25 @@ export const batchCallABI = [
         internalType: 'bytes[]',
         name: 'results',
         type: 'bytes[]',
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'address[]',
+        name: 'addresses',
+        type: 'address[]',
+      },
+    ],
+    name: 'batchGetBalances',
+    outputs: [
+      {
+        internalType: 'uint256[]',
+        name: 'balances',
+        type: 'uint256[]',
       },
     ],
     stateMutability: 'view',

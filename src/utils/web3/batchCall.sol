@@ -97,4 +97,19 @@ contract BatchCall is Ownable {
         authorizedCallers[caller] = false;
         emit CallerRevoked(caller);
     }
+
+    /**
+     * 批量查询多个地址的 ETH 原生代币余额
+     * @param addresses 要查询的地址数组
+     * @return balances 返回每个地址对应的余额数组（wei）
+     */
+    function batchGetBalances(
+        address[] calldata addresses
+    ) external view returns (uint256[] memory balances) {
+        balances = new uint256[](addresses.length);
+        
+        for (uint256 i = 0; i < addresses.length; i++) {
+            balances[i] = addresses[i].balance;
+        }
+    }
 }

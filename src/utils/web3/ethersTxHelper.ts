@@ -7,7 +7,7 @@ export class EthersTxHelper {
 
   constructor(NODE_PROVIDER: string | ethers.BrowserProvider, config?: any) {
     this.NODE_PROVIDER = NODE_PROVIDER;
-    this.private_key = config?.privateKey;
+    this.private_key = config?.private_key;
 
     if (typeof NODE_PROVIDER == 'string') {
       this.web3 = new ethers.JsonRpcProvider(NODE_PROVIDER);

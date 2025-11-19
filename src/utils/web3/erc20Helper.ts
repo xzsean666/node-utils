@@ -17,7 +17,7 @@ export class ERC20Helper extends EthersTxBatchHelper {
       target: token_address,
       abi: ERC20_ABI,
       function_name: 'name',
-      args: [],
+      execute_args: [],
     });
   }
 
@@ -31,7 +31,7 @@ export class ERC20Helper extends EthersTxBatchHelper {
       target: token_address,
       abi: ERC20_ABI,
       function_name: 'symbol',
-      args: [],
+      execute_args: [],
     });
   }
 
@@ -45,7 +45,7 @@ export class ERC20Helper extends EthersTxBatchHelper {
       target: token_address,
       abi: ERC20_ABI,
       function_name: 'decimals',
-      args: [],
+      execute_args: [],
     });
   }
 
@@ -59,7 +59,7 @@ export class ERC20Helper extends EthersTxBatchHelper {
       target: token_address,
       abi: ERC20_ABI,
       function_name: 'totalSupply',
-      args: [],
+      execute_args: [],
     });
   }
 
@@ -109,7 +109,7 @@ export class ERC20Helper extends EthersTxBatchHelper {
       target: token_address,
       abi: ERC20_ABI,
       function_name: 'balanceOf',
-      args: [wallet_address],
+      execute_args: [wallet_address],
       blockTag: block_number,
     });
   }
@@ -176,7 +176,7 @@ export class ERC20Helper extends EthersTxBatchHelper {
       target: token_address,
       abi: ERC20_ABI,
       function_name: 'allowance',
-      args: [owner, spender],
+      execute_args: [owner, spender],
       blockTag: block_number,
     });
   }

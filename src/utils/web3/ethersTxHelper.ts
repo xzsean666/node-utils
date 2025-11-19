@@ -112,18 +112,18 @@ export class EthersTxHelper {
     target: string;
     abi: any[];
     function_name: string;
-    args?: unknown[];
+    execute_args?: unknown[];
     blockTag?: number | bigint | 'latest';
   }): Promise<T> {
-    const { target, abi, function_name, args = [], blockTag } = opts;
+    const { target, abi, function_name, execute_args = [], blockTag } = opts;
     const contract = new ethers.Contract(target, abi, this.web3);
 
     try {
       const fn = contract.getFunction(function_name);
       if (blockTag !== undefined) {
-        return (await fn(...args, { blockTag })) as T;
+        return (await fn(...execute_args, { blockTag })) as T;
       } else {
-        return (await fn(...args)) as T;
+        return (await fn(...execute_args)) as T;
       }
     } catch (error: any) {
       throw new Error(

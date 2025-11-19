@@ -50,7 +50,7 @@ export class EthersTxBatchHelper extends EthersTxHelper {
         target: this.batch_call_address,
         abi: i_batch_call_abi,
         function_name: 'batchStaticCall',
-        args: [
+        execute_args: [
           batch_calls.map((call) => ({
             target: call.target,
             callData: call.data,
@@ -232,7 +232,7 @@ export class EthersTxBatchHelper extends EthersTxHelper {
             },
           ],
           function_name: 'batchGetBalances',
-          args: [batch_addresses],
+          execute_args: [batch_addresses],
           blockTag: blockNumber,
         });
 

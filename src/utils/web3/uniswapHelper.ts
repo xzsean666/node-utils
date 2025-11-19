@@ -69,7 +69,7 @@ export class UniswapHelper extends ERC20Helper {
       target: this.uniswap_v2_router_address,
       abi: UNISWAP_V2_ROUTER_ABI,
       function_name: 'getAmountsOut',
-      args: [amountIn, path],
+      execute_args: [amountIn, path],
     });
 
     return amounts[1];
@@ -96,7 +96,7 @@ export class UniswapHelper extends ERC20Helper {
       target: this.uniswap_v2_router_address,
       abi: UNISWAP_V2_ROUTER_ABI,
       function_name: 'getAmountsIn',
-      args: [amountOut, path],
+      execute_args: [amountOut, path],
     });
 
     return amounts[0];
@@ -556,7 +556,7 @@ export class UniswapHelper extends ERC20Helper {
       target: this.uniswap_v3_factory_address,
       abi: UNISWAP_V3_FACTORY_ABI,
       function_name: 'getPool',
-      args: [tokenA, tokenB, fee],
+      execute_args: [tokenA, tokenB, fee],
     });
 
     return pool_address;
@@ -589,7 +589,7 @@ export class UniswapHelper extends ERC20Helper {
         target: poolAddress,
         abi: UNISWAP_V3_POOL_ABI,
         function_name: 'liquidity',
-        args: [],
+        execute_args: [],
       });
       return liquidity;
     } catch (error) {

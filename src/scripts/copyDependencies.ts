@@ -44,23 +44,28 @@ if (!fs.existsSync(targetDir)) {
 const processedFiles = new Set<string>();
 
 // 递归分析文件依赖并复制
-function analyzeDependencies(filePath: string, depth = 0, maxDepth = 10) {
+function analyzeDependencies(filePath: string, depth = 0, maxDepth = 10, isEntryFile = false) {
   if (processedFiles.has(filePath) || depth > maxDepth) return;
   processedFiles.add(filePath);
 
   const content = fs.readFileSync(filePath, 'utf-8');
   const relativePath = path.relative(sourceDir, filePath);
   const relativePathFixed = relativePath.replace(new RegExp(`^${fixDir}/`), '');
-  // console.log('fixDir', fixDir);
-  // console.log('relativePath', relativePath);
-  // console.log('relativePathFixed', relativePathFixed);
-  const targetPath = path.join(targetDir, relativePathFixed);
+  
+  // 如果是入口文件，将其重命名为 index.ts
+  let targetPath: string;
+  if (isEntryFile) {
+    const ext = path.extname(relativePathFixed);
+    targetPath = path.join(targetDir, `index${ext}`);
+  } else {
+    targetPath = path.join(targetDir, relativePathFixed);
+  }
 
   // 创建目标文件所在的目录
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   fs.copyFileSync(filePath, targetPath);
 
-  console.log(`Copied [Depth ${depth}]: ${relativePath}`);
+  console.log(`Copied [Depth ${depth}]: ${relativePath}${isEntryFile ? ' -> index' + path.extname(relativePath) : ''}`);
 
   // 使用正则表达式查找所有类型的导入语句
   const importRegexes = [
@@ -115,6 +120,6 @@ if (!fs.existsSync(startFile)) {
   process.exit(1);
 }
 
-analyzeDependencies(startFile);
+analyzeDependencies(startFile, 0, 10, true);
 
 console.log('Dependencies copying completed!');

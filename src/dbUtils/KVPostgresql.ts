@@ -31,115 +31,7 @@ interface SaveArrayOptions {
   overwrite?: boolean;
 }
 
-/**
- * PostgreSQL Key-Value 数据库类，支持多种值类型
- *
- * 使用示例：
- *
- * // JSONB 类型 - 支持所有高级功能
- * const jsonbDB = new PGKVDatabase('postgresql://...', 'json_store', 'jsonb');
- * await jsonbDB.put('user:1', { name: 'John', age: 30 });
- * await jsonbDB.merge('user:1', { email: 'john@example.com' });
- *
- * // 高级搜索功能示例
- * // 精确匹配搜索
- * await jsonbDB.searchJson({ contains: { name: 'John' } });
- *
- * // 文本包含搜索（推荐用于搜索功能）
- * await jsonbDB.searchJson({
- *   text_search: [
- *     { path: 'english_only', text: 'legal document', case_sensitive: false }
- *   ],
- *   include_timestamps: true
- * });
- *
- * // 混合搜索条件
- * await jsonbDB.searchJson({
- *   contains: { status: 'active' },
- *   text_search: [{ path: 'content', text: 'search term', case_sensitive: false }],
- *   compare: [{ path: 'priority', operator: '>=', value: 5 }],
- *   limit: 20
- * });
- *
- * // VARCHAR 类型 - 基本字符串操作
- * const stringDB = new PGKVDatabase('postgresql://...', 'string_store', 'varchar');
- * await stringDB.put('name:1', 'John Doe');
- *
- * // INTEGER 类型 - 数值操作
- * const intDB = new PGKVDatabase('postgresql://...', 'int_store', 'integer');
- * await intDB.put('count:1', 42);
- *
- * // BOOLEAN 类型 - 布尔值操作
- * const boolDB = new PGKVDatabase('postgresql://...', 'bool_store', 'boolean');
- * await boolDB.put('active:1', true);
- * await boolDB.findBoolValues(true);
- *
- * // BYTEA 类型 - 二进制数据操作
- * const blobDB = new PGKVDatabase('postgresql://...', 'blob_store', 'bytea');
- * await blobDB.put('file:1', Buffer.from('binary data'));
- *
- * // 新增：时间戳功能使用示例
- *
- * // 1. 获取单个值时包含时间戳
- * const resultWithTimestamp = await jsonbDB.get('user:1', { include_timestamps: true });
- * // 返回: { value: { name: 'John', age: 30 }, created_at: Date, updated_at: Date }
- *
- * // 2. 兼容旧的 expire 参数
- * const result = await jsonbDB.get('user:1', 3600); // 3600秒过期时间
- *
- * // 3. 同时使用过期时间和时间戳选项
- * const resultFull = await jsonbDB.get('user:1', {
- *   expire: 3600,
- *   include_timestamps: true
- * });
- *
- * // 4. 前缀查询时包含时间戳
- * const usersWithTimestamp = await jsonbDB.getWithPrefix('user:', {
- *   include_timestamps: true,
- *   limit: 10
- * });
- * // 返回: [{ key: 'user:1', value: {...}, created_at: Date, updated_at: Date }]
- *
- * // 5. 包含查询时包含时间戳
- * const containsResults = await jsonbDB.getWithContains('user', {
- *   include_timestamps: true,
- *   limit: 5
- * });
- *
- * // 6. 后缀查询时包含时间戳
- * const suffixResults = await jsonbDB.getWithSuffix(':1', {
- *   include_timestamps: true
- * });
- *
- * // 7. 批量获取时包含时间戳
- * const manyResults = await jsonbDB.getMany(['user:1', 'user:2'], {
- *   include_timestamps: true
- * });
- *
- * // 8. 随机数据时包含时间戳
- * const randomResults = await jsonbDB.getRandomData(3, {
- *   include_timestamps: true
- * });
- *
- * // 9. 时间搜索时包含时间戳
- * const timeResults = await jsonbDB.searchByTime({
- *   timestamp: Date.now() - 24 * 60 * 60 * 1000, // 24小时前
- *   type: 'after',
- *   include_timestamps: true,
- *   take: 10
- * });
- *
- * // 10. JSON和时间复合搜索时包含时间戳 (仅JSONB类型)
- * const jsonTimeResults = await jsonbDB.searchJsonByTime(
- *   { contains: { status: 'active' } },
- *   {
- *     timestamp: Date.now() - 7 * 24 * 60 * 60 * 1000, // 7天前
- *     type: 'after',
- *     include_timestamps: true,
- *     take: 20
- *   }
- * );
- */
+
 export class PGKVDatabase {
   db: Repository<KVEntity>;
   private data_source: DataSource;
@@ -486,7 +378,7 @@ export class PGKVDatabase {
    * 使用范围查询充分利用主键索引性能，contains过滤在应用层执行以保持高性能
    * @param prefix 键前缀
    * @param options 查询选项
-   * @returns 匹配前缀的键值对数组
+   * @returns 匹配前缀的键值对对象
    */
   async getWithPrefix<T = any>(
     prefix: string,
@@ -501,12 +393,7 @@ export class PGKVDatabase {
       created_at_before?: number;
     },
   ): Promise<
-    Array<{
-      key: string;
-      value: T;
-      created_at?: Date;
-      updated_at?: Date;
-    }>
+    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
   > {
     await this.ensureInitialized();
 
@@ -595,19 +482,12 @@ export class PGKVDatabase {
       const results = await query_builder.getRawMany();
 
       // 反序列化值
-      let processed_results = results.map((record) => {
-        const result: any = {
-          key: record.key,
-          value: this.deserializeValue(record.value),
-        };
-
-        if (include_timestamps) {
-          result.created_at = record.created_at;
-          result.updated_at = record.updated_at;
-        }
-
-        return result;
-      });
+      let processed_results = results.map((record) => ({
+        key: record.key,
+        value: this.deserializeValue(record.value) as T,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+      }));
 
       // 如果有 contains 条件，在应用层进行高效过滤
       if (contains) {
@@ -631,7 +511,30 @@ export class PGKVDatabase {
         }
       }
 
-      return processed_results;
+      return processed_results.reduce(
+        (
+          acc,
+          record: {
+            key: string;
+            value: T;
+            created_at: Date;
+            updated_at: Date;
+          },
+        ) => {
+          acc[record.key] = include_timestamps
+            ? {
+                value: record.value,
+                created_at: record.created_at,
+                updated_at: record.updated_at,
+              }
+            : record.value;
+          return acc;
+        },
+        {} as Record<
+          string,
+          T | { value: T; created_at: Date; updated_at: Date }
+        >,
+      );
     } catch (error) {
       console.error('getWithPrefix query error:', error);
       throw error;
@@ -643,7 +546,7 @@ export class PGKVDatabase {
    * 注意：此方法性能较差，建议优先使用 getWithPrefix
    * @param substring 键中包含的子串
    * @param options 查询选项
-   * @returns 匹配的键值对数组
+   * @returns 匹配的键值对对象
    */
   async getWithContains<T = any>(
     substring: string,
@@ -655,12 +558,7 @@ export class PGKVDatabase {
       include_timestamps?: boolean;
     },
   ): Promise<
-    Array<{
-      key: string;
-      value: T;
-      created_at?: Date;
-      updated_at?: Date;
-    }>
+    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
   > {
     await this.ensureInitialized();
 
@@ -714,19 +612,31 @@ export class PGKVDatabase {
     try {
       const results = await query_builder.getRawMany();
 
-      return results.map((record) => {
-        const result: any = {
-          key: record.key,
-          value: this.deserializeValue(record.value),
-        };
-
-        if (include_timestamps) {
-          result.created_at = record.created_at;
-          result.updated_at = record.updated_at;
-        }
-
-        return result;
-      });
+      return results.reduce(
+        (
+          acc,
+          record: {
+            key: string;
+            value: any;
+            created_at: Date;
+            updated_at: Date;
+          },
+        ) => {
+          const value = this.deserializeValue(record.value) as T;
+          acc[record.key] = include_timestamps
+            ? {
+                value,
+                created_at: record.created_at,
+                updated_at: record.updated_at,
+              }
+            : value;
+          return acc;
+        },
+        {} as Record<
+          string,
+          T | { value: T; created_at: Date; updated_at: Date }
+        >,
+      );
     } catch (error) {
       console.error('getWithContains query error:', error);
       throw error;
@@ -738,7 +648,7 @@ export class PGKVDatabase {
    * 注意：此方法性能很差，因为无法利用标准B-tree索引
    * @param suffix 键的后缀
    * @param options 查询选项
-   * @returns 匹配的键值对数组
+   * @returns 匹配的键值对对象
    */
   async getWithSuffix<T = any>(
     suffix: string,
@@ -750,12 +660,7 @@ export class PGKVDatabase {
       include_timestamps?: boolean;
     },
   ): Promise<
-    Array<{
-      key: string;
-      value: T;
-      created_at?: Date;
-      updated_at?: Date;
-    }>
+    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
   > {
     await this.ensureInitialized();
 
@@ -809,19 +714,31 @@ export class PGKVDatabase {
     try {
       const results = await query_builder.getRawMany();
 
-      return results.map((record) => {
-        const result: any = {
-          key: record.key,
-          value: this.deserializeValue(record.value),
-        };
-
-        if (include_timestamps) {
-          result.created_at = record.created_at;
-          result.updated_at = record.updated_at;
-        }
-
-        return result;
-      });
+      return results.reduce(
+        (
+          acc,
+          record: {
+            key: string;
+            value: any;
+            created_at: Date;
+            updated_at: Date;
+          },
+        ) => {
+          const value = this.deserializeValue(record.value) as T;
+          acc[record.key] = include_timestamps
+            ? {
+                value,
+                created_at: record.created_at,
+                updated_at: record.updated_at,
+              }
+            : value;
+          return acc;
+        },
+        {} as Record<
+          string,
+          T | { value: T; created_at: Date; updated_at: Date }
+        >,
+      );
     } catch (error) {
       console.error('getWithSuffix query error:', error);
       throw error;
@@ -842,7 +759,9 @@ export class PGKVDatabase {
       offset?: number;
       order_by?: 'ASC' | 'DESC';
     },
-  ): Promise<Array<{ key: string; value: T }>> {
+  ): Promise<
+    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
+  > {
     await this.ensureInitialized();
 
     if (!suffix) {
@@ -864,11 +783,18 @@ export class PGKVDatabase {
     }>(reverse_prefix, options);
 
     // 根据反向键结果获取原始数据
-    if (reverse_results.length === 0) {
-      return [];
+    const reverse_values = Object.values(reverse_results).map((entry) => {
+      if (entry && typeof entry === 'object' && 'value' in (entry as any)) {
+        return (entry as any).value as { original_key: string; value: T };
+      }
+      return entry as { original_key: string; value: T };
+    });
+
+    if (reverse_values.length === 0) {
+      return {};
     }
 
-    const original_keys = reverse_results.map((r) => r.value.original_key);
+    const original_keys = reverse_values.map((r) => r.original_key);
     const original_data = await this.getMany<T>(original_keys);
 
     return original_data;
@@ -943,44 +869,36 @@ export class PGKVDatabase {
       include_timestamps?: boolean;
     },
   ): Promise<
-    Array<{
-      key: string;
-      value: T;
-      created_at?: Date;
-      updated_at?: Date;
-    }>
+    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
   > {
     if (!keys || keys.length === 0) {
-      return [];
+      return {};
     }
     await this.ensureInitialized();
 
-    const { include_timestamps = false } = options || {};
-
-    // 根据是否需要时间戳选择要查询的字段
-    const select_fields: (keyof KVEntity)[] = ['key', 'value'];
-    if (include_timestamps) {
-      select_fields.push('created_at', 'updated_at');
-    }
+    const include_timestamps = options?.include_timestamps === true;
 
     const records = await this.db.findBy({
       key: In(keys),
     });
 
-    // Deserialize values if necessary
-    return records.map((record) => {
-      const result: any = {
-        key: record.key,
-        value: this.deserializeValue(record.value),
-      };
-
-      if (include_timestamps) {
-        result.created_at = record.created_at;
-        result.updated_at = record.updated_at;
-      }
-
-      return result;
-    });
+    return records.reduce(
+      (acc, record) => {
+        const value = this.deserializeValue(record.value) as T;
+        acc[record.key] = include_timestamps
+          ? {
+              value,
+              created_at: record.created_at,
+              updated_at: record.updated_at,
+            }
+          : value;
+        return acc;
+      },
+      {} as Record<
+        string,
+        T | { value: T; created_at: Date; updated_at: Date }
+      >,
+    );
   }
 
   async add(key: string, value: any): Promise<void> {
@@ -1093,24 +1011,46 @@ export class PGKVDatabase {
   }
 
   // 获取所有键值对，支持分页
-  async getAll(offset?: number, limit?: number): Promise<Map<string, any>> {
+  async getAll<T = any>(
+    options?: { 
+      include_timestamps?: boolean; 
+      offset?: number;
+      limit?: number; 
+    },
+  ): Promise<
+    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
+  > {
     await this.ensureInitialized();
-    const options: any = {};
+    const include_timestamps = options?.include_timestamps === true;
+    const find_options: any = {
+      order: { key: 'ASC' },
+    };
 
-    if (typeof offset === 'number') {
-      options.offset = offset;
+    if (typeof options?.offset === 'number') {
+      find_options.skip = options.offset;
     }
 
-    if (typeof limit === 'number') {
-      options.limit = limit;
+    if (typeof options?.limit === 'number') {
+      find_options.take = options.limit;
     }
 
-    const records = await this.db.find(options);
-    return new Map(
-      records.map((record: { key: any; value: any }) => [
-        record.key,
-        record.value,
-      ]),
+    const records = await this.db.find(find_options);
+    return records.reduce(
+      (acc, record) => {
+        const value = this.deserializeValue(record.value) as T;
+        acc[record.key] = include_timestamps
+          ? {
+              value,
+              created_at: record.created_at,
+              updated_at: record.updated_at,
+            }
+          : value;
+        return acc;
+      },
+      {} as Record<
+        string,
+        T | { value: T; created_at: Date; updated_at: Date }
+      >,
     );
   }
 
@@ -1707,8 +1647,7 @@ export class PGKVDatabase {
         const remaining_space = batch_size - last_batch.length;
 
         // Prepare all statements before execution for better performance
-        const statements: string[] = [];
-        const parameters: any[][] = [];
+        const statements: Array<{ query: string; params: any[] }> = [];
 
         // Items to add to the last batch
         const items_for_last_batch =
@@ -1720,16 +1659,18 @@ export class PGKVDatabase {
         // Update the last batch if needed
         if (items_for_last_batch.length > 0) {
           const updated_last_batch = [...last_batch, ...items_for_last_batch];
-          statements.push(`
-            UPDATE "${this.table_name}" 
-            SET value = $1, updated_at = NOW()
-            WHERE key = $2
-          `);
           const serialized_value =
             this.value_type === 'jsonb'
               ? JSON.stringify(updated_last_batch)
               : String(updated_last_batch);
-          parameters.push([serialized_value, last_batch_key]);
+          statements.push({
+            query: `
+            UPDATE "${this.table_name}" 
+            SET value = $1, updated_at = NOW()
+            WHERE key = $2
+          `,
+            params: [serialized_value, last_batch_key],
+          });
         }
 
         // Create new batches for remaining items
@@ -1758,13 +1699,15 @@ export class PGKVDatabase {
           }
 
           if (bulk_values.length > 0) {
-            statements.push(`
+            statements.push({
+              query: `
               INSERT INTO "${
                 this.table_name
               }" (key, value, created_at, updated_at)
               VALUES ${bulk_values.join(',')}
-            `);
-            parameters.push(bulk_params);
+            `,
+              params: bulk_params,
+            });
           }
         }
 
@@ -1787,16 +1730,18 @@ export class PGKVDatabase {
               ? JSON.stringify(updated_meta)
               : String(updated_meta); // Stringify primitive types for other types
 
-        statements.push(`
+        statements.push({
+          query: `
           INSERT INTO "${this.table_name}" (key, value, created_at, updated_at)
           VALUES ($1, $2, NOW(), NOW())
           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-        `);
-        parameters.push([meta_key, serialized_meta]);
+        `,
+          params: [meta_key, serialized_meta],
+        });
 
         // Execute all statements in a single transaction
-        for (let i = 0; i < statements.length; i++) {
-          await query_runner.query(statements[i], parameters[i]);
+        for (const statement of statements) {
+          await query_runner.query(statement.query, statement.params);
         }
 
         await query_runner.commitTransaction();

@@ -459,7 +459,7 @@ export class SqljsKVDatabase {
     keys: string[],
     options?: { include_timestamps?: boolean },
   ): Promise<
-    Record<string, T | { value: T; created_at: Date; updated_at: Date } | null>
+    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
   > {
     await this.ensureInitialized();
     if (keys.length === 0) return {};
@@ -478,7 +478,7 @@ export class SqljsKVDatabase {
 
     const record_map = new Map<
       string,
-      T | { value: T; created_at: Date; updated_at: Date } | null
+      T | { value: T; created_at: Date; updated_at: Date }
     >();
 
     for (const record of all_records) {
@@ -498,16 +498,15 @@ export class SqljsKVDatabase {
         console.warn(
           `Failed to deserialize record for key ${record.key}: ${error.message}`,
         );
-        record_map.set(record.key, null);
       }
     }
 
     const result: Record<
       string,
-      T | { value: T; created_at: Date; updated_at: Date } | null
+      T | { value: T; created_at: Date; updated_at: Date }
     > = {};
-    for (const key of keys) {
-      result[key] = record_map.get(key) ?? null;
+    for (const [key, value] of record_map) {
+      result[key] = value;
     }
     return result;
   }
@@ -701,12 +700,7 @@ export class SqljsKVDatabase {
       include_timestamps?: boolean;
     },
   ): Promise<
-    Array<{
-      key: string;
-      value: T;
-      created_at?: Date;
-      updated_at?: Date;
-    }>
+    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
   > {
     await this.ensureInitialized();
     if (!prefix) {
@@ -736,16 +730,25 @@ export class SqljsKVDatabase {
     }
 
     const results = this.getRows(sql, params);
-    return results.map((record) => {
-      const result: any = {
-        key: record.key,
-        value: this.type_handler.deserialize(record.value) as T,
-      };
-      if (include_timestamps) {
-        result.created_at = this.parseDate(record.created_at);
-        result.updated_at = this.parseDate(record.updated_at);
-      }
-      return result;
-    });
+    return results.reduce(
+      (
+        acc,
+        record: { key: string; value: any; created_at: any; updated_at: any },
+      ) => {
+        const deserialized = this.type_handler.deserialize(record.value) as T;
+        acc[record.key] = include_timestamps
+          ? {
+              value: deserialized,
+              created_at: this.parseDate(record.created_at),
+              updated_at: this.parseDate(record.updated_at),
+            }
+          : deserialized;
+        return acc;
+      },
+      {} as Record<
+        string,
+        T | { value: T; created_at: Date; updated_at: Date }
+      >,
+    );
   }
 }

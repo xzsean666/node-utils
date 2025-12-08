@@ -493,7 +493,7 @@ export class SqliteKVDatabase {
     keys: string[],
     options?: { include_timestamps?: boolean },
   ): Promise<
-    Record<string, T | { value: T; created_at: Date; updated_at: Date } | null>
+    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
   > {
     await this.ensureInitialized();
     if (keys.length === 0) {
@@ -538,7 +538,10 @@ export class SqliteKVDatabase {
     }
 
     // 使用Map提高查找性能，避免O(n²)复杂度
-    const record_map = new Map<string, any>();
+    const record_map = new Map<
+      string,
+      T | { value: T; created_at: Date; updated_at: Date }
+    >();
     for (const record of records) {
       try {
         const deserialized = this.type_handler.deserialize(record.value) as T;
@@ -556,18 +559,15 @@ export class SqliteKVDatabase {
         console.warn(
           `Failed to deserialize record for key ${record.key}: ${deserialize_error.message}`,
         );
-        // 设置为null而不是抛出错误，保证其他数据正常返回
-        record_map.set(record.key, null);
       }
     }
 
-    // 为所有请求的keys分配值，不存在的返回null
     const result: Record<
       string,
-      T | { value: T; created_at: Date; updated_at: Date } | null
+      T | { value: T; created_at: Date; updated_at: Date }
     > = {};
-    for (const key of keys) {
-      result[key] = record_map.get(key) ?? null;
+    for (const [key, value] of record_map) {
+      result[key] = value;
     }
 
     return result;
@@ -745,7 +745,7 @@ export class SqliteKVDatabase {
    * 使用范围查询充分利用主键索引性能
    * @param prefix 键前缀
    * @param options 查询选项
-   * @returns 匹配前缀的键值对数组
+   * @returns 匹配前缀的键值对对象
    */
   async getWithPrefix<T = any>(
     prefix: string,
@@ -756,12 +756,7 @@ export class SqliteKVDatabase {
       include_timestamps?: boolean;
     },
   ): Promise<
-    Array<{
-      key: string;
-      value: T;
-      created_at?: Date;
-      updated_at?: Date;
-    }>
+    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
   > {
     await this.ensureInitialized();
 
@@ -815,19 +810,33 @@ export class SqliteKVDatabase {
       const results = await query_builder.getRawMany();
 
       // 反序列化值并根据选项返回时间戳
-      return results.map((record) => {
-        const result: any = {
-          key: record.key,
-          value: this.type_handler.deserialize(record.value),
-        };
-
-        if (include_timestamps) {
-          result.created_at = record.created_at;
-          result.updated_at = record.updated_at;
-        }
-
-        return result;
-      });
+      return results.reduce(
+        (
+          acc,
+          record: {
+            key: string;
+            value: any;
+            created_at: Date;
+            updated_at: Date;
+          },
+        ) => {
+          const deserialized = this.type_handler.deserialize(
+            record.value,
+          ) as T;
+          acc[record.key] = include_timestamps
+            ? {
+                value: deserialized,
+                created_at: record.created_at,
+                updated_at: record.updated_at,
+              }
+            : deserialized;
+          return acc;
+        },
+        {} as Record<
+          string,
+          T | { value: T; created_at: Date; updated_at: Date }
+        >,
+      );
     } catch (error) {
       console.error('getWithPrefix query error:', error);
       throw error;

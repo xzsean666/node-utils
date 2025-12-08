@@ -176,7 +176,13 @@ export class MongoKVDatabase {
     }
   }
 
-  async getAll(offset?: number, limit?: number): Promise<Map<string, any>> {
+  async getAll<T = any>(
+    offset?: number,
+    limit?: number,
+    options?: { include_timestamps?: boolean },
+  ): Promise<
+    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
+  > {
     await this.ensureInitialized();
     const cursor = this.collection.find().sort({ key: 1 });
 
@@ -188,11 +194,26 @@ export class MongoKVDatabase {
       cursor.limit(limit);
     }
 
+    const include_timestamps = options?.include_timestamps === true;
     const records = await cursor.toArray();
-    const batchMap = new Map<string, any[]>(
-      records.map((record) => [record.key, record.value]),
+
+    return records.reduce(
+      (acc, record) => {
+        const value = record.value as T;
+        acc[record.key] = include_timestamps
+          ? {
+              value,
+              created_at: record.created_at,
+              updated_at: record.updated_at,
+            }
+          : value;
+        return acc;
+      },
+      {} as Record<
+        string,
+        T | { value: T; created_at: Date; updated_at: Date }
+      >,
     );
-    return batchMap;
   }
 
   async keys(): Promise<string[]> {

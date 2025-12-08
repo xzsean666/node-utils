@@ -369,7 +369,7 @@ export class EthersLogHelper {
     } = params;
 
     // 如果filter.topics是简单的数组（只有indexed参数），自动构建完整的topics
-    let processedFilter = { ...filter };
+    const processedFilter = { ...filter };
     if (filter.topics && Array.isArray(filter.topics)) {
       const fullTopics = this.buildFullTopicsForEvents(
         abi,

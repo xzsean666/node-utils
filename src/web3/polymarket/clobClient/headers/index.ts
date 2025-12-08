@@ -1,18 +1,18 @@
-import { JsonRpcSigner, Wallet } from "ethers";
-import { buildClobEip712Signature, buildPolyHmacSignature } from "../signing";
+import { JsonRpcSigner, Wallet } from 'ethers';
+import { buildClobEip712Signature, buildPolyHmacSignature } from '../signing';
 import {
   ApiKeyCreds,
   Chain,
   L1PolyHeader,
   L2HeaderArgs,
   L2PolyHeader,
-} from "../types";
+} from '../types';
 
 export const createL1Headers = async (
   signer: Wallet | JsonRpcSigner,
   chainId: Chain,
   nonce?: number,
-  timestamp?: number
+  timestamp?: number,
 ): Promise<L1PolyHeader> => {
   let ts = Math.floor(Date.now() / 1000);
   if (timestamp !== undefined) {
@@ -39,7 +39,7 @@ export const createL2Headers = async (
   signer: Wallet | JsonRpcSigner,
   creds: ApiKeyCreds,
   l2HeaderArgs: L2HeaderArgs,
-  timestamp?: number
+  timestamp?: number,
 ): Promise<L2PolyHeader> => {
   let ts = Math.floor(Date.now() / 1000);
   if (timestamp !== undefined) {
@@ -52,7 +52,7 @@ export const createL2Headers = async (
     ts,
     l2HeaderArgs.method,
     l2HeaderArgs.requestPath,
-    l2HeaderArgs.body
+    l2HeaderArgs.body,
   );
 
   const headers = {

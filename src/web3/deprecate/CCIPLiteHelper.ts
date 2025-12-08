@@ -289,7 +289,7 @@ export class CCIPLiteHelper {
     // 获取起始区块
     const latestBlock = await this.ethersUtils.getLatestBlockNumber();
     const fromBlock = Math.max(0, latestBlock - BLOCKS_TO_SEARCH);
-    let status: any = {};
+    const status: any = {};
     status.state = 'UNTOUCHED';
     // 检查每个OffRamp的状态
     for (const offRamp of matchingOffRamps) {

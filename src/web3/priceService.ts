@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios from 'axios';
 // 基础类型定义
 interface ExchangeConfig {
   baseUrl: string;
@@ -23,7 +23,7 @@ interface PriceOptions {
 // 交易所配置
 const EXCHANGES: Record<string, ExchangeConfig> = {
   gate: {
-    baseUrl: "https://api.gateio.ws/api/v4",
+    baseUrl: 'https://api.gateio.ws/api/v4',
     getCurrentPriceUrl: (symbol) =>
       `/spot/tickers?currency_pair=${symbol}_USDT`,
     getHistoricalPriceUrl: (symbol, timestamp) =>
@@ -34,7 +34,7 @@ const EXCHANGES: Record<string, ExchangeConfig> = {
     parseHistoricalResponse: (data) => parseFloat(data[0]?.[2]),
   },
   binance: {
-    baseUrl: "https://api.binance.com/api/v3",
+    baseUrl: 'https://api.binance.com/api/v3',
     getCurrentPriceUrl: (symbol) => `/ticker/price?symbol=${symbol}USDT`,
     getHistoricalPriceUrl: (symbol, timestamp) =>
       `/klines?symbol=${symbol}USDT&interval=1m&startTime=${
@@ -44,7 +44,7 @@ const EXCHANGES: Record<string, ExchangeConfig> = {
     parseHistoricalResponse: (data) => parseFloat(data[0]?.[4]),
   },
   huobi: {
-    baseUrl: "https://api.huobi.pro/market",
+    baseUrl: 'https://api.huobi.pro/market',
     getCurrentPriceUrl: (symbol) =>
       `/detail/merged?symbol=${symbol.toLowerCase()}usdt`,
     getHistoricalPriceUrl: (symbol, timestamp) =>
@@ -53,7 +53,7 @@ const EXCHANGES: Record<string, ExchangeConfig> = {
     parseHistoricalResponse: (data) => parseFloat(data.data[0]?.close),
   },
   okx: {
-    baseUrl: "https://www.okx.com/api/v5",
+    baseUrl: 'https://www.okx.com/api/v5',
     getCurrentPriceUrl: (symbol) => `/market/ticker?instId=${symbol}-USDT`,
     getHistoricalPriceUrl: (symbol, timestamp) =>
       `/market/history-candles?instId=${symbol}-USDT&after=${
@@ -63,7 +63,7 @@ const EXCHANGES: Record<string, ExchangeConfig> = {
     parseHistoricalResponse: (data) => parseFloat(data.data[0]?.[4]),
   },
   kucoin: {
-    baseUrl: "https://api.kucoin.com/api/v1",
+    baseUrl: 'https://api.kucoin.com/api/v1',
     getCurrentPriceUrl: (symbol) =>
       `/market/orderbook/level1?symbol=${symbol}-USDT`,
     getHistoricalPriceUrl: (symbol, timestamp) =>
@@ -80,9 +80,9 @@ export class PriceService {
 
   private normalizeToken(token: string): string {
     const tokenMap: Record<string, string> = {
-      WETH: "ETH",
-      "USDC.E": "USDC",
-      USDT: "USDT",
+      WETH: 'ETH',
+      'USDC.E': 'USDC',
+      USDT: 'USDT',
     };
     return tokenMap[token.toUpperCase()] || token.toUpperCase();
   }
@@ -91,7 +91,7 @@ export class PriceService {
     exchange: string,
     config: ExchangeConfig,
     token: string,
-    options: PriceOptions = {}
+    options: PriceOptions = {},
   ): Promise<PriceResult> {
     try {
       const { timestamp } = options;
@@ -106,7 +106,7 @@ export class PriceService {
 
       const response = await axios.get(url, {
         timeout: this.TIMEOUT,
-        headers: { Accept: "application/json" },
+        headers: { Accept: 'application/json' },
       });
 
       const price = isHistorical
@@ -125,7 +125,7 @@ export class PriceService {
         exchange,
         price: null,
         timestamp: options.timestamp || Math.floor(Date.now() / 1000),
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: error instanceof Error ? error.message : 'Unknown error',
         fromCache: false,
       };
     }
@@ -133,11 +133,11 @@ export class PriceService {
 
   async getAllPrices(
     token: string,
-    options: PriceOptions = {}
+    options: PriceOptions = {},
   ): Promise<PriceResult[]> {
     const normalizedToken = this.normalizeToken(token);
 
-    if (normalizedToken === "USDT") {
+    if (normalizedToken === 'USDT') {
       return Object.keys(EXCHANGES).map((exchange) => ({
         exchange,
         price: 1,
@@ -147,7 +147,7 @@ export class PriceService {
     }
 
     const pricePromises = Object.entries(EXCHANGES).map(([exchange, config]) =>
-      this.fetchPrice(exchange, config, normalizedToken, options)
+      this.fetchPrice(exchange, config, normalizedToken, options),
     );
 
     return Promise.all(pricePromises);
@@ -156,7 +156,7 @@ export class PriceService {
   async getPrice(
     token: string,
     exchange: string,
-    options: PriceOptions = {}
+    options: PriceOptions = {},
   ): Promise<PriceResult> {
     const config = EXCHANGES[exchange];
     if (!config) {
@@ -164,7 +164,7 @@ export class PriceService {
         exchange,
         price: null,
         timestamp: options.timestamp || Date.now(),
-        error: "Exchange not supported",
+        error: 'Exchange not supported',
       };
     }
 
@@ -172,13 +172,13 @@ export class PriceService {
       exchange,
       config,
       this.normalizeToken(token),
-      options
+      options,
     );
   }
 
   async getHistoricalPrices(
     token: string,
-    timestamps: number[]
+    timestamps: number[],
   ): Promise<Record<number, PriceResult[]>> {
     const normalizedToken = this.normalizeToken(token);
     const results: Record<number, PriceResult[]> = {};
@@ -187,7 +187,7 @@ export class PriceService {
       timestamps.map(async (timestamp) => {
         const prices = await this.getAllPrices(normalizedToken, { timestamp });
         results[timestamp] = prices;
-      })
+      }),
     );
 
     return results;
@@ -215,7 +215,7 @@ export class PriceService {
   // 获取历史平均价格
   async getHistoricalAveragePrice(
     token: string,
-    timestamp: number
+    timestamp: number,
   ): Promise<number | null> {
     const prices = await this.getAllPrices(token, { timestamp });
     return this.calculateAveragePrice(prices);

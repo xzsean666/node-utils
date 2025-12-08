@@ -4,11 +4,11 @@ export class TickerMath {
     tickLower: number,
     tickUpper: number,
     sqrtPriceX96: bigint,
-    currentTick: number
+    currentTick: number,
   ): Promise<{ amount0: bigint; amount1: bigint }> {
     // 确保 sqrtPriceX96 不为0
     if (sqrtPriceX96 <= 0) {
-      throw new Error("Invalid sqrtPriceX96");
+      throw new Error('Invalid sqrtPriceX96');
     }
 
     const sqrtRatioA = this.getSqrtRatioAtTick(tickLower);
@@ -38,63 +38,63 @@ export class TickerMath {
     let ratio: bigint = BigInt(1) << BigInt(96);
 
     if ((absTick & 0x1) !== 0) {
-      ratio = (ratio * BigInt("79232123823359799118286999567")) >> BigInt(96);
+      ratio = (ratio * BigInt('79232123823359799118286999567')) >> BigInt(96);
     }
     if ((absTick & 0x2) !== 0) {
-      ratio = (ratio * BigInt("79236085330515764027303304731")) >> BigInt(96);
+      ratio = (ratio * BigInt('79236085330515764027303304731')) >> BigInt(96);
     }
     if ((absTick & 0x4) !== 0) {
-      ratio = (ratio * BigInt("79244008939048815603706035061")) >> BigInt(96);
+      ratio = (ratio * BigInt('79244008939048815603706035061')) >> BigInt(96);
     }
     if ((absTick & 0x8) !== 0) {
-      ratio = (ratio * BigInt("79259858533276714757314932305")) >> BigInt(96);
+      ratio = (ratio * BigInt('79259858533276714757314932305')) >> BigInt(96);
     }
     if ((absTick & 0x10) !== 0) {
-      ratio = (ratio * BigInt("79291567232598584799939703904")) >> BigInt(96);
+      ratio = (ratio * BigInt('79291567232598584799939703904')) >> BigInt(96);
     }
     if ((absTick & 0x20) !== 0) {
-      ratio = (ratio * BigInt("79355022692464371645785046466")) >> BigInt(96);
+      ratio = (ratio * BigInt('79355022692464371645785046466')) >> BigInt(96);
     }
     if ((absTick & 0x40) !== 0) {
-      ratio = (ratio * BigInt("79482085999252804386437311141")) >> BigInt(96);
+      ratio = (ratio * BigInt('79482085999252804386437311141')) >> BigInt(96);
     }
     if ((absTick & 0x80) !== 0) {
-      ratio = (ratio * BigInt("79736823300114093921829183326")) >> BigInt(96);
+      ratio = (ratio * BigInt('79736823300114093921829183326')) >> BigInt(96);
     }
     if ((absTick & 0x100) !== 0) {
-      ratio = (ratio * BigInt("80248749790819932309965073892")) >> BigInt(96);
+      ratio = (ratio * BigInt('80248749790819932309965073892')) >> BigInt(96);
     }
     if ((absTick & 0x200) !== 0) {
-      ratio = (ratio * BigInt("81282483887344747381513967011")) >> BigInt(96);
+      ratio = (ratio * BigInt('81282483887344747381513967011')) >> BigInt(96);
     }
     if ((absTick & 0x400) !== 0) {
-      ratio = (ratio * BigInt("83390072131320151908154831281")) >> BigInt(96);
+      ratio = (ratio * BigInt('83390072131320151908154831281')) >> BigInt(96);
     }
     if ((absTick & 0x800) !== 0) {
-      ratio = (ratio * BigInt("87770609709833776024991924138")) >> BigInt(96);
+      ratio = (ratio * BigInt('87770609709833776024991924138')) >> BigInt(96);
     }
     if ((absTick & 0x1000) !== 0) {
-      ratio = (ratio * BigInt("97234110755111693312479820773")) >> BigInt(96);
+      ratio = (ratio * BigInt('97234110755111693312479820773')) >> BigInt(96);
     }
     if ((absTick & 0x2000) !== 0) {
-      ratio = (ratio * BigInt("119332217159966728226237229890")) >> BigInt(96);
+      ratio = (ratio * BigInt('119332217159966728226237229890')) >> BigInt(96);
     }
     if ((absTick & 0x4000) !== 0) {
-      ratio = (ratio * BigInt("179736315981702064433883588727")) >> BigInt(96);
+      ratio = (ratio * BigInt('179736315981702064433883588727')) >> BigInt(96);
     }
     if ((absTick & 0x8000) !== 0) {
-      ratio = (ratio * BigInt("407748233172238350107850275304")) >> BigInt(96);
+      ratio = (ratio * BigInt('407748233172238350107850275304')) >> BigInt(96);
     }
     if ((absTick & 0x10000) !== 0) {
-      ratio = (ratio * BigInt("2098478828474011932436660412517")) >> BigInt(96);
+      ratio = (ratio * BigInt('2098478828474011932436660412517')) >> BigInt(96);
     }
     if ((absTick & 0x20000) !== 0) {
       ratio =
-        (ratio * BigInt("55581415166113811149459800483533")) >> BigInt(96);
+        (ratio * BigInt('55581415166113811149459800483533')) >> BigInt(96);
     }
     if ((absTick & 0x40000) !== 0) {
       ratio =
-        (ratio * BigInt("38992368544603139932233054999993551")) >> BigInt(96);
+        (ratio * BigInt('38992368544603139932233054999993551')) >> BigInt(96);
     }
 
     return tick >= 0 ? ratio : (BigInt(1) << BigInt(192)) / ratio;
@@ -103,7 +103,7 @@ export class TickerMath {
   private getAmount0ForLiquidity(
     sqrtRatioA: bigint,
     sqrtRatioB: bigint,
-    liquidity: bigint
+    liquidity: bigint,
   ): bigint {
     if (sqrtRatioA > sqrtRatioB) {
       [sqrtRatioA, sqrtRatioB] = [sqrtRatioB, sqrtRatioA];
@@ -122,7 +122,7 @@ export class TickerMath {
   private getAmount1ForLiquidity(
     sqrtRatioA: bigint,
     sqrtRatioB: bigint,
-    liquidity: bigint
+    liquidity: bigint,
   ): bigint {
     if (sqrtRatioA > sqrtRatioB) {
       [sqrtRatioA, sqrtRatioB] = [sqrtRatioB, sqrtRatioA];
@@ -132,7 +132,7 @@ export class TickerMath {
     return this.mulDiv(
       liquidity,
       sqrtRatioB - sqrtRatioA,
-      BigInt(1) << BigInt(96)
+      BigInt(1) << BigInt(96),
     );
   }
 
@@ -140,7 +140,7 @@ export class TickerMath {
   private mulDiv(a: bigint, b: bigint, denominator: bigint): bigint {
     // 检查除数不为零
     if (denominator === BigInt(0)) {
-      throw new Error("Division by zero");
+      throw new Error('Division by zero');
     }
 
     // 计算乘积的高位和低位

@@ -85,8 +85,8 @@ export class NetDataHelper {
     const data = await this.getDiskIO();
     const dataCount = data.data.length;
     let count60 = 0; // 添加计数器用于计算平均值
-    let average60 = { read: 0, write: 0 };
-    let average600 = { read: 0, write: 0 };
+    const average60 = { read: 0, write: 0 };
+    const average600 = { read: 0, write: 0 };
     for (const item of data.data) {
       if (count60 <= 60) {
         average60.read += item[1];
@@ -149,8 +149,8 @@ export class NetDataHelper {
   }
   async getAverageNetworkTraffic() {
     try {
-      let average60 = { received: 0, sent: 0 };
-      let average600 = { received: 0, sent: 0 };
+      const average60 = { received: 0, sent: 0 };
+      const average600 = { received: 0, sent: 0 };
       const data = await this.getNetworkTraffic();
       const dataCount = data.data.length;
       let count60 = 0; // 添加计数器用于计算平均值

@@ -1,10 +1,10 @@
-import { error } from "console";
+import { error } from 'console';
 import {
   BinanceAPIHelper,
   FormattedPosition,
   BinanceTrade,
   FuturesAccountChanges,
-} from "../binance/BinanceAPIHelper";
+} from '../binance/BinanceAPIHelper';
 import {
   ExchangeConfig,
   ExchangeName,
@@ -14,8 +14,8 @@ import {
   TradeStatisticsOptions,
   TradeStatistics,
   TradeStatisticsPeriod,
-} from "./types";
-export * from "./types";
+} from './types';
+export * from './types';
 export { BinanceAPIHelper };
 export class ExIndex {
   private exchangeConfigs: ExchangeConfig[] = [];
@@ -36,7 +36,7 @@ export class ExIndex {
    */
   removeExchange(exchangeName: ExchangeName) {
     this.exchangeConfigs = this.exchangeConfigs.filter(
-      (config) => config.name !== exchangeName
+      (config) => config.name !== exchangeName,
     );
   }
 
@@ -45,7 +45,7 @@ export class ExIndex {
    */
   private getExchangeConfigs(exchangeName: ExchangeName): ExchangeConfig[] {
     return this.exchangeConfigs.filter(
-      (config) => config.name === exchangeName
+      (config) => config.name === exchangeName,
     );
   }
 
@@ -90,7 +90,7 @@ export class ExIndex {
     return {
       exchange: ExchangeName.BINANCE,
       symbol: position.symbol,
-      positionSide: safePositionAmt > 0 ? "LONG" : "SHORT",
+      positionSide: safePositionAmt > 0 ? 'LONG' : 'SHORT',
       positionAmt: Math.abs(safePositionAmt),
       entryPrice,
       markPrice: markPrice,
@@ -107,7 +107,7 @@ export class ExIndex {
           marginRatio,
           safetyDistance, // Pass pre-calculated safetyDistance
           safeUnrealizedProfit,
-          safeInitialMargin
+          safeInitialMargin,
         ),
       },
       metrics: {
@@ -161,8 +161,8 @@ export class ExIndex {
     marginRatio: number,
     safetyDistance: number, // Added safetyDistance parameter
     unrealizedProfit: number,
-    initialMargin: number
-  ): "SAFE" | "WARNING" | "DANGER" {
+    initialMargin: number,
+  ): 'SAFE' | 'WARNING' | 'DANGER' {
     // Add basic checks for invalid inputs
     if (
       isNaN(riskRatio) ||
@@ -172,7 +172,7 @@ export class ExIndex {
       isNaN(initialMargin) ||
       initialMargin === 0 // Avoid division by zero
     ) {
-      return "DANGER"; // Default to DANGER if inputs are invalid
+      return 'DANGER'; // Default to DANGER if inputs are invalid
     }
 
     // 计算收益率
@@ -181,39 +181,39 @@ export class ExIndex {
     // 如果是盈利状态，主要看安全距离和保证金率
     if (profitRatio > 0) {
       if (safetyDistance > 20 && marginRatio > 3) {
-        return "SAFE";
+        return 'SAFE';
       } else if (safetyDistance > 10 && marginRatio > 2) {
-        return "WARNING";
+        return 'WARNING';
       }
       // 盈利但安全距离不足或保证金率过低，仍然标记为危险
-      return "DANGER";
+      return 'DANGER';
     }
 
     // 如果是亏损状态，综合评估所有风险指标
     if (riskRatio < 0.3 && marginRatio > 3 && safetyDistance > 30) {
-      return "SAFE";
+      return 'SAFE';
     } else if (riskRatio < 0.5 && marginRatio > 2 && safetyDistance > 20) {
-      return "WARNING";
+      return 'WARNING';
     }
 
     // 如果风险率超过0.8或保证金率低于1.2，直接标记为危险
     if (riskRatio > 0.8 || marginRatio < 1.2) {
-      return "DANGER";
+      return 'DANGER';
     }
 
     // 如果安全距离小于10%，标记为危险
     if (safetyDistance < 10) {
-      return "DANGER";
+      return 'DANGER';
     }
 
     // 其他情况根据亏损程度判断
     if (profitRatio < -0.5) {
-      return "DANGER";
+      return 'DANGER';
     } else if (profitRatio < -0.3) {
-      return "WARNING";
+      return 'WARNING';
     }
 
-    return "SAFE";
+    return 'SAFE';
   }
 
   /**
@@ -232,12 +232,12 @@ export class ExIndex {
           const binancePositions =
             await binanceAPIHelper.getFormattedFuturesPositions();
           positions.push(
-            ...binancePositions.map((p) => this.formatBinancePosition(p))
+            ...binancePositions.map((p) => this.formatBinancePosition(p)),
           );
         }
       } catch (error) {
         console.error(
-          `Failed to get positions from Binance instance: ${error}`
+          `Failed to get positions from Binance instance: ${error}`,
         );
       }
     }
@@ -260,16 +260,16 @@ export class ExIndex {
   }
   async getUnifiedPositionsWithPriceHistory(
     positions: UnifiedPosition[],
-    kvdb?: any
+    kvdb?: any,
   ): Promise<UnifiedPosition[]> {
     const positionsWithPriceHistory: UnifiedPosition[] = [];
-    const date = new Date("2025-01-01");
+    const date = new Date('2025-01-01');
     const binanceAPIHelper = new BinanceAPIHelper({}, kvdb);
 
     for (const position of positions) {
       const params = {
         symbol: position.symbol,
-        interval: "1d",
+        interval: '1d',
         startTime: date.getTime(),
         isFutures: true,
       };
@@ -328,7 +328,7 @@ export class ExIndex {
    * 获取指定交易所的格式化持仓信息
    */
   async getUnifiedPositionsByExchange(
-    exchangeName: ExchangeName
+    exchangeName: ExchangeName,
   ): Promise<UnifiedPosition[]> {
     const allPositions = await this.getUnifiedPositions();
     return allPositions.filter((p) => p.exchange === exchangeName);
@@ -338,7 +338,7 @@ export class ExIndex {
    * 获取指定交易对的格式化持仓信息
    */
   async getUnifiedPositionsBySymbol(
-    symbol: string
+    symbol: string,
   ): Promise<UnifiedPosition[]> {
     const allPositions = await this.getUnifiedPositions();
     return allPositions.filter((p) => p.symbol === symbol);
@@ -348,11 +348,11 @@ export class ExIndex {
    * 获取指定健康等级的格式化持仓信息
    */
   async getUnifiedPositionsByHealthLevel(
-    healthLevel: "SAFE" | "WARNING" | "DANGER"
+    healthLevel: 'SAFE' | 'WARNING' | 'DANGER',
   ): Promise<UnifiedPosition[]> {
     const allPositions = await this.getUnifiedPositions();
     return allPositions.filter(
-      (p) => p.healthStatus.healthLevel === healthLevel
+      (p) => p.healthStatus.healthLevel === healthLevel,
     );
   }
 
@@ -361,12 +361,12 @@ export class ExIndex {
    */
   private formatBinanceTrade(
     trade: BinanceTrade,
-    accountId: string
+    accountId: string,
   ): UnifiedTrade {
     // Parse necessary values
     const price = parseFloat(trade.price);
     const qty = parseFloat(trade.qty);
-    const realizedPnl = parseFloat(trade.realizedPnl || "0");
+    const realizedPnl = parseFloat(trade.realizedPnl || '0');
 
     // Calculate entryPrice
     let entryPrice: number | undefined;
@@ -404,7 +404,7 @@ export class ExIndex {
       isBuyer: trade.buyer,
       isMaker: trade.maker,
       isBestMatch: true, // 币安期货API不返回这个字段，默认为true
-      realizedPnl: trade.realizedPnl || "0", // 添加已实现盈亏字段，如果不存在则默认为'0'
+      realizedPnl: trade.realizedPnl || '0', // 添加已实现盈亏字段，如果不存在则默认为'0'
       entryPrice: entryPrice?.toString(), // Add calculated entryPrice
       rawData: trade.rawData || trade,
     };
@@ -423,7 +423,7 @@ export class ExIndex {
       endTime?: number;
       fromId?: number;
       limit?: number;
-    } = {}
+    } = {},
   ): Promise<UnifiedTrade[]> {
     const trades: UnifiedTrade[] = [];
 
@@ -441,14 +441,14 @@ export class ExIndex {
                 ...binanceTrades.map((trade) =>
                   this.formatBinanceTrade(
                     trade,
-                    binanceAPIHelper.getAccountId()
-                  )
-                )
+                    binanceAPIHelper.getAccountId(),
+                  ),
+                ),
               );
             }
           } catch (error) {
             console.error(
-              `Failed to get futures trading history from Binance instance: ${error}`
+              `Failed to get futures trading history from Binance instance: ${error}`,
             );
           }
         }
@@ -457,7 +457,7 @@ export class ExIndex {
       // TODO: Add support for other exchanges
       default:
         console.warn(
-          `Exchange ${exchangeName} is not supported yet for futures trading history`
+          `Exchange ${exchangeName} is not supported yet for futures trading history`,
         );
     }
 
@@ -470,7 +470,7 @@ export class ExIndex {
    */
   private formatBinanceAccountChanges(
     accountChanges: FuturesAccountChanges,
-    accountId: string
+    accountId: string,
   ): UnifiedAccountStateChanges {
     // Ensure all position changes have directionChanged as boolean
     const positionChanges = accountChanges.positionChanges.map((position) => ({
@@ -501,7 +501,7 @@ export class ExIndex {
     minutes: number,
     options: {
       includeUnchangedPositions?: boolean;
-    } = {}
+    } = {},
   ): Promise<UnifiedAccountStateChanges[]> {
     const results: UnifiedAccountStateChanges[] = [];
 
@@ -517,20 +517,20 @@ export class ExIndex {
               const accountChanges =
                 await binanceAPIHelper.getFuturesAccountStateChanges(
                   minutes,
-                  options
+                  options,
                 );
               if (accountChanges) {
                 results.push(
                   this.formatBinanceAccountChanges(
                     accountChanges,
-                    binanceAPIHelper.getAccountId()
-                  )
+                    binanceAPIHelper.getAccountId(),
+                  ),
                 );
               }
             }
           } catch (error) {
             console.error(
-              `Failed to get futures account state changes from Binance instance: ${error}`
+              `Failed to get futures account state changes from Binance instance: ${error}`,
             );
           }
         }
@@ -554,7 +554,7 @@ export class ExIndex {
       // }
       default:
         console.warn(
-          `Exchange ${exchangeName} is not supported yet for futures account state changes`
+          `Exchange ${exchangeName} is not supported yet for futures account state changes`,
         );
     }
 
@@ -571,13 +571,13 @@ export class ExIndex {
     minutes: number,
     options: {
       includeUnchangedPositions?: boolean;
-    } = {}
+    } = {},
   ): Promise<UnifiedAccountStateChanges[]> {
     const results: UnifiedAccountStateChanges[] = [];
 
     // Get unique exchange names from configs
     const exchangeNames = Array.from(
-      new Set(this.exchangeConfigs.map((config) => config.name))
+      new Set(this.exchangeConfigs.map((config) => config.name)),
     );
 
     // Get state changes for each exchange
@@ -585,7 +585,7 @@ export class ExIndex {
       const exchangeResults = await this.getFuturesAccountStateChanges(
         exchangeName,
         minutes,
-        options
+        options,
       );
       results.push(...exchangeResults);
     }
@@ -605,14 +605,14 @@ export class ExIndex {
     minutes: number,
     options: {
       includeUnchangedPositions?: boolean;
-    } = {}
+    } = {},
   ): Promise<UnifiedAccountStateChanges | null> {
     const allChanges = await this.getAllFuturesAccountStateChanges(
       minutes,
-      options
+      options,
     );
     const accountChanges = allChanges.find(
-      (change) => change.accountId === accountId
+      (change) => change.accountId === accountId,
     );
     return accountChanges || null;
   }
@@ -625,7 +625,7 @@ export class ExIndex {
    */
   getTradeStatistics(
     trades: UnifiedTrade[],
-    options: TradeStatisticsOptions = {}
+    options: TradeStatisticsOptions = {},
   ): Record<string, TradeStatistics> {
     // 设置默认选项
     const period = options.period || TradeStatisticsPeriod.DAY;
@@ -635,20 +635,20 @@ export class ExIndex {
 
     // 过滤交易数据
     let filteredTrades = trades.filter(
-      (trade) => trade.time >= startTime && trade.time <= endTime
+      (trade) => trade.time >= startTime && trade.time <= endTime,
     );
 
     // 按指定的交易对过滤
     if (options.symbols && options.symbols.length > 0) {
       filteredTrades = filteredTrades.filter((trade) =>
-        options.symbols!.includes(trade.symbol)
+        options.symbols!.includes(trade.symbol),
       );
     }
 
     // 按账户ID过滤
     if (options.accountIds && options.accountIds.length > 0) {
       filteredTrades = filteredTrades.filter((trade) =>
-        options.accountIds!.includes(trade.accountId)
+        options.accountIds!.includes(trade.accountId),
       );
     }
 
@@ -666,17 +666,17 @@ export class ExIndex {
       switch (period) {
         case TradeStatisticsPeriod.DAY:
           // 日期格式: YYYY-MM-DD
-          periodKey = date.toISOString().split("T")[0];
+          periodKey = date.toISOString().split('T')[0];
           periodStartTime = new Date(
             date.getFullYear(),
             date.getMonth(),
-            date.getDate()
+            date.getDate(),
           ).getTime();
           periodEndTime =
             new Date(
               date.getFullYear(),
               date.getMonth(),
-              date.getDate() + 1
+              date.getDate() + 1,
             ).getTime() - 1;
           break;
 
@@ -691,23 +691,23 @@ export class ExIndex {
             ((date.getTime() - new Date(date.getFullYear(), 0, 1).getTime()) /
               86400000 +
               1) /
-              7
+              7,
           );
           periodKey = `${date.getFullYear()}-W${weekNumber
             .toString()
-            .padStart(2, "0")}`;
+            .padStart(2, '0')}`;
 
           periodStartTime = new Date(
             firstDayOfWeek.getFullYear(),
             firstDayOfWeek.getMonth(),
-            firstDayOfWeek.getDate()
+            firstDayOfWeek.getDate(),
           ).getTime();
 
           periodEndTime =
             new Date(
               firstDayOfWeek.getFullYear(),
               firstDayOfWeek.getMonth(),
-              firstDayOfWeek.getDate() + 7
+              firstDayOfWeek.getDate() + 7,
             ).getTime() - 1;
           break;
 
@@ -715,12 +715,12 @@ export class ExIndex {
           // 月格式: YYYY-MM
           periodKey = `${date.getFullYear()}-${(date.getMonth() + 1)
             .toString()
-            .padStart(2, "0")}`;
+            .padStart(2, '0')}`;
 
           periodStartTime = new Date(
             date.getFullYear(),
             date.getMonth(),
-            1
+            1,
           ).getTime();
 
           periodEndTime =
@@ -765,7 +765,7 @@ export class ExIndex {
       const qty = parseFloat(trade.qty);
       const quoteQty = parseFloat(trade.quoteQty);
       const commission = parseFloat(trade.commission);
-      const realizedPnl = parseFloat(trade.realizedPnl || "0"); // 解析已实现盈亏
+      const realizedPnl = parseFloat(trade.realizedPnl || '0'); // 解析已实现盈亏
 
       periodStats.totalQuantity += qty;
       periodStats.totalValue += quoteQty;
@@ -797,18 +797,18 @@ export class ExIndex {
 
       if (period === TradeStatisticsPeriod.DAY) {
         // 按天填充
-        let currentDate = new Date(startTime);
+        const currentDate = new Date(startTime);
         const endDate = new Date(endTime);
 
         while (currentDate <= endDate) {
-          const dateStr = currentDate.toISOString().split("T")[0];
+          const dateStr = currentDate.toISOString().split('T')[0];
 
           if (!stats[dateStr]) {
             // 添加空白日期数据
             const dayStart = new Date(
               currentDate.getFullYear(),
               currentDate.getMonth(),
-              currentDate.getDate()
+              currentDate.getDate(),
             ).getTime();
 
             const dayEnd = dayStart + 86399999; // 23:59:59.999
@@ -837,7 +837,7 @@ export class ExIndex {
         }
       } else if (period === TradeStatisticsPeriod.MONTH) {
         // 按月填充
-        let currentMonth = new Date(startTime);
+        const currentMonth = new Date(startTime);
         const endMonth = new Date(endTime);
 
         while (
@@ -849,21 +849,21 @@ export class ExIndex {
             currentMonth.getMonth() + 1
           )
             .toString()
-            .padStart(2, "0")}`;
+            .padStart(2, '0')}`;
 
           if (!stats[monthStr]) {
             // 添加空白月份数据
             const monthStart = new Date(
               currentMonth.getFullYear(),
               currentMonth.getMonth(),
-              1
+              1,
             ).getTime();
 
             const monthEnd =
               new Date(
                 currentMonth.getFullYear(),
                 currentMonth.getMonth() + 1,
-                0
+                0,
               ).getTime() + 86399999; // 23:59:59.999
 
             stats[monthStr] = {

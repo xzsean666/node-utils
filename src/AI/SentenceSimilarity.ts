@@ -1,5 +1,5 @@
-import * as tf from "@tensorflow/tfjs-node"; // 或 '@tensorflow/tfjs' 用于浏览器
-import * as use from "@tensorflow-models/universal-sentence-encoder";
+import * as tf from '@tensorflow/tfjs-node'; // 或 '@tensorflow/tfjs' 用于浏览器
+import * as use from '@tensorflow-models/universal-sentence-encoder';
 
 export class SentenceSimilarity {
   private model: use.UniversalSentenceEncoder | null = null;
@@ -9,15 +9,15 @@ export class SentenceSimilarity {
       // Initialize TensorFlow.js backend
       await tf.ready();
 
-      console.log("Loading model...");
+      console.log('Loading model...');
       this.model = await use.load();
-      console.log("Model loaded!");
+      console.log('Model loaded!');
     }
   }
 
   async getSimilarity(text1: string, text2: string): Promise<number> {
     if (!this.model) {
-      throw new Error("Model not initialized");
+      throw new Error('Model not initialized');
     }
 
     // 获取句子嵌入

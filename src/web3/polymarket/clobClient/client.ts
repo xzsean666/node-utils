@@ -1,5 +1,5 @@
-import { Wallet, JsonRpcSigner } from "ethers";
-import { SignatureType, SignedOrder } from "@polymarket/order-utils";
+import { Wallet, JsonRpcSigner } from 'ethers';
+import { SignatureType, SignedOrder } from '@polymarket/order-utils';
 import {
   ApiKeyCreds,
   ApiKeysResponse,
@@ -40,8 +40,8 @@ import {
   TotalUserEarning,
   NegRisk,
   BanStatus,
-} from "./types";
-import { createL1Headers, createL2Headers } from "./headers";
+} from './types';
+import { createL1Headers, createL2Headers } from './headers';
 import {
   del,
   DELETE,
@@ -51,14 +51,14 @@ import {
   POST,
   post,
   RequestOptions,
-} from "./http-helpers";
-import { L1_AUTH_UNAVAILABLE_ERROR, L2_AUTH_NOT_AVAILABLE } from "./errors";
+} from './http-helpers';
+import { L1_AUTH_UNAVAILABLE_ERROR, L2_AUTH_NOT_AVAILABLE } from './errors';
 import {
   generateOrderBookSummaryHash,
   isTickSizeSmaller,
   orderToJson,
   priceValid,
-} from "./utilities";
+} from './utilities';
 import {
   CANCEL_ALL,
   CANCEL_ORDER,
@@ -105,13 +105,13 @@ import {
   GET_SPREAD,
   GET_SPREADS,
   UPDATE_BALANCE_ALLOWANCE,
-} from "./endpoints";
-import { OrderBuilder } from "./order-builder/builder";
-import { END_CURSOR, INITIAL_CURSOR } from "./constants";
+} from './endpoints';
+import { OrderBuilder } from './order-builder/builder';
+import { END_CURSOR, INITIAL_CURSOR } from './constants';
 import {
   calculateBuyMarketPrice,
   calculateSellMarketPrice,
-} from "./order-builder/helpers";
+} from './order-builder/helpers';
 
 export class ClobClient {
   readonly host: string;
@@ -143,9 +143,9 @@ export class ClobClient {
     signatureType?: SignatureType,
     funderAddress?: string,
     geoBlockToken?: string,
-    useServerTime?: boolean
+    useServerTime?: boolean,
   ) {
-    this.host = host.endsWith("/") ? host.slice(0, -1) : host;
+    this.host = host.endsWith('/') ? host.slice(0, -1) : host;
     this.chainId = chainId;
 
     if (signer !== undefined) {
@@ -158,7 +158,7 @@ export class ClobClient {
       signer as Wallet | JsonRpcSigner,
       chainId,
       signatureType,
-      funderAddress
+      funderAddress,
     );
     this.tickSizes = {};
     this.negRisk = {};
@@ -176,7 +176,7 @@ export class ClobClient {
   }
 
   public async getSamplingSimplifiedMarkets(
-    next_cursor = INITIAL_CURSOR
+    next_cursor = INITIAL_CURSOR,
   ): Promise<PaginationPayload> {
     return this.get(`${this.host}${GET_SAMPLING_SIMPLIFIED_MARKETS}`, {
       params: { next_cursor },
@@ -184,7 +184,7 @@ export class ClobClient {
   }
 
   public async getSamplingMarkets(
-    next_cursor = INITIAL_CURSOR
+    next_cursor = INITIAL_CURSOR,
   ): Promise<PaginationPayload> {
     return this.get(`${this.host}${GET_SAMPLING_MARKETS}`, {
       params: { next_cursor },
@@ -192,7 +192,7 @@ export class ClobClient {
   }
 
   public async getSimplifiedMarkets(
-    next_cursor = INITIAL_CURSOR
+    next_cursor = INITIAL_CURSOR,
   ): Promise<PaginationPayload> {
     return this.get(`${this.host}${GET_SIMPLIFIED_MARKETS}`, {
       params: { next_cursor },
@@ -200,7 +200,7 @@ export class ClobClient {
   }
 
   public async getMarkets(
-    next_cursor = INITIAL_CURSOR
+    next_cursor = INITIAL_CURSOR,
   ): Promise<PaginationPayload> {
     return this.get(`${this.host}${GET_MARKETS}`, {
       params: { next_cursor },
@@ -218,7 +218,7 @@ export class ClobClient {
   }
 
   public async getOrderBooks(
-    params: BookParams[]
+    params: BookParams[],
   ): Promise<OrderBookSummary[]> {
     return this.post(`${this.host}${GET_ORDER_BOOKS}`, {
       data: params,
@@ -309,7 +309,7 @@ export class ClobClient {
   }
 
   public async getPricesHistory(
-    params: PriceHistoryFilterParams
+    params: PriceHistoryFilterParams,
   ): Promise<MarketPrice[]> {
     return this.get(`${this.host}${GET_PRICES_HISTORY}`, {
       params,
@@ -331,7 +331,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.chainId,
       nonce,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     return await this.post(endpoint, { headers }).then(
@@ -342,7 +342,7 @@ export class ClobClient {
           passphrase: apiKeyRaw.passphrase,
         };
         return apiKey;
-      }
+      },
     );
   }
 
@@ -359,7 +359,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.chainId,
       nonce,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     return await this.get(endpoint, { headers }).then(
@@ -370,7 +370,7 @@ export class ClobClient {
           passphrase: apiKeyRaw.passphrase,
         };
         return apiKey;
-      }
+      },
     );
   }
 
@@ -396,7 +396,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       headerArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     return this.get(`${this.host}${endpoint}`, { headers });
@@ -415,7 +415,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       headerArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     return this.get(`${this.host}${endpoint}`, { headers });
@@ -434,7 +434,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       headerArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     return this.del(`${this.host}${endpoint}`, { headers });
@@ -453,7 +453,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       headerArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     return this.get(`${this.host}${endpoint}`, { headers });
@@ -462,7 +462,7 @@ export class ClobClient {
   public async getTrades(
     params?: TradeParams,
     only_first_page = false,
-    next_cursor?: string
+    next_cursor?: string,
   ): Promise<Trade[]> {
     this.canL2Auth();
 
@@ -476,7 +476,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       headerArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     let results: Trade[] = [];
@@ -501,7 +501,7 @@ export class ClobClient {
 
   public async getTradesPaginated(
     params?: TradeParams,
-    next_cursor?: string
+    next_cursor?: string,
   ): Promise<{
     trades: Trade[];
     next_cursor: string;
@@ -520,7 +520,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       headerArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     next_cursor = next_cursor || INITIAL_CURSOR;
@@ -556,7 +556,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       headerArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     return this.get(`${this.host}${endpoint}`, {
@@ -566,7 +566,7 @@ export class ClobClient {
   }
 
   public async dropNotifications(
-    params?: DropNotificationParams
+    params?: DropNotificationParams,
   ): Promise<void> {
     this.canL2Auth();
 
@@ -580,7 +580,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       l2HeaderArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     return this.del(`${this.host}${endpoint}`, {
@@ -590,7 +590,7 @@ export class ClobClient {
   }
 
   public async getBalanceAllowance(
-    params?: BalanceAllowanceParams
+    params?: BalanceAllowanceParams,
   ): Promise<BalanceAllowanceResponse> {
     this.canL2Auth();
 
@@ -604,7 +604,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       headerArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     const _params = {
@@ -616,7 +616,7 @@ export class ClobClient {
   }
 
   public async updateBalanceAllowance(
-    params?: BalanceAllowanceParams
+    params?: BalanceAllowanceParams,
   ): Promise<void> {
     this.canL2Auth();
 
@@ -630,7 +630,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       headerArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     const _params = {
@@ -643,7 +643,7 @@ export class ClobClient {
 
   public async createOrder(
     userOrder: UserOrder,
-    options?: Partial<CreateOrderOptions>
+    options?: Partial<CreateOrderOptions>,
   ): Promise<SignedOrder> {
     this.canL1Auth();
 
@@ -654,8 +654,8 @@ export class ClobClient {
     if (!priceValid(userOrder.price, tickSize)) {
       throw new Error(
         `invalid price (${userOrder.price}), min: ${parseFloat(
-          tickSize
-        )} - max: ${1 - parseFloat(tickSize)}`
+          tickSize,
+        )} - max: ${1 - parseFloat(tickSize)}`,
       );
     }
 
@@ -669,7 +669,7 @@ export class ClobClient {
 
   public async createMarketOrder(
     userMarketOrder: UserMarketOrder,
-    options?: Partial<CreateOrderOptions>
+    options?: Partial<CreateOrderOptions>,
   ): Promise<SignedOrder> {
     this.canL1Auth();
 
@@ -681,15 +681,15 @@ export class ClobClient {
       userMarketOrder.price = await this.calculateMarketPrice(
         tokenID,
         userMarketOrder.side,
-        userMarketOrder.amount
+        userMarketOrder.amount,
       );
     }
 
     if (!priceValid(userMarketOrder.price, tickSize)) {
       throw new Error(
         `invalid price (${userMarketOrder.price}), min: ${parseFloat(
-          tickSize
-        )} - max: ${1 - parseFloat(tickSize)}`
+          tickSize,
+        )} - max: ${1 - parseFloat(tickSize)}`,
       );
     }
 
@@ -704,7 +704,7 @@ export class ClobClient {
   public async getOpenOrders(
     params?: OpenOrderParams,
     only_first_page = false,
-    next_cursor?: string
+    next_cursor?: string,
   ): Promise<OpenOrdersResponse> {
     this.canL2Auth();
     const endpoint = GET_OPEN_ORDERS;
@@ -717,7 +717,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       l2HeaderArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     let results: OpenOrder[] = [];
@@ -742,11 +742,11 @@ export class ClobClient {
 
   public async postOrder<T extends OrderType = OrderType.GTC>(
     order: SignedOrder,
-    orderType: T = OrderType.GTC as T
+    orderType: T = OrderType.GTC as T,
   ): Promise<any> {
     this.canL2Auth();
     const endpoint = POST_ORDER;
-    const orderPayload = orderToJson(order, this.creds?.key || "", orderType);
+    const orderPayload = orderToJson(order, this.creds?.key || '', orderType);
 
     const l2HeaderArgs = {
       method: POST,
@@ -758,7 +758,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       l2HeaderArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     return this.post(`${this.host}${endpoint}`, {
@@ -780,7 +780,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       l2HeaderArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
     return this.del(`${this.host}${endpoint}`, { headers, data: payload });
   }
@@ -798,7 +798,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       l2HeaderArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
     return this.del(`${this.host}${endpoint}`, { headers, data: ordersHashes });
   }
@@ -815,13 +815,13 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       l2HeaderArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
     return this.del(`${this.host}${endpoint}`, { headers });
   }
 
   public async cancelMarketOrders(
-    payload: OrderMarketCancelParams
+    payload: OrderMarketCancelParams,
   ): Promise<any> {
     this.canL2Auth();
     const endpoint = CANCEL_MARKET_ORDERS;
@@ -835,13 +835,13 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       l2HeaderArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
     return this.del(`${this.host}${endpoint}`, { headers, data: payload });
   }
 
   public async isOrderScoring(
-    params?: OrderScoringParams
+    params?: OrderScoringParams,
   ): Promise<OrderScoring> {
     this.canL2Auth();
 
@@ -855,14 +855,14 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       headerArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     return this.get(`${this.host}${endpoint}`, { headers, params });
   }
 
   public async areOrdersScoring(
-    params?: OrdersScoringParams
+    params?: OrdersScoringParams,
   ): Promise<OrdersScoring> {
     this.canL2Auth();
 
@@ -878,7 +878,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       headerArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     return this.post(`${this.host}${endpoint}`, {
@@ -901,7 +901,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       headerArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     let results: UserEarning[] = [];
@@ -924,7 +924,7 @@ export class ClobClient {
   }
 
   public async getTotalEarningsForUserForDay(
-    date: string
+    date: string,
   ): Promise<TotalUserEarning[]> {
     this.canL2Auth();
 
@@ -938,7 +938,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       headerArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     const params = {
@@ -954,9 +954,9 @@ export class ClobClient {
 
   public async getUserEarningsAndMarketsConfig(
     date: string,
-    order_by = "",
-    position = "",
-    no_competition = false
+    order_by = '',
+    position = '',
+    no_competition = false,
   ): Promise<UserRewardsEarning[]> {
     this.canL2Auth();
 
@@ -970,7 +970,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       headerArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     let results: UserRewardsEarning[] = [];
@@ -1008,7 +1008,7 @@ export class ClobClient {
       this.signer as Wallet | JsonRpcSigner,
       this.creds as ApiKeyCreds,
       headerArgs,
-      this.useServerTime ? await this.getServerTime() : undefined
+      this.useServerTime ? await this.getServerTime() : undefined,
     );
 
     const _params = {
@@ -1026,7 +1026,7 @@ export class ClobClient {
         `${this.host}${GET_REWARDS_MARKETS_CURRENT}`,
         {
           params: { next_cursor },
-        }
+        },
       );
       next_cursor = response.next_cursor;
       results = [...results, ...response.data];
@@ -1035,7 +1035,7 @@ export class ClobClient {
   }
 
   public async getRawRewardsForMarket(
-    conditionId: string
+    conditionId: string,
   ): Promise<MarketReward[]> {
     let results: MarketReward[] = [];
     let next_cursor = INITIAL_CURSOR;
@@ -1044,7 +1044,7 @@ export class ClobClient {
         `${this.host}${GET_REWARDS_MARKETS}${conditionId}`,
         {
           params: { next_cursor },
-        }
+        },
       );
       next_cursor = response.next_cursor;
       results = [...results, ...response.data];
@@ -1053,7 +1053,7 @@ export class ClobClient {
   }
 
   public async getMarketTradesEvents(
-    conditionID: string
+    conditionID: string,
   ): Promise<MarketTradeEvent[]> {
     return this.get(`${this.host}${GET_MARKET_TRADES_EVENTS}${conditionID}`);
   }
@@ -1061,20 +1061,20 @@ export class ClobClient {
   public async calculateMarketPrice(
     tokenID: string,
     side: Side,
-    amount: number
+    amount: number,
   ): Promise<number> {
     const book = await this.getOrderBook(tokenID);
     if (!book) {
-      throw new Error("no orderbook");
+      throw new Error('no orderbook');
     }
     if (side === Side.BUY) {
       if (!book.asks) {
-        throw new Error("no match");
+        throw new Error('no match');
       }
       return calculateBuyMarketPrice(book.asks, amount);
     } else {
       if (!book.bids) {
-        throw new Error("no match");
+        throw new Error('no match');
       }
       return calculateSellMarketPrice(book.bids, amount);
     }
@@ -1098,13 +1098,13 @@ export class ClobClient {
 
   private async _resolveTickSize(
     tokenID: string,
-    tickSize?: TickSize
+    tickSize?: TickSize,
   ): Promise<TickSize> {
     const minTickSize = await this.getTickSize(tokenID);
     if (tickSize) {
       if (isTickSizeSmaller(tickSize, minTickSize)) {
         throw new Error(
-          `invalid tick size (${tickSize}), minimum for the market is ${minTickSize}`
+          `invalid tick size (${tickSize}), minimum for the market is ${minTickSize}`,
         );
       }
     } else {

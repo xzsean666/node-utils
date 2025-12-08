@@ -44,14 +44,19 @@ if (!fs.existsSync(targetDir)) {
 const processedFiles = new Set<string>();
 
 // 递归分析文件依赖并复制
-function analyzeDependencies(filePath: string, depth = 0, maxDepth = 10, isEntryFile = false) {
+function analyzeDependencies(
+  filePath: string,
+  depth = 0,
+  maxDepth = 10,
+  isEntryFile = false,
+) {
   if (processedFiles.has(filePath) || depth > maxDepth) return;
   processedFiles.add(filePath);
 
   const content = fs.readFileSync(filePath, 'utf-8');
   const relativePath = path.relative(sourceDir, filePath);
   const relativePathFixed = relativePath.replace(new RegExp(`^${fixDir}/`), '');
-  
+
   // 如果是入口文件，将其重命名为 index.ts
   let targetPath: string;
   if (isEntryFile) {
@@ -65,7 +70,9 @@ function analyzeDependencies(filePath: string, depth = 0, maxDepth = 10, isEntry
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   fs.copyFileSync(filePath, targetPath);
 
-  console.log(`Copied [Depth ${depth}]: ${relativePath}${isEntryFile ? ' -> index' + path.extname(relativePath) : ''}`);
+  console.log(
+    `Copied [Depth ${depth}]: ${relativePath}${isEntryFile ? ' -> index' + path.extname(relativePath) : ''}`,
+  );
 
   // 使用正则表达式查找所有类型的导入语句
   const importRegexes = [

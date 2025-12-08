@@ -1,7 +1,7 @@
-import WebSocket from "ws";
-import EventEmitter from "events";
-import * as https from "https";
-import * as http from "http";
+import WebSocket from 'ws';
+import EventEmitter from 'events';
+import * as https from 'https';
+import * as http from 'http';
 
 export interface BinanceStreamConfig {
   streams: string[];
@@ -44,8 +44,8 @@ export class BinanceWssHelper extends EventEmitter {
     this.streams = config.streams;
     this.directUrl = config.directUrl;
     this.baseUrl = config.isTestnet
-      ? "wss://stream.binancefuture.com/stream?streams="
-      : "wss://fstream.binance.com/stream?streams=";
+      ? 'wss://stream.binancefuture.com/stream?streams='
+      : 'wss://fstream.binance.com/stream?streams=';
     this.reconnectOnClose = config.reconnectOnClose !== false;
     this.requestTimeout = config.requestTimeout || 30000;
     this.connectionTimeout = config.connectionTimeout || 10000;
@@ -64,7 +64,7 @@ export class BinanceWssHelper extends EventEmitter {
    */
   public connect(): void {
     if (this.isConnected) {
-      console.warn("WebSocket is already connected");
+      console.warn('WebSocket is already connected');
       return;
     }
 
@@ -72,7 +72,7 @@ export class BinanceWssHelper extends EventEmitter {
     if (this.directUrl) {
       streamUrl = this.directUrl;
     } else {
-      streamUrl = `${this.baseUrl}${this.streams.join("/")}`;
+      streamUrl = `${this.baseUrl}${this.streams.join('/')}`;
     }
     console.log(`Connecting to WebSocket URL: ${streamUrl}`);
 
@@ -82,7 +82,7 @@ export class BinanceWssHelper extends EventEmitter {
         .then((canConnect) => {
           if (!canConnect) {
             console.warn(
-              "Unable to ping Binance server, but still trying to connect"
+              'Unable to ping Binance server, but still trying to connect',
             );
           }
 
@@ -90,15 +90,15 @@ export class BinanceWssHelper extends EventEmitter {
           const wsOptions: WebSocket.ClientOptions = {
             handshakeTimeout: this.connectionTimeout,
             headers: {
-              "User-Agent":
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
             },
           };
 
           // 如果设置了代理
           if (this.proxy) {
             const proxyUrl = new URL(this.proxy);
-            wsOptions.agent = proxyUrl.protocol.startsWith("https")
+            wsOptions.agent = proxyUrl.protocol.startsWith('https')
               ? new https.Agent({
                   host: proxyUrl.hostname,
                   port: Number(proxyUrl.port),
@@ -115,15 +115,15 @@ export class BinanceWssHelper extends EventEmitter {
           this.connectionTimer = setTimeout(() => {
             if (!this.isConnected && this.ws) {
               console.error(
-                `WebSocket connection timeout after ${this.connectionTimeout}ms`
+                `WebSocket connection timeout after ${this.connectionTimeout}ms`,
               );
               this.ws.terminate();
-              this.emit("error", new Error("Connection timeout"));
+              this.emit('error', new Error('Connection timeout'));
             }
           }, this.connectionTimeout);
 
-          this.ws.on("open", () => {
-            console.log("WebSocket connection established");
+          this.ws.on('open', () => {
+            console.log('WebSocket connection established');
             this.isConnected = true;
             this.reconnectAttempts = 0;
 
@@ -133,7 +133,7 @@ export class BinanceWssHelper extends EventEmitter {
               this.connectionTimer = undefined;
             }
 
-            this.emit("connected");
+            this.emit('connected');
 
             // Start ping interval to keep connection alive
             if (this.enableHeartbeat) {
@@ -145,41 +145,41 @@ export class BinanceWssHelper extends EventEmitter {
             }
           });
 
-          this.ws.on("pong", () => {
-            console.log("Received pong from server");
+          this.ws.on('pong', () => {
+            console.log('Received pong from server');
           });
 
-          this.ws.on("message", (data: WebSocket.Data) => {
+          this.ws.on('message', (data: WebSocket.Data) => {
             try {
               console.log(
-                `Raw message received: ${data.toString().substring(0, 200)}...`
+                `Raw message received: ${data.toString().substring(0, 200)}...`,
               );
               const message = JSON.parse(
-                data.toString()
+                data.toString(),
               ) as BinanceStreamMessage;
               message.time = Date.now();
 
-              this.emit("message", message);
+              this.emit('message', message);
 
               // Also emit events for specific stream types
               if (message.stream) {
                 this.emit(message.stream, message.data);
               }
             } catch (error) {
-              console.error("Error parsing WebSocket message:", error);
+              console.error('Error parsing WebSocket message:', error);
               console.error(
-                "Raw message data:",
-                data.toString().substring(0, 200)
+                'Raw message data:',
+                data.toString().substring(0, 200),
               );
             }
           });
 
-          this.ws.on("error", (error) => {
-            console.error("WebSocket error:", error);
-            this.emit("error", error);
+          this.ws.on('error', (error) => {
+            console.error('WebSocket error:', error);
+            this.emit('error', error);
           });
 
-          this.ws.on("close", (code, reason) => {
+          this.ws.on('close', (code, reason) => {
             console.log(`WebSocket connection closed: ${code} ${reason}`);
             this.isConnected = false;
 
@@ -194,7 +194,7 @@ export class BinanceWssHelper extends EventEmitter {
               this.pingInterval = null;
             }
 
-            this.emit("disconnected", { code, reason });
+            this.emit('disconnected', { code, reason });
 
             if (this.reconnectOnClose) {
               this.reconnect();
@@ -205,16 +205,16 @@ export class BinanceWssHelper extends EventEmitter {
           setTimeout(() => {
             if (!this.isConnected) {
               console.log(
-                "WebSocket connection hasn't been established after 5 seconds"
+                "WebSocket connection hasn't been established after 5 seconds",
               );
             }
           }, 5000);
         })
         .catch((error) => {
-          console.error("Error checking connection:", error);
+          console.error('Error checking connection:', error);
         });
     } catch (error) {
-      console.error("Error creating WebSocket connection:", error);
+      console.error('Error creating WebSocket connection:', error);
     }
   }
 
@@ -232,20 +232,20 @@ export class BinanceWssHelper extends EventEmitter {
           {
             hostname,
             port: 443,
-            path: "/",
-            method: "HEAD",
+            path: '/',
+            method: 'HEAD',
             timeout: 5000,
           },
           (res) => {
             resolve(res.statusCode !== undefined);
-          }
+          },
         );
 
-        req.on("error", () => {
+        req.on('error', () => {
           resolve(false);
         });
 
-        req.on("timeout", () => {
+        req.on('timeout', () => {
           req.destroy();
           resolve(false);
         });
@@ -253,7 +253,7 @@ export class BinanceWssHelper extends EventEmitter {
         req.end();
       });
     } catch (error) {
-      console.error("Error checking connection:", error);
+      console.error('Error checking connection:', error);
       return false;
     }
   }
@@ -263,14 +263,14 @@ export class BinanceWssHelper extends EventEmitter {
    */
   private reconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error("Max reconnection attempts reached");
-      this.emit("reconnect_failed");
+      console.error('Max reconnection attempts reached');
+      this.emit('reconnect_failed');
       return;
     }
 
     this.reconnectAttempts++;
     console.log(
-      `Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`
+      `Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`,
     );
 
     setTimeout(() => {
@@ -298,7 +298,7 @@ export class BinanceWssHelper extends EventEmitter {
     }
 
     this.isConnected = false;
-    console.log("WebSocket connection closed");
+    console.log('WebSocket connection closed');
   }
 
   /**

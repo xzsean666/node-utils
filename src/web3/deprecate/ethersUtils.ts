@@ -1663,7 +1663,7 @@ export class EthersUtils {
       if (!scanBlocks) {
         console.log('跳过区块扫描（scanBlocks=false）');
       } else {
-        let currentBlockNumber = await this.web3.getBlockNumber();
+        const currentBlockNumber = await this.web3.getBlockNumber();
         let foundTxs = 0;
 
         // 从最新区块开始往前搜索，带超时控制

@@ -1,14 +1,14 @@
-import { KVDatabase } from "./PGKVDatabase";
+import { KVDatabase } from './PGKVDatabase';
 
 export function createCacheDecorator(
   db: KVDatabase,
-  defaultTTL: number = 5 * 60 * 1000
+  defaultTTL: number = 5 * 60 * 1000,
 ) {
-  return function cache(prefix: string = "", ttl: number = defaultTTL) {
+  return function cache(prefix: string = '', ttl: number = defaultTTL) {
     return function (
       target: any,
       propertyKey: string,
-      descriptor: PropertyDescriptor
+      descriptor: PropertyDescriptor,
     ) {
       const originalMethod = descriptor.value;
 
@@ -16,7 +16,7 @@ export function createCacheDecorator(
         const cacheKey = `${prefix}:${propertyKey}:${JSON.stringify(args)}`;
 
         const cached = await db.get<{ value: any; timestamp: number }>(
-          cacheKey
+          cacheKey,
         );
 
         const now = Date.now();

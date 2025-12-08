@@ -1,8 +1,8 @@
 export enum ExchangeName {
-  BINANCE = "BINANCE",
-  OKX = "OKX",
-  GATE = "GATE",
-  HUOBI = "HUOBI",
+  BINANCE = 'BINANCE',
+  OKX = 'OKX',
+  GATE = 'GATE',
+  HUOBI = 'HUOBI',
   // 可以继续添加其他交易所
 }
 
@@ -14,7 +14,7 @@ export interface ExchangeConfig {
 export interface UnifiedPosition {
   exchange: ExchangeName; // 使用枚举类型
   symbol: string; // 交易对
-  positionSide: "LONG" | "SHORT"; // 持仓方向
+  positionSide: 'LONG' | 'SHORT'; // 持仓方向
   positionAmt: number; // 持仓数量
   entryPrice: number; // 开仓均价
   markPrice: number; // 标记价格
@@ -27,7 +27,7 @@ export interface UnifiedPosition {
     marginRatio: number; // 保证金率
     liquidationPrice: number; // 强平价格
     safetyDistance: number; // 安全距离（百分比）
-    healthLevel: "SAFE" | "WARNING" | "DANGER"; // 健康等级
+    healthLevel: 'SAFE' | 'WARNING' | 'DANGER'; // 健康等级
   };
   // 性能指标
   metrics: {
@@ -107,9 +107,9 @@ export interface UnifiedAccountStateChanges {
  * 交易统计周期类型
  */
 export enum TradeStatisticsPeriod {
-  DAY = "day",
-  WEEK = "week",
-  MONTH = "month",
+  DAY = 'day',
+  WEEK = 'week',
+  MONTH = 'month',
 }
 
 /**

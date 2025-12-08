@@ -1,10 +1,10 @@
-import axios from "axios";
-import { KVDatabase } from "../db/PGKVDatabase";
-import dotenv from "dotenv";
+import axios from 'axios';
+import { KVDatabase } from '../db/PGKVDatabase';
+import dotenv from 'dotenv';
 dotenv.config();
 
 export class GateioService {
-  private readonly BASE_URL = "https://api.gateio.ws/api/v4";
+  private readonly BASE_URL = 'https://api.gateio.ws/api/v4';
   private readonly db?: KVDatabase;
 
   constructor(dbConfig?: { dbUrl: string; tableName: string }) {
@@ -13,7 +13,7 @@ export class GateioService {
     const tableName =
       dbConfig?.tableName ||
       process.env.GATE_PRICE_CACHE_DB_TABLE_NAME ||
-      "gate_price_cache";
+      'gate_price_cache';
 
     if (dbUrl && tableName) {
       this.db = new KVDatabase(dbUrl, tableName);
@@ -23,7 +23,7 @@ export class GateioService {
   async getPrice(token: string, timestamp?: number): Promise<number> {
     try {
       // 构建缓存键
-      const cacheKey = `price:${token}:${timestamp || "current"}`;
+      const cacheKey = `price:${token}:${timestamp || 'current'}`;
 
       // 如果启用了缓存，先尝试从缓存获取
       if (this.db) {
@@ -35,14 +35,14 @@ export class GateioService {
 
       // 以下是原有的价格获取逻辑
       let symbolToken = token.toUpperCase();
-      if (symbolToken === "WETH") {
-        symbolToken = "ETH";
+      if (symbolToken === 'WETH') {
+        symbolToken = 'ETH';
       }
-      if (symbolToken === "USDC.E") {
-        symbolToken = "USDC";
+      if (symbolToken === 'USDC.E') {
+        symbolToken = 'USDC';
       }
-      if (symbolToken === "USDT") {
-        symbolToken = "USDT";
+      if (symbolToken === 'USDT') {
+        symbolToken = 'USDT';
         return 1;
       }
 
@@ -50,7 +50,7 @@ export class GateioService {
       let price: number;
 
       if (timestamp) {
-        const interval = "1m";
+        const interval = '1m';
         const endTime = timestamp + 60;
         const url = `${this.BASE_URL}/spot/candlesticks?currency_pair=${currencyPair}&from=${timestamp}&to=${endTime}&interval=${interval}`;
         const response = await axios.get(url);

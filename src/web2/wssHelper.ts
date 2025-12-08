@@ -2,8 +2,8 @@
  * WebSocket 帮助类
  * 提供 WebSocket 连接管理、消息发送和接收、事件处理等功能
  */
-import WebSocket from "ws"; // 导入 ws 包
-import { HttpsProxyAgent } from "https-proxy-agent"; // 导入代理支持
+import WebSocket from 'ws'; // 导入 ws 包
+import { HttpsProxyAgent } from 'https-proxy-agent'; // 导入代理支持
 
 export class WssHelper {
   private ws: WebSocket | null = null;
@@ -23,11 +23,11 @@ export class WssHelper {
    * 连接状态枚举
    */
   public static ConnectionStatus = {
-    CONNECTING: "connecting",
-    CONNECTED: "connected",
-    DISCONNECTED: "disconnected",
-    RECONNECTING: "reconnecting",
-    ERROR: "error",
+    CONNECTING: 'connecting',
+    CONNECTED: 'connected',
+    DISCONNECTED: 'disconnected',
+    RECONNECTING: 'reconnecting',
+    ERROR: 'error',
   } as const;
 
   /**
@@ -43,7 +43,7 @@ export class WssHelper {
       reconnectInterval?: number;
       heartbeatInterval?: number;
       proxyUrl?: string;
-    } = {}
+    } = {},
   ) {
     this.url = url;
     this.proxyUrl = options.proxyUrl || null;
@@ -73,14 +73,14 @@ export class WssHelper {
         }
 
         // 设置事件处理程序
-        this.ws.on("open", () => {
+        this.ws.on('open', () => {
           this.reconnectAttempts = 0;
           this.startHeartbeat();
           this.notifyStatusChange(WssHelper.ConnectionStatus.CONNECTED);
           resolve();
         });
 
-        this.ws.on("close", () => {
+        this.ws.on('close', () => {
           this.stopHeartbeat();
           this.notifyStatusChange(WssHelper.ConnectionStatus.DISCONNECTED);
 
@@ -89,18 +89,18 @@ export class WssHelper {
           }
         });
 
-        this.ws.on("error", (error) => {
+        this.ws.on('error', (error) => {
           this.notifyStatusChange(WssHelper.ConnectionStatus.ERROR);
           reject(error);
         });
 
-        this.ws.on("message", (data) => {
+        this.ws.on('message', (data) => {
           try {
             // 将数据转换为字符串然后解析
             const message = JSON.parse(data.toString());
             this.handleMessage(message);
           } catch (error) {
-            console.error("Failed to parse message:", error);
+            console.error('Failed to parse message:', error);
           }
         });
       } catch (error) {
@@ -117,7 +117,7 @@ export class WssHelper {
    */
   public send(type: string, data: any): void {
     if (!this.isConnected()) {
-      throw new Error("WebSocket is not connected");
+      throw new Error('WebSocket is not connected');
     }
 
     const message = JSON.stringify({
@@ -164,8 +164,8 @@ export class WssHelper {
    */
   public onStatusChange(
     listener: (
-      status: (typeof WssHelper.ConnectionStatus)[keyof typeof WssHelper.ConnectionStatus]
-    ) => void
+      status: (typeof WssHelper.ConnectionStatus)[keyof typeof WssHelper.ConnectionStatus],
+    ) => void,
   ): void {
     this.statusListeners.push(listener);
   }
@@ -176,8 +176,8 @@ export class WssHelper {
    */
   public offStatusChange(
     listener: (
-      status: (typeof WssHelper.ConnectionStatus)[keyof typeof WssHelper.ConnectionStatus]
-    ) => void
+      status: (typeof WssHelper.ConnectionStatus)[keyof typeof WssHelper.ConnectionStatus],
+    ) => void,
   ): void {
     const index = this.statusListeners.indexOf(listener);
     if (index !== -1) {
@@ -219,8 +219,8 @@ export class WssHelper {
     const { type, data } = message;
 
     // 处理心跳消息
-    if (type === "heartbeat") {
-      this.send("heartbeat-ack", {});
+    if (type === 'heartbeat') {
+      this.send('heartbeat-ack', {});
       return;
     }
 
@@ -238,7 +238,7 @@ export class WssHelper {
     this.stopHeartbeat();
     this.heartbeatTimer = setInterval(() => {
       if (this.isConnected()) {
-        this.send("heartbeat", {});
+        this.send('heartbeat', {});
       }
     }, this.heartbeatInterval);
   }
@@ -258,7 +258,7 @@ export class WssHelper {
    */
   private attemptReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.warn("Maximum reconnect attempts reached");
+      console.warn('Maximum reconnect attempts reached');
       return;
     }
 
@@ -267,7 +267,7 @@ export class WssHelper {
 
     this.reconnectTimer = setTimeout(() => {
       console.log(
-        `Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})`
+        `Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
       );
       this.connect().catch(() => {
         // 连接失败，继续尝试重连
@@ -280,7 +280,7 @@ export class WssHelper {
    * @param status 连接状态
    */
   private notifyStatusChange(
-    status: (typeof WssHelper.ConnectionStatus)[keyof typeof WssHelper.ConnectionStatus]
+    status: (typeof WssHelper.ConnectionStatus)[keyof typeof WssHelper.ConnectionStatus],
   ): void {
     this.statusListeners.forEach((listener) => listener(status));
   }

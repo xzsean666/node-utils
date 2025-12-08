@@ -356,7 +356,7 @@ function analyzeMessages(messages: any[]) {
   let textCount = 0;
   let mediaCount = 0;
   let totalLength = 0;
-  let dates: Date[] = [];
+  const dates: Date[] = [];
 
   messages.forEach((msg) => {
     if (msg.senderId) {

@@ -1,5 +1,5 @@
-import { ethers, HDNodeWallet, Log } from "ethers";
-import detectEthereumProvider from "@metamask/detect-provider";
+import { ethers, HDNodeWallet, Log } from 'ethers';
+import detectEthereumProvider from '@metamask/detect-provider';
 
 export { ethers };
 declare global {
@@ -27,7 +27,7 @@ export class EthersUtils {
     this.config = config;
     this.batchCallAddress = config?.batchCallAddress;
     this.ethers = ethers;
-    if (typeof NODE_PROVIDER == "string") {
+    if (typeof NODE_PROVIDER == 'string') {
       this.web3 = new ethers.JsonRpcProvider(NODE_PROVIDER);
     } else if (NODE_PROVIDER instanceof ethers.BrowserProvider) {
       this.web3 = NODE_PROVIDER;
@@ -45,18 +45,18 @@ export class EthersUtils {
     const provider = await detectEthereumProvider();
 
     if (!provider || provider !== window.ethereum) {
-      throw new Error("MetaMask未安装或检测到多个钱包插件");
+      throw new Error('MetaMask未安装或检测到多个钱包插件');
     }
 
     if (!provider.isMetaMask) {
-      throw new Error("请安装MetaMask钱包");
+      throw new Error('请安装MetaMask钱包');
     }
 
     return new ethers.BrowserProvider(window.ethereum);
   }
   public async deployContract(abi: any[], bytecode: string): Promise<any> {
     try {
-      const signer = new ethers.Wallet(this.privateKey || "", this.web3);
+      const signer = new ethers.Wallet(this.privateKey || '', this.web3);
       const factory = new ethers.ContractFactory(abi, bytecode, signer);
       const contract = await factory.deploy();
       await contract.waitForDeployment();
@@ -70,7 +70,7 @@ export class EthersUtils {
     return (await this.web3.getBalance(address)).toString();
   }
   static async getRPCStatus(
-    rpcs: string[]
+    rpcs: string[],
   ): Promise<{ [key: string]: { blockNumber: number; latency: number } }> {
     const statuses = await Promise.all(
       rpcs.map(async (rpc) => {
@@ -88,19 +88,22 @@ export class EthersUtils {
         }
 
         return { rpc, blockNumber, latency };
-      })
+      }),
     );
 
     // 将结果转换为字典格式
-    return statuses.reduce((acc, { rpc, blockNumber, latency }) => {
-      acc[rpc] = { blockNumber, latency };
-      return acc;
-    }, {} as { [key: string]: { blockNumber: number; latency: number } });
+    return statuses.reduce(
+      (acc, { rpc, blockNumber, latency }) => {
+        acc[rpc] = { blockNumber, latency };
+        return acc;
+      },
+      {} as { [key: string]: { blockNumber: number; latency: number } },
+    );
   }
 
   async getLatestBlockNumber(): Promise<number> {
     if (!this.web3) {
-      throw new Error("未找到有效的Provider");
+      throw new Error('未找到有效的Provider');
     }
     try {
       const blockNumber = await this.web3.getBlockNumber();
@@ -111,7 +114,7 @@ export class EthersUtils {
   }
   async getStorageAt(contractAddress: string, slot: string): Promise<string> {
     if (!this.web3) {
-      throw new Error("未找到有效的Provider");
+      throw new Error('未找到有效的Provider');
     }
     try {
       const data = await this.web3.getStorage(contractAddress, slot);
@@ -123,10 +126,10 @@ export class EthersUtils {
   async cancelPendingTransaction(
     nonce: number,
     gasPriceMultiplierMAX: number = 10,
-    step: number = 0.5
+    step: number = 0.5,
   ) {
     if (!this.web3) {
-      throw new Error("未找到有效的Provider");
+      throw new Error('未找到有效的Provider');
     }
 
     let multiplier = 1;
@@ -137,7 +140,7 @@ export class EthersUtils {
         // 获取当前gas价格
         const currentGasPrice = await this.web3.getFeeData();
         const newGasPrice = BigInt(
-          Math.floor(Number(currentGasPrice.gasPrice) * multiplier)
+          Math.floor(Number(currentGasPrice.gasPrice) * multiplier),
         );
 
         console.log(`尝试取消交易，当前gas倍数: ${multiplier}x`);
@@ -160,7 +163,7 @@ export class EthersUtils {
         }
 
         const transaction = await signer.sendTransaction(tx);
-        console.log("取消交易已发送,Hash:", transaction.hash);
+        console.log('取消交易已发送,Hash:', transaction.hash);
 
         return transaction;
       } catch (error: any) {
@@ -171,7 +174,7 @@ export class EthersUtils {
     }
 
     throw new Error(
-      `取消Pending交易失败 (尝试至 ${gasPriceMultiplierMAX}x): ${lastError?.message}`
+      `取消Pending交易失败 (尝试至 ${gasPriceMultiplierMAX}x): ${lastError?.message}`,
     );
   }
 
@@ -181,7 +184,7 @@ export class EthersUtils {
       return wallet.address;
     } else {
       const accounts = await window.ethereum.request({
-        method: "eth_requestAccounts",
+        method: 'eth_requestAccounts',
       });
       this.account = accounts[0];
       return this.account;
@@ -190,17 +193,17 @@ export class EthersUtils {
   getEventTopics(events: any[]) {
     const processType = (input: any): string => {
       // 处理基础 tuple 类型
-      if (input.type === "tuple") {
+      if (input.type === 'tuple') {
         const components = input.components
           .map((comp: any) => processType(comp))
-          .join(",");
+          .join(',');
         return `(${components})`;
       }
       // 处理 tuple 数组
-      if (input.type === "tuple[]") {
+      if (input.type === 'tuple[]') {
         const components = input.components
           .map((comp: any) => processType(comp))
-          .join(",");
+          .join(',');
         return `(${components})[]`;
       }
       // 返回基本类型
@@ -210,14 +213,14 @@ export class EthersUtils {
     return events.map((event) => {
       const signature = `${event.name}(${event.inputs
         .map((input: any) => processType(input))
-        .join(",")})`;
+        .join(',')})`;
       return ethers.id(signature);
     });
   }
   getSignerAddress() {
     return new ethers.Wallet(
       this.privateKey!,
-      this.web3 as ethers.JsonRpcProvider
+      this.web3 as ethers.JsonRpcProvider,
     ).address;
   }
 
@@ -226,7 +229,7 @@ export class EthersUtils {
   }
   async deriveWallets(privateKey: string, index: number = 0) {
     if (!privateKey) {
-      throw new Error("私钥不能为空");
+      throw new Error('私钥不能为空');
     }
 
     try {
@@ -240,7 +243,7 @@ export class EthersUtils {
       const derivedWallet = hdNode.derivePath(path);
 
       if (!(derivedWallet instanceof HDNodeWallet)) {
-        throw new Error("钱包派生失败");
+        throw new Error('钱包派生失败');
       }
 
       return {
@@ -286,7 +289,7 @@ export class EthersUtils {
     error?: any;
   }> {
     if (!this.web3) {
-      throw new Error("未找到有效的Provider");
+      throw new Error('未找到有效的Provider');
     }
 
     try {
@@ -298,13 +301,13 @@ export class EthersUtils {
         txHash = await this.sendWithPrivateKey(
           call.target,
           call.data,
-          call.value || "0"
+          call.value || '0',
         );
       } else {
         txHash = await this.sendWithMetaMask(
           call.target,
           call.data,
-          call.value || "0"
+          call.value || '0',
         );
       }
 
@@ -323,14 +326,14 @@ export class EthersUtils {
                     data: (log as ethers.Log).data,
                   });
                 } catch (e) {
-                  console.warn("解析单个日志失败:", e);
+                  console.warn('解析单个日志失败:', e);
                   return null;
                 }
               })
               .filter(Boolean) || null;
         }
       } catch (e) {
-        console.warn("解析交易日志失败:", e);
+        console.warn('解析交易日志失败:', e);
         decodedLogs = null;
       }
 
@@ -338,17 +341,17 @@ export class EthersUtils {
         target: call.target,
         success: true,
         transactionHash: txHash,
-        function: call.functionName || "",
+        function: call.functionName || '',
         args: call.executeArgs || [],
         decodedData: decodedLogs,
       };
     } catch (error: any) {
-      console.error("交易发送失败:", error);
+      console.error('交易发送失败:', error);
       return {
         target: call.target,
         success: false,
-        transactionHash: "",
-        function: call.functionName || "",
+        transactionHash: '',
+        function: call.functionName || '',
         args: call.executeArgs || [],
         decodedData: null,
         error: error,
@@ -359,10 +362,10 @@ export class EthersUtils {
   private async sendWithPrivateKey(
     to: string,
     data?: string,
-    value: string = "0"
+    value: string = '0',
   ): Promise<string> {
     if (!this.privateKey) {
-      throw new Error("Private key is required");
+      throw new Error('Private key is required');
     }
     const signer = new ethers.Wallet(this.privateKey, this.web3);
     const tx = await signer.sendTransaction({
@@ -378,17 +381,17 @@ export class EthersUtils {
   private async sendWithMetaMask(
     to: string,
     data?: string,
-    value: string = "0"
+    value: string = '0',
   ): Promise<string> {
     const fromAddress = await this.getAccounts();
-    const hexValue = value === "0" ? "0x0" : this.ethers.toQuantity(value);
+    const hexValue = value === '0' ? '0x0' : this.ethers.toQuantity(value);
     const txHash = await window.ethereum.request({
-      method: "eth_sendTransaction",
+      method: 'eth_sendTransaction',
       params: [
         {
           to,
           from: fromAddress,
-          data: data?.startsWith("0x") ? data : data ? "0x" + data : undefined,
+          data: data?.startsWith('0x') ? data : data ? '0x' + data : undefined,
           value: hexValue, // 使用转换后的十六进制值
         },
       ],
@@ -409,7 +412,7 @@ export class EthersUtils {
     // Encode the function call
     const data = iface.encodeFunctionData(
       params.functionName,
-      params.executeArgs
+      params.executeArgs,
     );
     return {
       target: params.target,
@@ -426,7 +429,7 @@ export class EthersUtils {
     abi: any,
     functionName: any,
     executeArgs: any[] | undefined = [],
-    blockNumber?: number
+    blockNumber?: number,
   ) {
     const contract = new ethers.Contract(contractAddress, abi, this.web3);
 
@@ -443,7 +446,7 @@ export class EthersUtils {
     contractAddress: string,
     abi: any,
     functionName: string,
-    executeArgs: any[] = []
+    executeArgs: any[] = [],
   ) {
     try {
       const contract = new ethers.Contract(contractAddress, abi, this.web3);
@@ -457,7 +460,7 @@ export class EthersUtils {
     contractAddress: string,
     abi: any,
     functionName: string,
-    executeArgs: any[]
+    executeArgs: any[],
   ) {
     const data = await this.encodeDataByABI({
       abi: abi,
@@ -475,7 +478,7 @@ export class EthersUtils {
       fromBlock?: number | string;
       toBlock?: number | string;
       topics?: string[];
-    } = {}
+    } = {},
   ) {
     try {
       // 确保地址和事件签名都是数组格式
@@ -491,7 +494,7 @@ export class EthersUtils {
         address: addresses,
         topics: [topics, ...(filter.topics || [])],
         fromBlock: filter.fromBlock || 0,
-        toBlock: filter.toBlock || "latest",
+        toBlock: filter.toBlock || 'latest',
       });
 
       return logs;
@@ -505,12 +508,12 @@ export class EthersUtils {
     eventNames: string | string[],
     abi: any,
     filter: LogFilter = {},
-    initialBatchSize: number = 50000
+    initialBatchSize: number = 50000,
   ) {
     try {
       // 1. 基础验证
       if (!contractAddresses || !abi) {
-        throw new Error("合约地址和ABI是必需的");
+        throw new Error('合约地址和ABI是必需的');
       }
 
       const addresses = Array.isArray(contractAddresses)
@@ -521,18 +524,18 @@ export class EthersUtils {
       // 2. 事件ABI过滤
       const abiArray = Array.isArray(abi) ? abi : [abi];
       const eventAbis = abiArray
-        .filter((item: any) => item.type === "event")
+        .filter((item: any) => item.type === 'event')
         .filter((item: any) => events.includes(item.name));
 
       if (eventAbis.length === 0) {
-        throw new Error("未找到指定的事件定义");
+        throw new Error('未找到指定的事件定义');
       }
       // 3. 生成事件topics
       const eventTopics = this.getEventTopics(eventAbis);
       // 4. 获取区块范围
       const fromBlock = BigInt(filter.fromBlock || 0);
       const toBlock =
-        filter.toBlock === "latest"
+        filter.toBlock === 'latest'
           ? await this.web3.getBlockNumber()
           : BigInt(filter.toBlock || (await this.web3.getBlockNumber()));
 
@@ -546,7 +549,7 @@ export class EthersUtils {
       while (currentBlock <= toBlock) {
         try {
           const endBlock = BigInt(
-            Math.min(Number(currentBlock) + batchSize - 1, Number(toBlock))
+            Math.min(Number(currentBlock) + batchSize - 1, Number(toBlock)),
           );
 
           console.log(`获取日志: ${currentBlock} 至 ${endBlock}`);
@@ -569,7 +572,7 @@ export class EthersUtils {
           console.warn(
             `获取区块 ${currentBlock} 至 ${
               currentBlock + BigInt(batchSize)
-            } 的日志失败`
+            } 的日志失败`,
           );
 
           // 减小批次大小并重试
@@ -577,7 +580,7 @@ export class EthersUtils {
 
           if (batchSize < MIN_BATCH_SIZE) {
             throw new Error(
-              `批次大小 ${batchSize} 小于最小值 ${MIN_BATCH_SIZE}`
+              `批次大小 ${batchSize} 小于最小值 ${MIN_BATCH_SIZE}`,
             );
           }
 
@@ -612,7 +615,7 @@ export class EthersUtils {
           } catch (error) {
             console.warn(
               `解析日志失败 (blockNumber: ${log.blockNumber}):`,
-              error
+              error,
             );
             return {
               ...log,
@@ -630,7 +633,7 @@ export class EthersUtils {
   async getLogByTxHash(txHash: string, abi?: any) {
     const receipt = await this.web3.getTransactionReceipt(txHash);
     if (!receipt) {
-      throw new Error("Transaction receipt not found");
+      throw new Error('Transaction receipt not found');
     }
     if (!abi) {
       return receipt.logs;
@@ -654,7 +657,7 @@ export class EthersUtils {
 
   getContract(address: string, abi: any) {
     if (!this.web3) {
-      throw new Error("未找到有效的Provider");
+      throw new Error('未找到有效的Provider');
     }
     // 直接使用 getAddress 规范化地址，避免 ENS 解析
     const normalizedAddress = ethers.getAddress(address);
@@ -663,7 +666,7 @@ export class EthersUtils {
   }
   async getContractWithSigner(address: string, abi: any) {
     if (!this.privateKey) {
-      throw new Error("私钥不能为空");
+      throw new Error('私钥不能为空');
     }
     const signer = new ethers.Wallet(this.privateKey, this.web3);
     const contract = new ethers.Contract(address, abi, signer);
@@ -679,12 +682,12 @@ export class EthersUtils {
       executeArgs: any[];
     }>,
     blockNumber?: number,
-    batchLimit: number = 1000
+    batchLimit: number = 1000,
   ) {
     const IBatchCallABI = batchCallABI;
 
     if (!this.batchCallAddress) {
-      throw new Error("BatchCallAddress not provided!");
+      throw new Error('BatchCallAddress not provided!');
     }
 
     const results: Array<{
@@ -703,14 +706,14 @@ export class EthersUtils {
       const [successes, returnData] = await this.excuteReadContract(
         this.batchCallAddress,
         IBatchCallABI,
-        "batchStaticCall",
+        'batchStaticCall',
         [
           batchCalls.map((call) => ({
             target: call.target,
             callData: call.data,
           })),
         ],
-        blockNumber
+        blockNumber,
       );
 
       // 解码返回结果
@@ -732,7 +735,7 @@ export class EthersUtils {
             const decodedData = await this.decodeDataByABI(
               call.abi,
               call.functionName,
-              data
+              data,
             );
             return {
               target: call.target,
@@ -751,7 +754,7 @@ export class EthersUtils {
               args: call.executeArgs,
             };
           }
-        })
+        }),
       );
 
       results.push(...batchResults);
@@ -768,20 +771,20 @@ export class EthersUtils {
     try {
       // 验证地址是否为合约
       const code = await this.web3.getCode(contractAddress);
-      if (code === "0x") {
-        throw new Error("供的地址不是合约地址");
+      if (code === '0x') {
+        throw new Error('供的地址不是合约地址');
       }
 
       // 直接获取该地址的第一笔交易记录
       const logs = await this.web3.getLogs({
         address: contractAddress,
         fromBlock: 0,
-        toBlock: "latest",
+        toBlock: 'latest',
         topics: [],
       });
 
       if (logs.length === 0) {
-        throw new Error("该合约没有产生任何的LOG。");
+        throw new Error('该合约没有产生任何的LOG。');
       }
 
       // 获取最早的交易记录
@@ -802,7 +805,7 @@ export class EthersUtils {
     contract: ethers.Contract,
     methodName: string,
     args: any[] = [],
-    blockNumber?: number | string
+    blockNumber?: number | string,
   ) {
     try {
       if (blockNumber) {
@@ -825,11 +828,11 @@ export class EthersUtils {
     tokenAddresses: string[],
     abi: any[],
     fromBlock?: number,
-    toBlock?: number | string
+    toBlock?: number | string,
   ): Promise<string[]> {
     const addresses: Set<string> = new Set();
     const eventNames = abi
-      .filter((item) => item.type === "event")
+      .filter((item) => item.type === 'event')
       .map((item) => item.name);
 
     const logs = await this.getContractLogs(
@@ -839,11 +842,11 @@ export class EthersUtils {
       {
         fromBlock,
         toBlock,
-      }
+      },
     );
 
     logs.forEach((log: any) => {
-      if ("args" in log && log.args) {
+      if ('args' in log && log.args) {
         if (log.args.from) addresses.add(log.args.from);
         if (log.args.to) addresses.add(log.args.to);
       }
@@ -851,9 +854,9 @@ export class EthersUtils {
 
     // 移除零地址
     const blackList = [
-      "0x000000000000000000000000000000000000dEaD",
-      "0x0000000000000000000000000000000000000000",
-      "0x0000000000000000000000000000000000000001",
+      '0x000000000000000000000000000000000000dEaD',
+      '0x0000000000000000000000000000000000000000',
+      '0x0000000000000000000000000000000000000001',
     ];
     blackList.forEach((address) => addresses.delete(address));
 
@@ -871,40 +874,40 @@ export class EthersUtils {
     try {
       // 检查地址是否为空
       if (!address) {
-        console.error("地址不能为空");
-        return "";
+        console.error('地址不能为空');
+        return '';
       }
 
       // 检查地址格式是否正确
       if (!ethers.isAddress(address)) {
-        console.error("无效的以太坊地址格式");
-        return "";
+        console.error('无效的以太坊地址格式');
+        return '';
       }
 
       // 检查地址是否为零地址
-      const zeroAddress = "0x0000000000000000000000000000000000000000";
+      const zeroAddress = '0x0000000000000000000000000000000000000000';
       if (address.toLowerCase() === zeroAddress.toLowerCase()) {
-        console.error("不能使用零地址");
-        return "";
+        console.error('不能使用零地址');
+        return '';
       }
 
       // 返回规范化的地址
       return ethers.getAddress(address);
     } catch (error) {
-      console.error("检查地址时发生错误:", error);
-      return "";
+      console.error('检查地址时发生错误:', error);
+      return '';
     }
   }
 
   async getBlockTimestamp(blockNumber: number | string): Promise<number> {
     if (!this.web3) {
-      throw new Error("未找到有效的Provider");
+      throw new Error('未找到有效的Provider');
     }
 
     try {
       const block = await this.web3.getBlock(blockNumber);
       if (!block) {
-        throw new Error("未找到指定区块");
+        throw new Error('未找到指定区块');
       }
       return Number(block.timestamp);
     } catch (error: any) {
@@ -920,12 +923,12 @@ export class EthersUtils {
       functionName: string;
       executeArgs: any[];
     }>,
-    batchLimit: number = 1000
+    batchLimit: number = 1000,
   ) {
     const IBatchCallABI = batchCallABI;
 
     if (!this.batchCallAddress) {
-      throw new Error("BatchCallAddress未提供！");
+      throw new Error('BatchCallAddress未提供！');
     }
 
     const results: Array<{
@@ -946,13 +949,13 @@ export class EthersUtils {
         const txResult = await this.excuteWriteContract(
           this.batchCallAddress,
           IBatchCallABI,
-          "batchCall",
+          'batchCall',
           [
             batchCalls.map((call) => ({
               target: call.target,
               callData: call.data,
             })),
-          ]
+          ],
         );
 
         const batchResults = batchCalls.map((call) => ({
@@ -971,7 +974,7 @@ export class EthersUtils {
         const failedResults = batchCalls.map((call) => ({
           target: call.target,
           success: false,
-          transactionHash: "",
+          transactionHash: '',
           function: call.functionName,
           args: call.executeArgs,
         }));
@@ -998,7 +1001,7 @@ export class EthersUtils {
       const contract = new ethers.Contract(
         params.target,
         params.abi,
-        this.web3
+        this.web3,
       );
 
       // 获取当前 gas 价格
@@ -1010,7 +1013,7 @@ export class EthersUtils {
         ...(params.executeArgs || []),
         {
           value: params.value ? BigInt(params.value) : undefined,
-        }
+        },
       );
 
       // 计算预估成本 (gasLimit * gasPrice)
@@ -1031,7 +1034,7 @@ export async function encodeDataByABI(
   abi: any[],
   functionName: string,
   executeArgs: any[],
-  target: string = "0x0000000000000000000000000000000000000000"
+  target: string = '0x0000000000000000000000000000000000000000',
 ) {
   const iface = new ethers.Interface(abi);
   // Encode the function call
@@ -1044,7 +1047,7 @@ export async function functionsWithParamTypesFromABI(abi: any[]) {
   const functionArgs: { [key: string]: string[] } = {};
 
   abi
-    .filter((entry) => entry.type === "function")
+    .filter((entry) => entry.type === 'function')
     .forEach((func) => {
       const paramTypes = func.inputs.map((input: any) => input.type);
       functionNames.push(func.name);
@@ -1059,114 +1062,114 @@ export const batchCallABI = [
       {
         components: [
           {
-            internalType: "address",
-            name: "target",
-            type: "address",
+            internalType: 'address',
+            name: 'target',
+            type: 'address',
           },
           {
-            internalType: "bytes",
-            name: "callData",
-            type: "bytes",
+            internalType: 'bytes',
+            name: 'callData',
+            type: 'bytes',
           },
         ],
-        internalType: "struct Multicall[]",
-        name: "calls",
-        type: "tuple[]",
+        internalType: 'struct Multicall[]',
+        name: 'calls',
+        type: 'tuple[]',
       },
     ],
-    name: "batchCall",
+    name: 'batchCall',
     outputs: [
       {
-        internalType: "bool[]",
-        name: "successes",
-        type: "bool[]",
+        internalType: 'bool[]',
+        name: 'successes',
+        type: 'bool[]',
       },
       {
-        internalType: "bytes[]",
-        name: "results",
-        type: "bytes[]",
+        internalType: 'bytes[]',
+        name: 'results',
+        type: 'bytes[]',
       },
     ],
-    stateMutability: "payable",
-    type: "function",
+    stateMutability: 'payable',
+    type: 'function',
   },
   {
     inputs: [],
-    stateMutability: "nonpayable",
-    type: "constructor",
+    stateMutability: 'nonpayable',
+    type: 'constructor',
   },
   {
     anonymous: false,
     inputs: [
       {
         indexed: false,
-        internalType: "address",
-        name: "target",
-        type: "address",
+        internalType: 'address',
+        name: 'target',
+        type: 'address',
       },
       {
         indexed: false,
-        internalType: "string",
-        name: "reason",
-        type: "string",
+        internalType: 'string',
+        name: 'reason',
+        type: 'string',
       },
     ],
-    name: "CallError",
-    type: "event",
+    name: 'CallError',
+    type: 'event',
   },
   {
     anonymous: false,
     inputs: [
       {
         indexed: false,
-        internalType: "address",
-        name: "target",
-        type: "address",
+        internalType: 'address',
+        name: 'target',
+        type: 'address',
       },
       {
         indexed: false,
-        internalType: "bytes",
-        name: "data",
-        type: "bytes",
+        internalType: 'bytes',
+        name: 'data',
+        type: 'bytes',
       },
     ],
-    name: "CallResult",
-    type: "event",
+    name: 'CallResult',
+    type: 'event',
   },
   {
     inputs: [
       {
         components: [
           {
-            internalType: "address",
-            name: "target",
-            type: "address",
+            internalType: 'address',
+            name: 'target',
+            type: 'address',
           },
           {
-            internalType: "bytes",
-            name: "callData",
-            type: "bytes",
+            internalType: 'bytes',
+            name: 'callData',
+            type: 'bytes',
           },
         ],
-        internalType: "struct Multicall[]",
-        name: "calls",
-        type: "tuple[]",
+        internalType: 'struct Multicall[]',
+        name: 'calls',
+        type: 'tuple[]',
       },
     ],
-    name: "batchStaticCall",
+    name: 'batchStaticCall',
     outputs: [
       {
-        internalType: "bool[]",
-        name: "successes",
-        type: "bool[]",
+        internalType: 'bool[]',
+        name: 'successes',
+        type: 'bool[]',
       },
       {
-        internalType: "bytes[]",
-        name: "results",
-        type: "bytes[]",
+        internalType: 'bytes[]',
+        name: 'results',
+        type: 'bytes[]',
       },
     ],
-    stateMutability: "view",
-    type: "function",
+    stateMutability: 'view',
+    type: 'function',
   },
 ];

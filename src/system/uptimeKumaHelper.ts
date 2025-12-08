@@ -146,7 +146,7 @@ export class UptimeKumaHelper {
   async getMonitors(): Promise<Monitor[]> {
     return new Promise((resolve, reject) => {
       let monitors: Monitor[] = [];
-      let heartbeatListReceived = new Set();
+      const heartbeatListReceived = new Set();
 
       this.socket.once('monitorList', async (data: any) => {
         if (typeof data === 'object') {

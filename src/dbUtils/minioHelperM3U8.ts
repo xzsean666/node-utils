@@ -1,9 +1,9 @@
-import { MinioHelper } from "./minioHelper";
-import fs from "fs";
-import path from "path";
-import os from "os";
-import ffmpeg from "fluent-ffmpeg";
-import CryptoJS from "crypto-js";
+import { MinioHelper } from './minioHelper';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import ffmpeg from 'fluent-ffmpeg';
+import CryptoJS from 'crypto-js';
 
 export class MinioHelperM3U8 extends MinioHelper {
   private tempDir: string;
@@ -11,7 +11,7 @@ export class MinioHelperM3U8 extends MinioHelper {
   constructor(config: any) {
     super(config);
     // 创建临时目录用于存储转码文件
-    this.tempDir = path.join(os.tmpdir(), "video-transcoding");
+    this.tempDir = path.join(os.tmpdir(), 'video-transcoding');
     if (!fs.existsSync(this.tempDir)) {
       fs.mkdirSync(this.tempDir, { recursive: true });
     }
@@ -22,15 +22,15 @@ export class MinioHelperM3U8 extends MinioHelper {
     bucketName: string,
     m3u8Path: string,
     tsFilesDir: string,
-    targetDir: string
+    targetDir: string,
   ): Promise<void> {
     try {
-      const m3u8Content = await fs.promises.readFile(m3u8Path, "utf-8");
+      const m3u8Content = await fs.promises.readFile(m3u8Path, 'utf-8');
 
       // 解析并上传 ts 文件
       const tsFiles = m3u8Content
-        .split("\n")
-        .filter((line) => line.endsWith(".ts"))
+        .split('\n')
+        .filter((line) => line.endsWith('.ts'))
         .map((line) => line.trim());
 
       // 上传所有 ts 文件到指定目录
@@ -52,18 +52,18 @@ export class MinioHelperM3U8 extends MinioHelper {
   async getM3U8PlaybackUrl(
     bucketName: string,
     m3u8Name: string,
-    expiry: number = 24 * 60 * 60
+    expiry: number = 24 * 60 * 60,
   ): Promise<string> {
     try {
       const m3u8Content = await this.client.getObject(bucketName, m3u8Name);
       const content = await streamToString(m3u8Content);
 
-      const lines = content.split("\n");
+      const lines = content.split('\n');
       const m3u8Dir = path.dirname(m3u8Name);
 
       const updatedLines = await Promise.all(
         lines.map(async (line) => {
-          if (line.endsWith(".ts")) {
+          if (line.endsWith('.ts')) {
             // 使用相对路径构建ts文件路径，避免重复的目录名
             const tsFileName = line.trim();
             const tsPath = path.join(m3u8Dir, tsFileName);
@@ -72,16 +72,16 @@ export class MinioHelperM3U8 extends MinioHelper {
             const tsUrl = await this.getPresignedUrl(
               bucketName,
               tsPath,
-              expiry
+              expiry,
             );
             return line.replace(tsFileName, tsUrl);
           }
           return line;
-        })
+        }),
       );
       // 创建一个临时的 m3u8 文件
       const tempM3u8Path = path.join(this.tempDir, `temp-${Date.now()}.m3u8`);
-      await fs.promises.writeFile(tempM3u8Path, updatedLines.join("\n"));
+      await fs.promises.writeFile(tempM3u8Path, updatedLines.join('\n'));
 
       // 使用唯一的临时文件名来避免冲突
       const tempM3u8Name = `temp/${Date.now()}-${path.basename(m3u8Name)}`;
@@ -103,7 +103,7 @@ export class MinioHelperM3U8 extends MinioHelper {
       const now = Date.now();
 
       for (const file of files) {
-        if (file.startsWith("temp-") && file.endsWith(".m3u8")) {
+        if (file.startsWith('temp-') && file.endsWith('.m3u8')) {
           const filePath = path.join(this.tempDir, file);
           const stats = await fs.promises.stat(filePath);
 
@@ -121,7 +121,7 @@ export class MinioHelperM3U8 extends MinioHelper {
 
   async getM3U8PlayUrlByHash(
     bucketName: string,
-    hash: string
+    hash: string,
   ): Promise<string> {
     const m3u8Path = `videos/${hash}/hls/playlist.m3u8`;
     return await this.getM3U8PlaybackUrl(bucketName, m3u8Path, 24 * 60 * 60);
@@ -143,12 +143,12 @@ export class MinioHelperM3U8 extends MinioHelper {
     } else {
       // 处理文件路径
       const fileStats = await fs.promises.stat(input);
-      const fileHandle = await fs.promises.open(input, "r");
+      const fileHandle = await fs.promises.open(input, 'r');
       let bytesRead = 0;
 
       while (bytesRead < fileStats.size) {
         const buffer = Buffer.alloc(
-          Math.min(chunkSize, fileStats.size - bytesRead)
+          Math.min(chunkSize, fileStats.size - bytesRead),
         );
         await fileHandle.read(buffer, 0, buffer.length, bytesRead);
         md5Hash.update(CryptoJS.lib.WordArray.create(buffer));
@@ -164,7 +164,7 @@ export class MinioHelperM3U8 extends MinioHelper {
   async uploadVideoToM3U8(
     bucketName: string,
     objectName: string,
-    targetPath: string
+    targetPath: string,
   ): Promise<string> {
     try {
       // 1. 计算文件的 MD5
@@ -188,7 +188,7 @@ export class MinioHelperM3U8 extends MinioHelper {
       // 5. 创建临时目录用于转码
       const outputDir = path.join(this.tempDir, `output-${Date.now()}`);
       fs.mkdirSync(outputDir, { recursive: true });
-      const m3u8Path = path.join(outputDir, "playlist.m3u8");
+      const m3u8Path = path.join(outputDir, 'playlist.m3u8');
 
       // 6. 执行转码
       await this.convertToM3U8(targetPath, outputDir, m3u8Path);
@@ -198,7 +198,7 @@ export class MinioHelperM3U8 extends MinioHelper {
         bucketName,
         m3u8Path,
         outputDir,
-        hlsDir
+        hlsDir,
       );
 
       // 8. 清理临时文件
@@ -213,7 +213,7 @@ export class MinioHelperM3U8 extends MinioHelper {
   // 新增：检查对象是否存在
   private async objectExists(
     bucketName: string,
-    objectName: string
+    objectName: string,
   ): Promise<boolean> {
     try {
       await this.client.statObject(bucketName, objectName);
@@ -227,7 +227,7 @@ export class MinioHelperM3U8 extends MinioHelper {
   async transcodeVideoToM3U8(
     bucketName: string,
     videoKey: string,
-    targetPath?: string
+    targetPath?: string,
   ): Promise<string> {
     try {
       // 1. 从MinIO下载原始视频
@@ -239,7 +239,7 @@ export class MinioHelperM3U8 extends MinioHelper {
       fs.mkdirSync(outputDir, { recursive: true });
 
       // 3. 设置输出m3u8文件路径
-      const m3u8Path = path.join(outputDir, "playlist.m3u8");
+      const m3u8Path = path.join(outputDir, 'playlist.m3u8');
 
       // 4. 执行转码
       await this.convertToM3U8(tempVideoPath, outputDir, m3u8Path);
@@ -253,7 +253,7 @@ export class MinioHelperM3U8 extends MinioHelper {
         bucketName,
         m3u8Path,
         outputDir,
-        finalTargetPath
+        finalTargetPath,
       );
 
       // 7. 清理临时文件
@@ -269,22 +269,22 @@ export class MinioHelperM3U8 extends MinioHelper {
   private convertToM3U8(
     inputPath: string,
     outputDir: string,
-    m3u8Path: string
+    m3u8Path: string,
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       ffmpeg(inputPath)
         .outputOptions([
-          "-codec:v libx264", // 视频编码器
-          "-codec:a aac", // 音频编码器
-          "-hls_time 10", // 每个片段的时长（秒）
-          "-hls_list_size 0", // 保留所有片段
-          "-f hls", // HLS格式输出
-          "-hls_segment_filename", // 设置ts文件名格式
-          path.join(outputDir, "segment%d.ts"),
+          '-codec:v libx264', // 视频编码器
+          '-codec:a aac', // 音频编码器
+          '-hls_time 10', // 每个片段的时长（秒）
+          '-hls_list_size 0', // 保留所有片段
+          '-f hls', // HLS格式输出
+          '-hls_segment_filename', // 设置ts文件名格式
+          path.join(outputDir, 'segment%d.ts'),
         ])
         .output(m3u8Path)
-        .on("end", () => resolve())
-        .on("error", (err) => reject(err))
+        .on('end', () => resolve())
+        .on('error', (err) => reject(err))
         .run();
     });
   }
@@ -294,8 +294,8 @@ export class MinioHelperM3U8 extends MinioHelper {
 function streamToString(stream: any): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: any[] = [];
-    stream.on("data", (chunk: any) => chunks.push(chunk));
-    stream.on("error", reject);
-    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    stream.on('data', (chunk: any) => chunks.push(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
   });
 }

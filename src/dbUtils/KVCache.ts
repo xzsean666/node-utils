@@ -42,7 +42,9 @@ function makeCacheKey(
     payload = String(args);
   }
 
-  const base = prefix ? `${prefix}:${func_name}:${payload}` : `${func_name}:${payload}`;
+  const base = prefix
+    ? `${prefix}:${func_name}:${payload}`
+    : `${func_name}:${payload}`;
   return base.slice(0, 255);
 }
 
@@ -160,7 +162,11 @@ export function createCacheDecorator<T = any>(
   const lock_manager = global_lock_manager;
 
   return function cache(options: CacheOptions = {}) {
-    const { ttl = default_ttl, prefix = '', use_lock = default_use_lock } = options;
+    const {
+      ttl = default_ttl,
+      prefix = '',
+      use_lock = default_use_lock,
+    } = options;
 
     return function (
       target: any,
@@ -373,4 +379,3 @@ export function wrapWithCache<TArgs extends any[], TResult>(
     return result;
   };
 }
-

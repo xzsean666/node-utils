@@ -127,7 +127,7 @@ export interface FormattedPosition {
     leverage: number;
     liquidationPrice: string;
     safetyDistance: number;
-    healthLevel: "SAFE" | "WARNING" | "DANGER";
+    healthLevel: 'SAFE' | 'WARNING' | 'DANGER';
   };
   metrics: {
     entryPrice: string;

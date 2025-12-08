@@ -1,6 +1,6 @@
-import { Wallet, JsonRpcSigner } from "ethers";
-import { MSG_TO_SIGN } from "./constants";
-import { Chain } from "../types";
+import { Wallet, JsonRpcSigner } from 'ethers';
+import { MSG_TO_SIGN } from './constants';
+import { Chain } from '../types';
 
 /**
  * Builds the canonical Polymarket CLOB EIP712 signature
@@ -12,23 +12,23 @@ export const buildClobEip712Signature = async (
   signer: Wallet | JsonRpcSigner,
   chainId: Chain,
   timestamp: number,
-  nonce: number
+  nonce: number,
 ): Promise<string> => {
   const address = await signer.getAddress();
   const ts = `${timestamp}`;
 
   const domain = {
-    name: "ClobAuthDomain",
-    version: "1",
+    name: 'ClobAuthDomain',
+    version: '1',
     chainId: chainId,
   };
 
   const types = {
     ClobAuth: [
-      { name: "address", type: "address" },
-      { name: "timestamp", type: "string" },
-      { name: "nonce", type: "uint256" },
-      { name: "message", type: "string" },
+      { name: 'address', type: 'address' },
+      { name: 'timestamp', type: 'string' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'message', type: 'string' },
     ],
   };
   const value = {

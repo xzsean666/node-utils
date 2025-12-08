@@ -1,10 +1,10 @@
-import { ethers } from "ethers";
+import { ethers } from 'ethers';
 
 export class AnvilForkHelper {
   forkUrl: string;
   private provider: ethers.JsonRpcProvider;
 
-  constructor(forkUrl: string = "http://localhost:8545") {
+  constructor(forkUrl: string = 'http://localhost:8545') {
     this.forkUrl = forkUrl;
     this.provider = new ethers.JsonRpcProvider(forkUrl);
   }
@@ -12,7 +12,7 @@ export class AnvilForkHelper {
   public async deployContract(
     abi: any[],
     bytecode: string,
-    wallet: ethers.Wallet
+    wallet: ethers.Wallet,
   ): Promise<any> {
     try {
       // 验证钱包状态
@@ -20,16 +20,16 @@ export class AnvilForkHelper {
       const balance = await this.provider.getBalance(address);
       const nonce = await this.provider.getTransactionCount(address);
 
-      console.log("部署前状态检查:");
+      console.log('部署前状态检查:');
       console.log(`- 部署者地址: ${address}`);
       console.log(`- 当前余额: ${ethers.formatEther(balance)} ETH`);
       console.log(`- 当前 Nonce: ${nonce}`);
 
       // 验证是否仍在模拟状态
       try {
-        await this.provider.send("anvil_impersonateAccount", [address]);
+        await this.provider.send('anvil_impersonateAccount', [address]);
       } catch (e) {
-        console.log("重新启动模拟账户");
+        console.log('重新启动模拟账户');
       }
 
       // 创建合约工厂
@@ -47,7 +47,7 @@ export class AnvilForkHelper {
       console.log(`合约已部署到: ${await contract.getAddress()}`);
       return contract;
     } catch (error) {
-      console.error("部署错误详细信息:", error);
+      console.error('部署错误详细信息:', error);
       throw new Error(`部署合约失败: ${error}`);
     }
   }
@@ -55,12 +55,12 @@ export class AnvilForkHelper {
   // 新增方法：铸造 ETH
   public async mintETH(
     address: string,
-    amount: string | bigint | number
+    amount: string | bigint | number,
   ): Promise<void> {
     try {
       // 验证地址
       if (!ethers.isAddress(address)) {
-        throw new Error("Invalid address format");
+        throw new Error('Invalid address format');
       }
 
       // 获取当前余额
@@ -68,27 +68,27 @@ export class AnvilForkHelper {
 
       // 处理和验证金额
       let amountBigInt: bigint;
-      if (typeof amount === "string") {
+      if (typeof amount === 'string') {
         try {
           amountBigInt = ethers.parseEther(amount);
         } catch {
           amountBigInt = BigInt(amount);
         }
-      } else if (typeof amount === "number") {
+      } else if (typeof amount === 'number') {
         amountBigInt = ethers.parseEther(amount.toString());
       } else {
         amountBigInt = amount;
       }
 
       if (amountBigInt <= 0n) {
-        throw new Error("Amount must be greater than 0");
+        throw new Error('Amount must be greater than 0');
       }
 
       // 设置新余额
       const newBalance = currentBalance + amountBigInt;
-      await this.provider.send("anvil_setBalance", [
+      await this.provider.send('anvil_setBalance', [
         address,
-        "0x" + newBalance.toString(16),
+        '0x' + newBalance.toString(16),
       ]);
 
       console.log(
@@ -96,7 +96,7 @@ export class AnvilForkHelper {
         - Address: ${address}
         - Amount Minted: ${ethers.formatEther(amountBigInt)} ETH
         - Previous Balance: ${ethers.formatEther(currentBalance)} ETH
-        - New Balance: ${ethers.formatEther(newBalance)} ETH`
+        - New Balance: ${ethers.formatEther(newBalance)} ETH`,
       );
     } catch (error) {
       const errorMessage =
@@ -108,12 +108,12 @@ export class AnvilForkHelper {
   // 新增方法：铸造指定 Token
   private async findBalanceSlot(
     tokenAddress: string,
-    testAddress: string = "0x0000000000000000000000000000000000000001"
+    testAddress: string = '0x0000000000000000000000000000000000000001',
   ): Promise<number> {
     const tokenContract = new ethers.Contract(
       tokenAddress,
-      ["function balanceOf(address) view returns (uint256)"],
-      this.provider
+      ['function balanceOf(address) view returns (uint256)'],
+      this.provider,
     );
 
     // 测试金额
@@ -127,17 +127,17 @@ export class AnvilForkHelper {
           ethers.concat([
             ethers.zeroPadValue(testAddress, 32),
             ethers.zeroPadValue(ethers.toBeHex(slot), 32),
-          ])
+          ]),
         );
 
         // 记录原始值
         const originalValue = await this.readStorageSlot(
           tokenAddress,
-          encodedKey
+          encodedKey,
         );
 
         // 设置测试值
-        await this.provider.send("anvil_setStorageAt", [
+        await this.provider.send('anvil_setStorageAt', [
           tokenAddress,
           encodedKey,
           ethers.zeroPadValue(ethers.toBeHex(testAmount), 32),
@@ -147,7 +147,7 @@ export class AnvilForkHelper {
         const balance = await tokenContract.balanceOf(testAddress);
 
         // 恢复原始值
-        await this.provider.send("anvil_setStorageAt", [
+        await this.provider.send('anvil_setStorageAt', [
           tokenAddress,
           encodedKey,
           originalValue,
@@ -163,36 +163,36 @@ export class AnvilForkHelper {
       }
     }
 
-    throw new Error("Could not find balance slot");
+    throw new Error('Could not find balance slot');
   }
 
   public async mintToken(
     tokenAddress: string,
     to: string,
-    amount: string | bigint | number
+    amount: string | bigint | number,
   ): Promise<void> {
     try {
       // 验证地址
       if (!ethers.isAddress(tokenAddress) || !ethers.isAddress(to)) {
-        throw new Error("Invalid address format");
+        throw new Error('Invalid address format');
       }
 
       // 处理金额
       let amountBigInt: bigint;
-      if (typeof amount === "string") {
+      if (typeof amount === 'string') {
         try {
           amountBigInt = ethers.parseUnits(amount, 18);
         } catch {
           amountBigInt = BigInt(amount);
         }
-      } else if (typeof amount === "number") {
+      } else if (typeof amount === 'number') {
         amountBigInt = ethers.parseUnits(amount.toString(), 18);
       } else {
         amountBigInt = amount;
       }
 
       if (amountBigInt <= 0n) {
-        throw new Error("Amount must be greater than 0");
+        throw new Error('Amount must be greater than 0');
       }
 
       // 自动查找正确的存储槽位
@@ -203,15 +203,15 @@ export class AnvilForkHelper {
         ethers.concat([
           ethers.zeroPadValue(to, 32),
           ethers.zeroPadValue(ethers.toBeHex(balanceSlot), 32),
-        ])
+        ]),
       );
 
       // 读取修改前的值
       const beforeValue = await this.readStorageSlot(tokenAddress, encodedKey);
-      console.log("Storage value before:", beforeValue);
+      console.log('Storage value before:', beforeValue);
 
       // 设置代币余额
-      await this.provider.send("anvil_setStorageAt", [
+      await this.provider.send('anvil_setStorageAt', [
         tokenAddress,
         encodedKey,
         ethers.zeroPadValue(ethers.toBeHex(amountBigInt), 32),
@@ -219,13 +219,13 @@ export class AnvilForkHelper {
 
       // 读取修改后的值
       const afterValue = await this.readStorageSlot(tokenAddress, encodedKey);
-      console.log("Storage value after:", afterValue);
+      console.log('Storage value after:', afterValue);
 
       // 获取余额进行验证
       const tokenContract = new ethers.Contract(
         tokenAddress,
-        ["function balanceOf(address) view returns (uint256)"],
-        this.provider
+        ['function balanceOf(address) view returns (uint256)'],
+        this.provider,
       );
 
       const newBalance = await tokenContract.balanceOf(to);
@@ -236,7 +236,7 @@ export class AnvilForkHelper {
         - To Address: ${to}
         - Amount Minted: ${ethers.formatUnits(amountBigInt, 18)}
         - Storage Slot: ${encodedKey}
-        - Verified Balance: ${ethers.formatUnits(newBalance, 18)}`
+        - Verified Balance: ${ethers.formatUnits(newBalance, 18)}`,
       );
     } catch (error) {
       const errorMessage =
@@ -248,12 +248,12 @@ export class AnvilForkHelper {
   // 新增辅助方法：读取存储槽位
   private async readStorageSlot(
     contractAddress: string,
-    slot: string
+    slot: string,
   ): Promise<string> {
-    return await this.provider.send("eth_getStorageAt", [
+    return await this.provider.send('eth_getStorageAt', [
       contractAddress,
       slot,
-      "latest",
+      'latest',
     ]);
   }
 
@@ -261,7 +261,7 @@ export class AnvilForkHelper {
   public async increaseBlock(count: number): Promise<void> {
     try {
       const params = [count];
-      await this.provider.send("anvil_mine", params);
+      await this.provider.send('anvil_mine', params);
     } catch (error) {
       throw new Error(`Increase block failed: ${error}`);
     }
@@ -271,7 +271,7 @@ export class AnvilForkHelper {
   public async decreaseBlock(count: number): Promise<void> {
     try {
       const params = [count];
-      await this.provider.send("anvil_rollBack", params);
+      await this.provider.send('anvil_rollBack', params);
     } catch (error) {
       throw new Error(`Decrease block failed: ${error}`);
     }
@@ -280,7 +280,7 @@ export class AnvilForkHelper {
   // 新增方法：获取当前区块信息
   public async getCurrentBlock(): Promise<any> {
     try {
-      const block = await this.provider.getBlock("latest");
+      const block = await this.provider.getBlock('latest');
       return block;
     } catch (error) {
       throw new Error(`Get current block failed: ${error}`);

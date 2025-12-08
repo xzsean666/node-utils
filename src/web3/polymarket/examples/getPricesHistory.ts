@@ -1,22 +1,22 @@
-import { ethers } from "ethers";
-import { config as dotenvConfig } from "dotenv";
-import { resolve } from "path";
+import { ethers } from 'ethers';
+import { config as dotenvConfig } from 'dotenv';
+import { resolve } from 'path';
 import {
   ApiKeyCreds,
   Chain,
   ClobClient,
   PriceHistoryFilterParams,
   PriceHistoryInterval,
-} from "../clobClient";
+} from '../clobClient';
 
-dotenvConfig({ path: resolve(__dirname, "../.env") });
+dotenvConfig({ path: resolve(__dirname, '../.env') });
 
 async function main() {
   const wallet = new ethers.Wallet(`${process.env.PRIVATE_KEY_TEST}`);
   const chainId = parseInt(`${process.env.CHAIN_ID || Chain.POLYGON}`) as Chain;
   console.log(`Address: ${await wallet.getAddress()}, chainId: ${chainId}`);
 
-  const host = process.env.CLOB_API_URL || "https://clob.polymarket.com/";
+  const host = process.env.CLOB_API_URL || 'https://clob.polymarket.com/';
   const creds: ApiKeyCreds = {
     key: `${process.env.CLOB_API_KEY}`,
     secret: `${process.env.CLOB_SECRET}`,
@@ -25,9 +25,9 @@ async function main() {
   const clobClient = new ClobClient(host, chainId);
 
   const YES_TOKEN_ID =
-    "17148991929546304218678959738430213065524880357303658607403556776126482126118";
+    '17148991929546304218678959738430213065524880357303658607403556776126482126118';
   const NO_TOKEN_ID =
-    "113944511437047286070977074222535617181404611267671592896303826271480616303572";
+    '113944511437047286070977074222535617181404611267671592896303826271480616303572';
 
   const yes_prices_history = await clobClient.getPricesHistory({
     startTs: new Date().getTime() / 1000 - 1000,

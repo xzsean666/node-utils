@@ -181,7 +181,9 @@ export class SqljsKVDatabase {
     return new Date().toISOString();
   }
 
-  private rowToEntity<T = any>(row: any): {
+  private rowToEntity<T = any>(
+    row: any,
+  ): {
     key: string;
     value: T;
     created_at: Date;
@@ -633,9 +635,9 @@ export class SqljsKVDatabase {
   async count(): Promise<number> {
     await this.ensureInitialized();
     const table = this.escapeIdentifier(this.table_name);
-    const row = this.getSingleRow(
-      `SELECT COUNT(*) as count FROM ${table}`,
-    ) as { count: number };
+    const row = this.getSingleRow(`SELECT COUNT(*) as count FROM ${table}`) as {
+      count: number;
+    };
     return Number(row?.count ?? 0);
   }
 
@@ -655,10 +657,9 @@ export class SqljsKVDatabase {
       this.value_type === SqljsValueType.TEXT ||
       this.value_type === SqljsValueType.JSON
     ) {
-      const rows = this.getRows(
-        `SELECT key FROM ${table} WHERE value LIKE ?`,
-        [`%${serialized}%`],
-      );
+      const rows = this.getRows(`SELECT key FROM ${table} WHERE value LIKE ?`, [
+        `%${serialized}%`,
+      ]);
       return rows.map((row) => String(row.key));
     }
 

@@ -1,11 +1,11 @@
-import { Wallet, parseUnits, JsonRpcSigner } from "ethers";
+import { Wallet, parseUnits, JsonRpcSigner } from 'ethers';
 import {
   ExchangeOrderBuilder,
   OrderData,
   SignatureType,
   SignedOrder,
   Side as UtilsSide,
-} from "@polymarket/order-utils";
+} from '@polymarket/order-utils';
 import {
   UserOrder,
   Side,
@@ -15,27 +15,27 @@ import {
   RoundConfig,
   CreateOrderOptions,
   OrderSummary,
-} from "../types";
-import { decimalPlaces, roundDown, roundNormal, roundUp } from "../utilities";
-import { COLLATERAL_TOKEN_DECIMALS, getContractConfig } from "../config";
+} from '../types';
+import { decimalPlaces, roundDown, roundNormal, roundUp } from '../utilities';
+import { COLLATERAL_TOKEN_DECIMALS, getContractConfig } from '../config';
 
 export const ROUNDING_CONFIG: Record<TickSize, RoundConfig> = {
-  "0.1": {
+  '0.1': {
     price: 1,
     size: 2,
     amount: 3,
   },
-  "0.01": {
+  '0.01': {
     price: 2,
     size: 2,
     amount: 4,
   },
-  "0.001": {
+  '0.001': {
     price: 3,
     size: 2,
     amount: 5,
   },
-  "0.0001": {
+  '0.0001': {
     price: 4,
     size: 2,
     amount: 6,
@@ -55,7 +55,7 @@ export const buildOrder = async (
   signer: Wallet | JsonRpcSigner,
   exchangeAddress: string,
   chainId: number,
-  orderData: OrderData
+  orderData: OrderData,
 ): Promise<SignedOrder> => {
   // 创建适配器，使 ethers v6 的 signer 可以与 order-utils 库兼容
   const legacySigner = {
@@ -69,7 +69,7 @@ export const buildOrder = async (
   const cTFExchangeOrderBuilder = new ExchangeOrderBuilder(
     exchangeAddress,
     chainId,
-    legacySigner as any
+    legacySigner as any,
   );
   return cTFExchangeOrderBuilder.buildSignedOrder(orderData);
 };
@@ -78,7 +78,7 @@ export const getOrderRawAmounts = (
   side: Side,
   size: number,
   price: number,
-  roundConfig: RoundConfig
+  roundConfig: RoundConfig,
 ): { side: UtilsSide; rawMakerAmt: number; rawTakerAmt: number } => {
   const rawPrice = roundNormal(price, roundConfig.price);
 
@@ -126,43 +126,43 @@ export const buildOrderCreationArgs = async (
   maker: string,
   signatureType: SignatureType,
   userOrder: UserOrder,
-  roundConfig: RoundConfig
+  roundConfig: RoundConfig,
 ): Promise<OrderData> => {
   const { side, rawMakerAmt, rawTakerAmt } = getOrderRawAmounts(
     userOrder.side,
     userOrder.size,
     userOrder.price,
-    roundConfig
+    roundConfig,
   );
 
   const makerAmount = parseUnits(
     rawMakerAmt.toString(),
-    COLLATERAL_TOKEN_DECIMALS
+    COLLATERAL_TOKEN_DECIMALS,
   ).toString();
   const takerAmount = parseUnits(
     rawTakerAmt.toString(),
-    COLLATERAL_TOKEN_DECIMALS
+    COLLATERAL_TOKEN_DECIMALS,
   ).toString();
 
   let taker;
-  if (typeof userOrder.taker !== "undefined" && userOrder.taker) {
+  if (typeof userOrder.taker !== 'undefined' && userOrder.taker) {
     taker = userOrder.taker;
   } else {
-    taker = "0x0000000000000000000000000000000000000000";
+    taker = '0x0000000000000000000000000000000000000000';
   }
 
   let feeRateBps;
-  if (typeof userOrder.feeRateBps !== "undefined" && userOrder.feeRateBps) {
+  if (typeof userOrder.feeRateBps !== 'undefined' && userOrder.feeRateBps) {
     feeRateBps = userOrder.feeRateBps.toString();
   } else {
-    feeRateBps = "0";
+    feeRateBps = '0';
   }
 
   let nonce;
-  if (typeof userOrder.nonce !== "undefined" && userOrder.nonce) {
+  if (typeof userOrder.nonce !== 'undefined' && userOrder.nonce) {
     nonce = userOrder.nonce.toString();
   } else {
-    nonce = "0";
+    nonce = '0';
   }
 
   return {
@@ -186,7 +186,7 @@ export const createOrder = async (
   signatureType: SignatureType,
   funderAddress: string | undefined,
   userOrder: UserOrder,
-  options: CreateOrderOptions
+  options: CreateOrderOptions,
 ): Promise<SignedOrder> => {
   const eoaSignerAddress = await eoaSigner.getAddress();
 
@@ -199,7 +199,7 @@ export const createOrder = async (
     maker,
     signatureType,
     userOrder,
-    ROUNDING_CONFIG[options.tickSize]
+    ROUNDING_CONFIG[options.tickSize],
   );
 
   const exchangeContract = options.negRisk
@@ -213,7 +213,7 @@ export const getMarketOrderRawAmounts = (
   side: Side,
   amount: number,
   price: number,
-  roundConfig: RoundConfig
+  roundConfig: RoundConfig,
 ): { side: UtilsSide; rawMakerAmt: number; rawTakerAmt: number } => {
   // force 2 decimals places
   const rawPrice = roundDown(price, roundConfig.price);
@@ -258,46 +258,46 @@ export const buildMarketOrderCreationArgs = async (
   maker: string,
   signatureType: SignatureType,
   userMarketOrder: UserMarketOrder,
-  roundConfig: RoundConfig
+  roundConfig: RoundConfig,
 ): Promise<OrderData> => {
   const { side, rawMakerAmt, rawTakerAmt } = getMarketOrderRawAmounts(
     userMarketOrder.side,
     userMarketOrder.amount,
     userMarketOrder.price || 1,
-    roundConfig
+    roundConfig,
   );
 
   const makerAmount = parseUnits(
     rawMakerAmt.toString(),
-    COLLATERAL_TOKEN_DECIMALS
+    COLLATERAL_TOKEN_DECIMALS,
   ).toString();
   const takerAmount = parseUnits(
     rawTakerAmt.toString(),
-    COLLATERAL_TOKEN_DECIMALS
+    COLLATERAL_TOKEN_DECIMALS,
   ).toString();
 
   let taker;
-  if (typeof userMarketOrder.taker !== "undefined" && userMarketOrder.taker) {
+  if (typeof userMarketOrder.taker !== 'undefined' && userMarketOrder.taker) {
     taker = userMarketOrder.taker;
   } else {
-    taker = "0x0000000000000000000000000000000000000000";
+    taker = '0x0000000000000000000000000000000000000000';
   }
 
   let feeRateBps;
   if (
-    typeof userMarketOrder.feeRateBps !== "undefined" &&
+    typeof userMarketOrder.feeRateBps !== 'undefined' &&
     userMarketOrder.feeRateBps
   ) {
     feeRateBps = userMarketOrder.feeRateBps.toString();
   } else {
-    feeRateBps = "0";
+    feeRateBps = '0';
   }
 
   let nonce;
-  if (typeof userMarketOrder.nonce !== "undefined" && userMarketOrder.nonce) {
+  if (typeof userMarketOrder.nonce !== 'undefined' && userMarketOrder.nonce) {
     nonce = userMarketOrder.nonce.toString();
   } else {
-    nonce = "0";
+    nonce = '0';
   }
 
   return {
@@ -310,7 +310,7 @@ export const buildMarketOrderCreationArgs = async (
     feeRateBps,
     nonce,
     signer,
-    expiration: "0",
+    expiration: '0',
     signatureType,
   } as OrderData;
 };
@@ -321,7 +321,7 @@ export const createMarketOrder = async (
   signatureType: SignatureType,
   funderAddress: string | undefined,
   userMarketOrder: UserMarketOrder,
-  options: CreateOrderOptions
+  options: CreateOrderOptions,
 ): Promise<SignedOrder> => {
   const eoaSignerAddress = await eoaSigner.getAddress();
 
@@ -334,7 +334,7 @@ export const createMarketOrder = async (
     maker,
     signatureType,
     userMarketOrder,
-    ROUNDING_CONFIG[options.tickSize]
+    ROUNDING_CONFIG[options.tickSize],
   );
 
   const exchangeContract = options.negRisk
@@ -352,7 +352,7 @@ export const createMarketOrder = async (
  */
 export const calculateBuyMarketPrice = (
   positions: OrderSummary[],
-  amountToMatch: number
+  amountToMatch: number,
 ) => {
   let sum = 0;
   for (let i = 0; i < positions.length; i++) {
@@ -362,7 +362,7 @@ export const calculateBuyMarketPrice = (
       return parseFloat(p.price);
     }
   }
-  throw new Error("no match");
+  throw new Error('no match');
 };
 
 /**
@@ -373,7 +373,7 @@ export const calculateBuyMarketPrice = (
  */
 export const calculateSellMarketPrice = (
   positions: OrderSummary[],
-  amountToMatch: number
+  amountToMatch: number,
 ) => {
   let sum = 0;
   for (let i = positions.length - 1; i >= 0; i--) {
@@ -383,5 +383,5 @@ export const calculateSellMarketPrice = (
       return parseFloat(p.price);
     }
   }
-  throw new Error("no match");
+  throw new Error('no match');
 };

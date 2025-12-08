@@ -783,7 +783,7 @@ class EnhancedIndexedDB {
       }
 
       // Use the determined batch size
-      let batch_size_local = active_batch_size;
+      const batch_size_local = active_batch_size;
 
       // Get the last batch which might not be full
       const lastBatchKey = `${key}_${existingBatchCount - 1}`;

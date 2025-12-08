@@ -6,8 +6,8 @@ import {
   FindManyOptions,
   ObjectLiteral,
   DeepPartial,
-} from "typeorm";
-import "reflect-metadata";
+} from 'typeorm';
+import 'reflect-metadata';
 
 export class PostgresqlDbHelper<T extends ObjectLiteral> {
   private repository: Repository<T>;
@@ -23,7 +23,7 @@ export class PostgresqlDbHelper<T extends ObjectLiteral> {
    */
   constructor(
     entityClass: EntityTarget<T>,
-    dbUrl: string = "postgres://postgres:postgres@localhost:5432/postgres"
+    dbUrl: string = 'postgres://postgres:postgres@localhost:5432/postgres',
   ) {
     this.entityClass = entityClass;
     this.dbUrl = dbUrl;
@@ -38,10 +38,10 @@ export class PostgresqlDbHelper<T extends ObjectLiteral> {
 
     // 创建数据源
     this.dataSource = new DataSource({
-      type: "postgres",
+      type: 'postgres',
       url: this.dbUrl,
       entities: [this.entityClass] as any,
-      synchronize: process.env.NODE_ENV !== "production", // 生产环境中需谨慎使用
+      synchronize: process.env.NODE_ENV !== 'production', // 生产环境中需谨慎使用
       logging: false,
     });
 
@@ -115,7 +115,7 @@ export class PostgresqlDbHelper<T extends ObjectLiteral> {
    */
   public async updateById(
     id: number | string,
-    partialEntity: DeepPartial<T>
+    partialEntity: DeepPartial<T>,
   ): Promise<boolean> {
     await this.ensureInitialized();
     const result = await this.repository.update(id, partialEntity as any);
@@ -130,7 +130,7 @@ export class PostgresqlDbHelper<T extends ObjectLiteral> {
    */
   public async update(
     where: FindOptionsWhere<T>,
-    partialEntity: DeepPartial<T>
+    partialEntity: DeepPartial<T>,
   ): Promise<boolean> {
     await this.ensureInitialized();
     const result = await this.repository.update(where, partialEntity as any);
@@ -166,7 +166,7 @@ export class PostgresqlDbHelper<T extends ObjectLiteral> {
   public async saveMany(entities: DeepPartial<T>[]): Promise<T[]> {
     await this.ensureInitialized();
     const createdEntities = entities.map((entity) =>
-      this.repository.create(entity)
+      this.repository.create(entity),
     );
     return await this.repository.save(createdEntities as T[]);
   }
@@ -179,7 +179,7 @@ export class PostgresqlDbHelper<T extends ObjectLiteral> {
    */
   public async executeCustomQuery(
     query: string,
-    parameters?: any[]
+    parameters?: any[],
   ): Promise<any> {
     await this.ensureInitialized();
     return await this.dataSource.query(query, parameters);
@@ -209,7 +209,7 @@ export class PostgresqlDbHelper<T extends ObjectLiteral> {
     if (this.dataSource && this.dataSource.isInitialized) {
       await this.dataSource.destroy();
       this.initialized = false;
-      console.log("数据库连接已关闭");
+      console.log('数据库连接已关闭');
     }
   }
 }

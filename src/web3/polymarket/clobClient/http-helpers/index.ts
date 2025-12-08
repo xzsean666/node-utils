@@ -1,16 +1,16 @@
 /* eslint-disable max-depth */
-import axios, { AxiosRequestHeaders, Method } from "axios";
-import { DropNotificationParams, OrdersScoringParams } from "../types";
-import { isBrowser } from "browser-or-node";
+import axios, { AxiosRequestHeaders, Method } from 'axios';
+import { DropNotificationParams, OrdersScoringParams } from '../types';
+import { isBrowser } from 'browser-or-node';
 
-export const GET = "GET";
-export const POST = "POST";
-export const DELETE = "DELETE";
-export const PUT = "PUT";
+export const GET = 'GET';
+export const POST = 'POST';
+export const DELETE = 'DELETE';
+export const PUT = 'PUT';
 
 const overloadHeaders = (
   method: Method,
-  headers?: Record<string, string | number | boolean>
+  headers?: Record<string, string | number | boolean>,
 ) => {
   if (isBrowser) {
     return;
@@ -21,13 +21,13 @@ const overloadHeaders = (
   }
 
   if (headers) {
-    headers["User-Agent"] = `@polymarket/clob-client`;
-    headers["Accept"] = "*/*";
-    headers["Connection"] = "keep-alive";
-    headers["Content-Type"] = "application/json";
+    headers['User-Agent'] = `@polymarket/clob-client`;
+    headers['Accept'] = '*/*';
+    headers['Connection'] = 'keep-alive';
+    headers['Content-Type'] = 'application/json';
 
     if (method === GET) {
-      headers["Accept-Encoding"] = "gzip";
+      headers['Accept-Encoding'] = 'gzip';
     }
   }
 };
@@ -37,7 +37,7 @@ export const request = async (
   method: Method,
   headers?: any,
   data?: any,
-  params?: any
+  params?: any,
 ): Promise<any> => {
   overloadHeaders(method, headers);
   return await axios({ method, url: endpoint, headers, data, params });
@@ -53,7 +53,7 @@ export interface RequestOptions {
 
 export const post = async (
   endpoint: string,
-  options?: RequestOptions
+  options?: RequestOptions,
 ): Promise<any> => {
   try {
     const resp = await request(
@@ -61,7 +61,7 @@ export const post = async (
       POST,
       options?.headers,
       options?.data,
-      options?.params
+      options?.params,
     );
     return resp.data;
   } catch (err: unknown) {
@@ -71,7 +71,7 @@ export const post = async (
 
 export const get = async (
   endpoint: string,
-  options?: RequestOptions
+  options?: RequestOptions,
 ): Promise<any> => {
   try {
     const resp = await request(
@@ -79,7 +79,7 @@ export const get = async (
       GET,
       options?.headers,
       options?.data,
-      options?.params
+      options?.params,
     );
     return resp.data;
   } catch (err: unknown) {
@@ -89,7 +89,7 @@ export const get = async (
 
 export const del = async (
   endpoint: string,
-  options?: RequestOptions
+  options?: RequestOptions,
 ): Promise<any> => {
   try {
     const resp = await request(
@@ -97,7 +97,7 @@ export const del = async (
       DELETE,
       options?.headers,
       options?.data,
-      options?.params
+      options?.params,
     );
     return resp.data;
   } catch (err: unknown) {
@@ -109,23 +109,23 @@ const errorHandling = (err: unknown) => {
   if (axios.isAxiosError(err)) {
     if (err.response) {
       console.error(
-        "[CLOB Client] request error",
+        '[CLOB Client] request error',
         JSON.stringify({
           status: err.response?.status,
           statusText: err.response?.statusText,
           data: err.response?.data,
           config: err.response?.config,
-        })
+        }),
       );
       if (err.response?.data) {
         if (
-          typeof err.response?.data === "string" ||
+          typeof err.response?.data === 'string' ||
           err.response?.data instanceof String
         ) {
           return { error: err.response?.data };
         }
         if (
-          !Object.prototype.hasOwnProperty.call(err.response?.data, "error")
+          !Object.prototype.hasOwnProperty.call(err.response?.data, 'error')
         ) {
           return { error: err.response?.data };
         }
@@ -136,38 +136,38 @@ const errorHandling = (err: unknown) => {
 
     if (err.message) {
       console.error(
-        "[CLOB Client] request error",
+        '[CLOB Client] request error',
         JSON.stringify({
           error: err.message,
-        })
+        }),
       );
       return { error: err.message };
     }
   }
 
-  console.error("[CLOB Client] request error", err);
+  console.error('[CLOB Client] request error', err);
   return { error: err };
 };
 
 export const parseOrdersScoringParams = (
-  orderScoringParams?: OrdersScoringParams
+  orderScoringParams?: OrdersScoringParams,
 ): QueryParams => {
   const params: QueryParams = {};
   if (orderScoringParams !== undefined) {
     if (orderScoringParams.orderIds !== undefined) {
-      params["order_ids"] = orderScoringParams?.orderIds.join(",");
+      params['order_ids'] = orderScoringParams?.orderIds.join(',');
     }
   }
   return params;
 };
 
 export const parseDropNotificationParams = (
-  dropNotificationParams?: DropNotificationParams
+  dropNotificationParams?: DropNotificationParams,
 ): QueryParams => {
   const params: QueryParams = {};
   if (dropNotificationParams !== undefined) {
     if (dropNotificationParams.ids !== undefined) {
-      params["ids"] = dropNotificationParams?.ids.join(",");
+      params['ids'] = dropNotificationParams?.ids.join(',');
     }
   }
   return params;

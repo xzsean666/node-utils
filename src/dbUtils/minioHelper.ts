@@ -1,4 +1,4 @@
-import { Client, BucketItem, CopyConditions } from "minio";
+import { Client, BucketItem, CopyConditions } from 'minio';
 
 interface MinioConfig {
   endPoint: string;
@@ -43,7 +43,7 @@ export class MinioHelper {
   async uploadFile(
     bucketName: string,
     objectName: string,
-    filePath: string
+    filePath: string,
   ): Promise<void> {
     try {
       await this.client.fPutObject(bucketName, objectName, filePath);
@@ -64,16 +64,16 @@ export class MinioHelper {
   // 列出 bucket 中的所有文件
   async listObjects(
     bucketName: string,
-    prefix?: string
+    prefix?: string,
   ): Promise<BucketItem[]> {
     try {
       const stream = this.client.listObjects(bucketName, prefix);
       const files: BucketItem[] = [];
 
       return new Promise((resolve, reject) => {
-        stream.on("data", (obj: BucketItem) => files.push(obj));
-        stream.on("error", reject);
-        stream.on("end", () => resolve(files));
+        stream.on('data', (obj: BucketItem) => files.push(obj));
+        stream.on('error', reject);
+        stream.on('end', () => resolve(files));
       });
     } catch (error: any) {
       throw new Error(`列出文件失败: ${error.message}`);
@@ -84,7 +84,7 @@ export class MinioHelper {
   async downloadFile(
     bucketName: string,
     objectName: string,
-    filePath: string
+    filePath: string,
   ): Promise<void> {
     try {
       await this.client.fGetObject(bucketName, objectName, filePath);
@@ -115,13 +115,13 @@ export class MinioHelper {
   async getPresignedUrl(
     bucketName: string,
     objectName: string,
-    expiry: number = 24 * 60 * 60
+    expiry: number = 24 * 60 * 60,
   ): Promise<string> {
     try {
       return await this.client.presignedGetObject(
         bucketName,
         objectName,
-        expiry
+        expiry,
       );
     } catch (error: any) {
       throw new Error(`获取临时URL失败: ${error.message}`);
@@ -133,7 +133,7 @@ export class MinioHelper {
     sourceBucket: string,
     sourceObject: string,
     destBucket: string,
-    destObject: string
+    destObject: string,
   ): Promise<void> {
     try {
       const conds = new CopyConditions();
@@ -141,7 +141,7 @@ export class MinioHelper {
         destBucket,
         destObject,
         `/${sourceBucket}/${sourceObject}`,
-        conds
+        conds,
       );
     } catch (error: any) {
       throw new Error(`复制文件失败: ${error.message}`);

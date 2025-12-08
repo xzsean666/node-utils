@@ -1,5 +1,5 @@
-import axios from "axios";
-import * as crypto from "crypto";
+import axios from 'axios';
+import * as crypto from 'crypto';
 import {
   BinanceConfig,
   BinanceBalance,
@@ -11,8 +11,8 @@ import {
   FormattedPosition,
   FuturesAccountState,
   FuturesAccountChanges,
-} from "./types";
-export * from "./types";
+} from './types';
+export * from './types';
 
 // 在文件顶部添加接口定义
 interface KlineUpdateParams {
@@ -42,11 +42,11 @@ export class BinanceAPIHelper {
     this.apiKey = config.apiKey;
     this.apiSecret = config.apiSecret;
     this.baseUrl = config.isTestnet
-      ? "https://testnet.binance.vision"
-      : "https://api.binance.com";
+      ? 'https://testnet.binance.vision'
+      : 'https://api.binance.com';
     this.futuresBaseUrl = config.isTestnet
-      ? "https://testnet.binancefuture.com"
-      : "https://fapi.binance.com";
+      ? 'https://testnet.binancefuture.com'
+      : 'https://fapi.binance.com';
     this.kvdb = kvdb;
   }
 
@@ -55,30 +55,30 @@ export class BinanceAPIHelper {
    * @returns Account ID
    */
   getAccountId(): string {
-    return this.apiKey?.slice(0, 10) || "unknown";
+    return this.apiKey?.slice(0, 10) || 'unknown';
   }
 
   private async signRequest(params: Record<string, any>): Promise<string> {
     const timestamp = Date.now();
     const queryString = Object.entries({ ...params, timestamp })
       .map(([key, value]) => `${key}=${value}`)
-      .join("&");
+      .join('&');
     if (!this.apiSecret) {
-      throw new Error("API secret is not set");
+      throw new Error('API secret is not set');
     }
     const signature = crypto
-      .createHmac("sha256", this.apiSecret)
+      .createHmac('sha256', this.apiSecret)
       .update(queryString)
-      .digest("hex");
+      .digest('hex');
 
     return `${queryString}&signature=${signature}`;
   }
 
   private async makeRequest<T>(
-    method: "GET" | "POST" | "DELETE",
+    method: 'GET' | 'POST' | 'DELETE',
     endpoint: string,
     params: Record<string, any> = {},
-    baseUrl?: string
+    baseUrl?: string,
   ): Promise<T> {
     const signedQuery = await this.signRequest(params);
     const url = `${baseUrl || this.baseUrl}${endpoint}?${signedQuery}`;
@@ -87,7 +87,7 @@ export class BinanceAPIHelper {
       method,
       url,
       headers: {
-        "X-MBX-APIKEY": this.apiKey,
+        'X-MBX-APIKEY': this.apiKey,
       },
     });
 
@@ -99,7 +99,7 @@ export class BinanceAPIHelper {
    * @returns Account information including balances
    */
   async getAccountInfo(): Promise<BinanceAccountInfo> {
-    return this.makeRequest("GET", "/api/v3/account");
+    return this.makeRequest('GET', '/api/v3/account');
   }
 
   async checkAPIKeyAndSecret(): Promise<{
@@ -122,10 +122,10 @@ export class BinanceAPIHelper {
     try {
       // 验证合约账号
       await this.makeRequest<FuturesAccountInfo>(
-        "GET",
-        "/fapi/v3/account",
+        'GET',
+        '/fapi/v3/account',
         {},
-        this.futuresBaseUrl
+        this.futuresBaseUrl,
       );
       result.futures = true;
     } catch (error) {
@@ -147,9 +147,9 @@ export class BinanceAPIHelper {
       endTime?: number;
       fromId?: number;
       limit?: number;
-    } = {}
+    } = {},
   ): Promise<BinanceTrade[]> {
-    return this.makeRequest("GET", "/api/v3/myTrades", {
+    return this.makeRequest('GET', '/api/v3/myTrades', {
       symbol,
       ...options,
     });
@@ -160,7 +160,7 @@ export class BinanceAPIHelper {
    * @param symbol Trading pair symbol (e.g., 'BTCUSDT')
    */
   async getOpenOrders(symbol?: string): Promise<BinanceOrder[]> {
-    return this.makeRequest("GET", "/api/v3/openOrders", {
+    return this.makeRequest('GET', '/api/v3/openOrders', {
       ...(symbol && { symbol }),
     });
   }
@@ -177,9 +177,9 @@ export class BinanceAPIHelper {
       startTime?: number;
       endTime?: number;
       limit?: number;
-    } = {}
+    } = {},
   ): Promise<BinanceOrder[]> {
-    return this.makeRequest("GET", "/api/v3/allOrders", {
+    return this.makeRequest('GET', '/api/v3/allOrders', {
       symbol,
       ...options,
     });
@@ -201,10 +201,10 @@ export class BinanceAPIHelper {
    */
   async getFuturesAccountInfo(): Promise<FuturesAccountInfo> {
     const accountInfo = await this.makeRequest<FuturesAccountInfo>(
-      "GET",
-      "/fapi/v3/account",
+      'GET',
+      '/fapi/v3/account',
       {},
-      this.futuresBaseUrl
+      this.futuresBaseUrl,
     );
 
     // 获取所有持仓的入场价格
@@ -222,7 +222,7 @@ export class BinanceAPIHelper {
           }
         }
         return position;
-      })
+      }),
     );
 
     return {
@@ -244,9 +244,9 @@ export class BinanceAPIHelper {
       fromId?: number;
       limit?: number;
       orderId?: number;
-    } = {}
+    } = {},
   ): Promise<BinanceTrade[]> {
-    return this.makeRequest("GET", "/api/v3/myTrades", {
+    return this.makeRequest('GET', '/api/v3/myTrades', {
       symbol,
       limit: 500, // 设置默认值
       ...options,
@@ -265,17 +265,17 @@ export class BinanceAPIHelper {
       endTime?: number;
       fromId?: number;
       limit?: number;
-    } = {}
+    } = {},
   ): Promise<BinanceTrade[]> {
     return this.makeRequest(
-      "GET",
-      "/fapi/v1/userTrades",
+      'GET',
+      '/fapi/v1/userTrades',
       {
         symbol,
         limit: 500, // 设置默认值
         ...options,
       },
-      this.futuresBaseUrl
+      this.futuresBaseUrl,
     );
   }
 
@@ -291,7 +291,7 @@ export class BinanceAPIHelper {
       endTime?: number;
       fromId?: number;
       limit?: number;
-    } = {}
+    } = {},
   ): Promise<BinanceTrade[]> {
     const allTrades: BinanceTrade[] = [];
 
@@ -325,16 +325,16 @@ export class BinanceAPIHelper {
       endTime?: number;
       fromId?: number;
       limit?: number;
-    } = {}
+    } = {},
   ): Promise<BinanceTrade[]> {
     return this.makeRequest(
-      "GET",
-      "/fapi/v1/userTrades",
+      'GET',
+      '/fapi/v1/userTrades',
       {
         limit: 500, // 设置默认值
         ...options,
       },
-      this.futuresBaseUrl
+      this.futuresBaseUrl,
     );
   }
 
@@ -345,7 +345,7 @@ export class BinanceAPIHelper {
    */
   private formatPositionWithHealthStatus(
     position: FuturesPosition,
-    markPrice: string
+    markPrice: string,
   ): FormattedPosition {
     const positionAmt = parseFloat(position.positionAmt);
     const unrealizedProfit = parseFloat(position.unrealizedProfit);
@@ -370,7 +370,7 @@ export class BinanceAPIHelper {
     const liquidationPrice = this.calculateLiquidationPrice(
       position,
       entryPrice,
-      markPrice
+      markPrice,
     );
 
     // 计算安全距离
@@ -385,7 +385,7 @@ export class BinanceAPIHelper {
     const healthLevel = this.determineHealthLevel(
       riskRatio,
       marginRatio,
-      safetyDistance
+      safetyDistance,
     );
 
     // 计算收益率
@@ -420,7 +420,7 @@ export class BinanceAPIHelper {
   private calculateLiquidationPrice(
     position: FuturesPosition,
     entryPrice: string,
-    markPrice: string
+    markPrice: string,
   ): string {
     const positionAmt = parseFloat(position.positionAmt);
     const maintMargin = parseFloat(position.maintMargin);
@@ -447,14 +447,14 @@ export class BinanceAPIHelper {
   private determineHealthLevel(
     riskRatio: number,
     marginRatio: number,
-    safetyDistance: number
-  ): "SAFE" | "WARNING" | "DANGER" {
+    safetyDistance: number,
+  ): 'SAFE' | 'WARNING' | 'DANGER' {
     if (riskRatio < 0.5 && marginRatio > 2 && safetyDistance > 20) {
-      return "SAFE";
+      return 'SAFE';
     } else if (riskRatio < 0.8 && marginRatio > 1.2 && safetyDistance > 10) {
-      return "WARNING";
+      return 'WARNING';
     } else {
-      return "DANGER";
+      return 'DANGER';
     }
   }
 
@@ -464,16 +464,16 @@ export class BinanceAPIHelper {
   async getFormattedFuturesPositions(): Promise<FormattedPosition[]> {
     const accountInfo = await this.getFuturesAccountInfo();
     const positions = accountInfo.positions.filter(
-      (p) => parseFloat(p.positionAmt) !== 0
+      (p) => parseFloat(p.positionAmt) !== 0,
     );
 
     // 获取所有持仓的标记价格
     const markPrices = await Promise.all(
-      positions.map((p) => this.getMarkPrice(p.symbol))
+      positions.map((p) => this.getMarkPrice(p.symbol)),
     );
 
     return positions.map((position, index) =>
-      this.formatPositionWithHealthStatus(position, markPrices[index])
+      this.formatPositionWithHealthStatus(position, markPrices[index]),
     );
   }
 
@@ -482,10 +482,10 @@ export class BinanceAPIHelper {
    */
   private async getMarkPrice(symbol: string): Promise<string> {
     const response = await this.makeRequest<{ markPrice: string }>(
-      "GET",
-      "/fapi/v1/premiumIndex",
+      'GET',
+      '/fapi/v1/premiumIndex',
       { symbol },
-      this.futuresBaseUrl
+      this.futuresBaseUrl,
     );
     return response.markPrice;
   }
@@ -496,7 +496,7 @@ export class BinanceAPIHelper {
    * @returns 指定时间的账户状态
    */
   async getFuturesAccountStateAt(
-    targetTime: number
+    targetTime: number,
   ): Promise<FuturesAccountState> {
     // 1. 获取当前账户状态
     const currentAccount = await this.getFuturesAccountInfo();
@@ -536,7 +536,7 @@ export class BinanceAPIHelper {
         positionMap[pos.symbol] = {
           symbol: pos.symbol,
           positionAmt: parseFloat(pos.positionAmt),
-          entryPrice: parseFloat(pos.entryPrice || "0"),
+          entryPrice: parseFloat(pos.entryPrice || '0'),
           unrealizedProfit: parseFloat(pos.unrealizedProfit),
           initialMargin: parseFloat(pos.initialMargin),
           maintMargin: parseFloat(pos.maintMargin),
@@ -608,10 +608,10 @@ export class BinanceAPIHelper {
 
         // 反向应用持仓变化
         if (positionMap[symbol]) {
-          if (side === "BUY") {
+          if (side === 'BUY') {
             // 如果是买入，回溯就是减少持仓
             positionMap[symbol].positionAmt -= qty;
-          } else if (side === "SELL") {
+          } else if (side === 'SELL') {
             // 如果是卖出，回溯就是增加持仓
             positionMap[symbol].positionAmt += qty;
           }
@@ -639,7 +639,7 @@ export class BinanceAPIHelper {
         // 简化的未实现盈亏计算（实际应该考虑目标时间的价格）
         // 这里假设持仓数量变化会按比例改变未实现盈亏
         const currentPosition = currentAccount.positions.find(
-          (p) => p.symbol === pos.symbol
+          (p) => p.symbol === pos.symbol,
         );
         const currentPosAmt = currentPosition
           ? parseFloat(currentPosition.positionAmt)
@@ -709,7 +709,7 @@ export class BinanceAPIHelper {
       .map((pos) => ({
         symbol: pos.symbol,
         positionAmt: pos.positionAmt,
-        entryPrice: pos.entryPrice || "0",
+        entryPrice: pos.entryPrice || '0',
         unrealizedProfit: pos.unrealizedProfit,
         initialMargin: pos.initialMargin,
         maintMargin: pos.maintMargin,
@@ -743,7 +743,7 @@ export class BinanceAPIHelper {
     minutes: number,
     options: {
       includeUnchangedPositions?: boolean;
-    } = {}
+    } = {},
   ): Promise<FuturesAccountChanges> {
     // 设置默认选项
     const { includeUnchangedPositions = false } = options;
@@ -775,8 +775,8 @@ export class BinanceAPIHelper {
       Math.sign(pastUnrealizedProfit) === Math.sign(unrealizedProfit)
         ? (unrealizedProfitChange / Math.abs(pastUnrealizedProfit)) * 100
         : pastUnrealizedProfit === 0
-        ? 0
-        : "盈亏方向已改变";
+          ? 0
+          : '盈亏方向已改变';
 
     const marginBalance = parseFloat(currentState.totalMarginBalance);
     const pastMarginBalance = parseFloat(pastState.totalMarginBalance);
@@ -802,10 +802,10 @@ export class BinanceAPIHelper {
     // 5. 计算持仓变化
     const positionChanges = Array.from(allSymbols).map((symbol) => {
       const currentPosition = currentState.positions.find(
-        (pos) => pos.symbol === symbol
+        (pos) => pos.symbol === symbol,
       );
       const pastPosition = pastState.positions.find(
-        (pos) => pos.symbol === symbol
+        (pos) => pos.symbol === symbol,
       );
 
       const currentPositionAmt = currentPosition
@@ -842,7 +842,7 @@ export class BinanceAPIHelper {
       let unrealizedProfitChangePercent: number | string = 0;
       if (directionChanged) {
         // 方向变化时使用特殊标记
-        unrealizedProfitChangePercent = "持仓方向已改变";
+        unrealizedProfitChangePercent = '持仓方向已改变';
       } else if (previousUnrealizedProfit !== 0) {
         // 正常计算百分比变化
         unrealizedProfitChangePercent =
@@ -858,7 +858,7 @@ export class BinanceAPIHelper {
 
       // 当unrealizedProfitChangePercent是字符串时正确处理
       let formattedProfitChangePercent: string;
-      if (typeof unrealizedProfitChangePercent === "number") {
+      if (typeof unrealizedProfitChangePercent === 'number') {
         formattedProfitChangePercent = unrealizedProfitChangePercent.toFixed(2);
       } else {
         formattedProfitChangePercent = unrealizedProfitChangePercent;
@@ -904,13 +904,13 @@ export class BinanceAPIHelper {
     //   `原始持仓数量: ${positionChanges.length}, 过滤后持仓数量: ${filteredPositionChanges.length}, 包含无变化持仓: ${includeUnchangedPositions}`
     // );
     if (filteredPositionChanges.length === 0 && positionChanges.length > 0) {
-      console.log("警告: 所有持仓都被过滤掉了，检查过滤条件是否过于严格");
-      console.log("持仓示例:", positionChanges[0]);
+      console.log('警告: 所有持仓都被过滤掉了，检查过滤条件是否过于严格');
+      console.log('持仓示例:', positionChanges[0]);
     }
 
     // 在返回数据中处理类型问题
     let formattedTotalProfitChangePercent: string;
-    if (typeof unrealizedProfitChangePercent === "number") {
+    if (typeof unrealizedProfitChangePercent === 'number') {
       formattedTotalProfitChangePercent =
         unrealizedProfitChangePercent.toFixed(2);
     } else {
@@ -956,10 +956,10 @@ export class BinanceAPIHelper {
       endTime?: number;
       limit?: number;
       isFutures?: boolean;
-    } = {}
+    } = {},
   ): Promise<any[]> {
     const { startTime, endTime, limit, isFutures = false } = options;
-    const endpoint = isFutures ? "/fapi/v1/klines" : "/api/v3/klines";
+    const endpoint = isFutures ? '/fapi/v1/klines' : '/api/v3/klines';
     const baseUrl = isFutures ? this.futuresBaseUrl : this.baseUrl;
     const params: Record<string, any> = { symbol, interval };
     if (startTime) params.startTime = startTime;
@@ -992,7 +992,7 @@ export class BinanceAPIHelper {
         totalKlines: number;
         checkpoint: KlineUpdateCheckpoint;
       }) => void;
-    }
+    },
   ): Promise<{
     klines: any[];
     checkpoint: KlineUpdateCheckpoint;
@@ -1046,7 +1046,7 @@ export class BinanceAPIHelper {
         if (klines.length < limit) break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       } catch (error) {
-        console.error("获取K线数据时出错:", error);
+        console.error('获取K线数据时出错:', error);
         return {
           klines: allKlines,
           checkpoint: {
@@ -1091,29 +1091,28 @@ export class BinanceAPIHelper {
       endTime: number;
       totalKlines: number;
       checkpoint: KlineUpdateCheckpoint;
-    }) => void
+    }) => void,
   ): Promise<{
     klines: any[];
     checkpoint: KlineUpdateCheckpoint;
   }> {
     if (!this.kvdb) {
-      throw new Error("KVDB is required for persistent Kline updates");
+      throw new Error('KVDB is required for persistent Kline updates');
     }
 
     // 生成唯一的检查点key
     const checkpointKey = `kline_checkpoint_${params.symbol}_${
       params.interval
-    }_${params.isFutures ? "futures" : "spot"}`;
+    }_${params.isFutures ? 'futures' : 'spot'}`;
 
     // 生成数据存储的key前缀
     const dataKeyPrefix = `kline_data_${params.symbol}_${params.interval}_${
-      params.isFutures ? "futures" : "spot"
+      params.isFutures ? 'futures' : 'spot'
     }`;
 
     // 尝试获取现有的检查点
-    let checkpoint: KlineUpdateCheckpoint | null = await this.kvdb.get(
-      checkpointKey
-    );
+    let checkpoint: KlineUpdateCheckpoint | null =
+      await this.kvdb.get(checkpointKey);
 
     // 获取当前时间作为结束时间
     const currentTime = Date.now();
@@ -1122,13 +1121,13 @@ export class BinanceAPIHelper {
     const timeRanges = this.splitTimeRange(
       params.startTime,
       currentTime,
-      24 * 60 * 60 * 1000 // 按天分割
+      24 * 60 * 60 * 1000, // 按天分割
     );
 
     // 获取并合并现有数据
     const existingData = await this.getExistingKlineData(
       dataKeyPrefix,
-      timeRanges
+      timeRanges,
     );
 
     // 如果检查点存在，检查是否需要更新
@@ -1141,7 +1140,7 @@ export class BinanceAPIHelper {
 
       if (hasCompleteData) {
         console.log(
-          "Using existing data as it already covers the requested time range"
+          'Using existing data as it already covers the requested time range',
         );
         return {
           klines: existingData,
@@ -1200,7 +1199,7 @@ export class BinanceAPIHelper {
               onProgress(progress);
             }
           },
-        }
+        },
       );
 
       // 合并新数据，避免重复
@@ -1210,7 +1209,7 @@ export class BinanceAPIHelper {
       await this.saveKlineDataByTimeRange(
         dataKeyPrefix,
         timeRanges,
-        mergedKlines
+        mergedKlines,
       );
 
       // 更新最终检查点
@@ -1247,7 +1246,7 @@ export class BinanceAPIHelper {
   private splitTimeRange(
     startTime: number,
     endTime: number,
-    interval: number
+    interval: number,
   ): Array<{ start: number; end: number }> {
     const ranges: Array<{ start: number; end: number }> = [];
     let currentStart = startTime;
@@ -1266,7 +1265,7 @@ export class BinanceAPIHelper {
    */
   private async getExistingKlineData(
     dataKeyPrefix: string,
-    timeRanges: Array<{ start: number; end: number }>
+    timeRanges: Array<{ start: number; end: number }>,
   ): Promise<any[]> {
     const existingData: any[] = [];
 
@@ -1307,12 +1306,12 @@ export class BinanceAPIHelper {
   private async saveKlineDataByTimeRange(
     dataKeyPrefix: string,
     timeRanges: Array<{ start: number; end: number }>,
-    klines: any[]
+    klines: any[],
   ): Promise<void> {
     for (const range of timeRanges) {
       const dataKey = `${dataKeyPrefix}_${range.start}`;
       const rangeKlines = klines.filter(
-        (kline) => kline[0] >= range.start && kline[0] < range.end
+        (kline) => kline[0] >= range.start && kline[0] < range.end,
       );
 
       if (rangeKlines.length > 0) {
@@ -1326,7 +1325,7 @@ export class BinanceAPIHelper {
    */
   private isParamsMatch(
     checkpoint: KlineUpdateCheckpoint,
-    params: KlineUpdateParams
+    params: KlineUpdateParams,
   ): boolean {
     return (
       checkpoint.symbol === params.symbol &&
@@ -1347,14 +1346,14 @@ export class BinanceAPIHelper {
   async getKlineCheckpoint(
     symbol: string,
     interval: string,
-    isFutures: boolean
+    isFutures: boolean,
   ): Promise<KlineUpdateCheckpoint | null> {
     if (!this.kvdb) {
-      throw new Error("KVDB is required for getting Kline checkpoints");
+      throw new Error('KVDB is required for getting Kline checkpoints');
     }
 
     const checkpointKey = `kline_checkpoint_${symbol}_${interval}_${
-      isFutures ? "futures" : "spot"
+      isFutures ? 'futures' : 'spot'
     }`;
 
     return await this.kvdb.get(checkpointKey);
@@ -1376,15 +1375,15 @@ export class BinanceAPIHelper {
     startTime: number,
     endTime: number,
     isFutures: boolean = false,
-    limit: number = 1000
+    limit: number = 1000,
   ): Promise<any[]> {
     if (!this.kvdb) {
-      throw new Error("KVDB is required for getting Kline data");
+      throw new Error('KVDB is required for getting Kline data');
     }
 
     // 生成数据存储的key
     const dataKey = `kline_data_${symbol}_${interval}_${
-      isFutures ? "futures" : "spot"
+      isFutures ? 'futures' : 'spot'
     }_${startTime}`;
 
     // 尝试从缓存中获取数据
@@ -1417,13 +1416,13 @@ export class BinanceAPIHelper {
    * @param interval K线周期（如 '1m', '5m', '1h', '1d' 等）
    */
   private formatAndLogKlines(klines: any[], interval: string): void {
-    console.log("\n=== K线数据详情 ===");
+    console.log('\n=== K线数据详情 ===');
     console.log(`总数据条数: ${klines.length}`);
-    console.log("时间范围:", {
+    console.log('时间范围:', {
       开始: new Date(klines[0][0]).toLocaleString(),
       结束: new Date(klines[klines.length - 1][0]).toLocaleString(),
     });
-    console.log("\n数据详情:");
+    console.log('\n数据详情:');
 
     klines.forEach((kline, index) => {
       const [
@@ -1442,16 +1441,16 @@ export class BinanceAPIHelper {
       ] = kline;
 
       console.log(`\n第 ${index + 1} 条数据:`);
-      console.log("时间:", new Date(openTime).toLocaleString());
-      console.log("开盘价:", open);
-      console.log("最高价:", high);
-      console.log("最低价:", low);
-      console.log("收盘价:", close);
-      console.log("成交量:", volume);
-      console.log("成交额:", quoteVolume);
-      console.log("成交笔数:", trades);
-      console.log("主动买入成交量:", takerBuyBaseVolume);
-      console.log("主动买入成交额:", takerBuyQuoteVolume);
+      console.log('时间:', new Date(openTime).toLocaleString());
+      console.log('开盘价:', open);
+      console.log('最高价:', high);
+      console.log('最低价:', low);
+      console.log('收盘价:', close);
+      console.log('成交量:', volume);
+      console.log('成交额:', quoteVolume);
+      console.log('成交笔数:', trades);
+      console.log('主动买入成交量:', takerBuyBaseVolume);
+      console.log('主动买入成交额:', takerBuyQuoteVolume);
     });
   }
 
@@ -1465,42 +1464,42 @@ export class BinanceAPIHelper {
   async getKlinesByParams(
     params: KlineUpdateParams,
     days: number = 7,
-    shouldLog: boolean = false
+    shouldLog: boolean = false,
   ): Promise<any[]> {
     if (!this.kvdb) {
-      throw new Error("KVDB is required for getting Kline data");
+      throw new Error('KVDB is required for getting Kline data');
     }
 
     // 计算时间范围
     const endTime = params.endTime || Date.now();
     const startTime = Math.max(
       params.startTime,
-      endTime - days * 24 * 60 * 60 * 1000
+      endTime - days * 24 * 60 * 60 * 1000,
     );
 
     // 获取检查点信息
     const checkpoint = await this.getKlineCheckpoint(
       params.symbol,
       params.interval,
-      params.isFutures
+      params.isFutures,
     );
 
     // 如果检查点存在且数据足够新，优先使用检查点数据
     if (checkpoint && checkpoint.lastKlineTime >= startTime) {
       const dataKeyPrefix = `kline_data_${params.symbol}_${params.interval}_${
-        params.isFutures ? "futures" : "spot"
+        params.isFutures ? 'futures' : 'spot'
       }`;
 
       // 只获取需要的时间范围
       const timeRanges = this.splitTimeRange(
         startTime,
         Math.min(endTime, checkpoint.lastKlineTime),
-        24 * 60 * 60 * 1000
+        24 * 60 * 60 * 1000,
       );
 
       const existingData = await this.getExistingKlineData(
         dataKeyPrefix,
-        timeRanges
+        timeRanges,
       );
 
       if (existingData.length > 0) {

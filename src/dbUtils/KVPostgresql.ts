@@ -234,7 +234,9 @@ export class PGKVDatabase {
                 `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_value_gin" ON "${this.table_name}" USING gin (value);`,
               );
             } catch (err) {
-              console.warn(`创建索引失败，可能已存在: ${err}`);
+              const message =
+                err instanceof Error ? err.message : String(err);
+              console.warn(`创建索引失败，可能已存在: ${message}`);
             }
           } else {
             // 为其他类型创建 B-tree 索引
@@ -243,7 +245,9 @@ export class PGKVDatabase {
                 `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_value_btree" ON "${this.table_name}" (value);`,
               );
             } catch (err) {
-              console.warn(`创建索引失败，可能已存在: ${err}`);
+              const message =
+                err instanceof Error ? err.message : String(err);
+              console.warn(`创建索引失败，可能已存在: ${message}`);
             }
           }
         }

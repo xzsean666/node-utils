@@ -31,7 +31,6 @@ interface SaveArrayOptions {
   overwrite?: boolean;
 }
 
-
 export class PGKVDatabase {
   db: Repository<KVEntity>;
   private data_source: DataSource;
@@ -234,8 +233,7 @@ export class PGKVDatabase {
                 `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_value_gin" ON "${this.table_name}" USING gin (value);`,
               );
             } catch (err) {
-              const message =
-                err instanceof Error ? err.message : String(err);
+              const message = err instanceof Error ? err.message : String(err);
               console.warn(`创建索引失败，可能已存在: ${message}`);
             }
           } else {
@@ -245,8 +243,7 @@ export class PGKVDatabase {
                 `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_value_btree" ON "${this.table_name}" (value);`,
               );
             } catch (err) {
-              const message =
-                err instanceof Error ? err.message : String(err);
+              const message = err instanceof Error ? err.message : String(err);
               console.warn(`创建索引失败，可能已存在: ${message}`);
             }
           }
@@ -1015,13 +1012,11 @@ export class PGKVDatabase {
   }
 
   // 获取所有键值对，支持分页
-  async getAll<T = any>(
-    options?: { 
-      include_timestamps?: boolean; 
-      offset?: number;
-      limit?: number; 
-    },
-  ): Promise<
+  async getAll<T = any>(options?: {
+    include_timestamps?: boolean;
+    offset?: number;
+    limit?: number;
+  }): Promise<
     Record<string, T | { value: T; created_at: Date; updated_at: Date }>
   > {
     await this.ensureInitialized();

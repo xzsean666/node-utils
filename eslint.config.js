@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
+import prettierPlugin from 'eslint-plugin-prettier';
 
 const sharedGlobals = {
   ...globals.node,
@@ -19,6 +20,21 @@ export default tseslint.config(
       '**/*.zip',
       '**/*.mp4',
     ],
+  },
+  {
+    plugins: {
+      prettier: prettierPlugin,
+    },
+    files: ['**/*.{js,cjs,mjs,ts,tsx}'],
+    rules: {
+      // Treat Prettier mismatches as errors so formatting issues surface; prefer single quotes
+      'prettier/prettier': [
+        'error',
+        {
+          singleQuote: true,
+        },
+      ],
+    },
   },
   {
     ...js.configs.recommended,

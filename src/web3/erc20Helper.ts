@@ -1,9 +1,12 @@
 import { EthersTxBatchHelper } from './ethersTxBatchHelper';
-
+import { memoryCache } from '../dbUtils/MemoryCache';
 import { ethers } from 'ethers';
 
 export class ERC20Helper extends EthersTxBatchHelper {
-  constructor(NODE_PROVIDER: string | ethers.BrowserProvider, config?: any) {
+  constructor(
+    NODE_PROVIDER: string | ethers.BrowserProvider | ethers.JsonRpcProvider,
+    config?: any,
+  ) {
     super(NODE_PROVIDER, config);
   }
 
@@ -12,12 +15,12 @@ export class ERC20Helper extends EthersTxBatchHelper {
    * @param token_address token 地址
    * @returns token 名称
    */
+  @memoryCache(24 * 60 * 60, 'erc20Helper_getName')
   async getName(token_address: string): Promise<string> {
     return await this.callReadContract<string>({
       target: token_address,
       abi: ERC20_ABI,
       function_name: 'name',
-      execute_args: [],
     });
   }
 
@@ -26,12 +29,12 @@ export class ERC20Helper extends EthersTxBatchHelper {
    * @param token_address token 地址
    * @returns token 符号
    */
+  @memoryCache(24 * 60 * 60, 'erc20Helper_getSymbol')
   async getSymbol(token_address: string): Promise<string> {
     return await this.callReadContract<string>({
       target: token_address,
       abi: ERC20_ABI,
       function_name: 'symbol',
-      execute_args: [],
     });
   }
 
@@ -40,12 +43,12 @@ export class ERC20Helper extends EthersTxBatchHelper {
    * @param token_address token 地址
    * @returns token 精度
    */
+  @memoryCache(24 * 60 * 60, 'erc20Helper_getDecimals')
   async getDecimals(token_address: string): Promise<number> {
     return await this.callReadContract<number>({
       target: token_address,
       abi: ERC20_ABI,
       function_name: 'decimals',
-      execute_args: [],
     });
   }
 
@@ -59,7 +62,6 @@ export class ERC20Helper extends EthersTxBatchHelper {
       target: token_address,
       abi: ERC20_ABI,
       function_name: 'totalSupply',
-      execute_args: [],
     });
   }
 
@@ -243,7 +245,7 @@ export class ERC20Helper extends EthersTxBatchHelper {
 
     // 格式化返回结果
     return results.map((result, index) => ({
-      address: addresses[index],
+      address: addresses[index] as string,
       balance: result.success ? (result.decodedData[0] as bigint) : 0n,
       success: result.success,
     }));
@@ -289,8 +291,8 @@ export class ERC20Helper extends EthersTxBatchHelper {
 
     // 格式化返回结果
     return results.map((result, index) => ({
-      token_address: queries[index].token_address,
-      address: queries[index].address,
+      token_address: queries[index]!.token_address,
+      address: queries[index]!.address,
       balance: result.success ? (result.decodedData[0] as bigint) : 0n,
       success: result.success,
     }));
@@ -350,7 +352,7 @@ export class ERC20Helper extends EthersTxBatchHelper {
       if (!grouped[result.address]) {
         grouped[result.address] = [];
       }
-      grouped[result.address].push({
+      grouped[result.address]!.push({
         token_address: result.token_address,
         balance: result.balance,
         success: result.success,

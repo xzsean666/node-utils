@@ -28,7 +28,7 @@ async function main() {
       name: tokenInfo.name,
       symbol: tokenInfo.symbol,
       decimals: tokenInfo.decimals,
-      totalSupply: tokenInfo.totalSupply.toString(),
+      totalSupply: tokenInfo.total_supply.toString(),
       address: tokenInfo.address,
     });
   } catch (error) {
@@ -39,7 +39,10 @@ async function main() {
   console.log('\n===== 查询余额 =====');
   const walletAddress = '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb';
   try {
-    const balance = await erc20Helper.balanceOf(USDT_ADDRESS, walletAddress);
+    const balance = await erc20Helper.balanceOf({
+      token_address: USDT_ADDRESS,
+      wallet_address: walletAddress,
+    });
     const decimals = await erc20Helper.getDecimals(USDT_ADDRESS);
     const formattedBalance = erc20Helper.formatTokenAmount(balance, decimals);
     console.log(`地址 ${walletAddress} 的 USDT 余额:`, formattedBalance);
@@ -56,10 +59,10 @@ async function main() {
   ];
 
   try {
-    const balances = await erc20Helper.batchGetBalances(
-      USDT_ADDRESS,
+    const balances = await erc20Helper.batchGetBalances({
+      token_address: USDT_ADDRESS,
       addresses,
-    );
+    });
     const decimals = await erc20Helper.getDecimals(USDT_ADDRESS);
 
     console.log('批量余额查询结果:');
@@ -76,20 +79,20 @@ async function main() {
   // ===== 4. 批量查询余额（多个 token，多个地址）=====
   console.log('\n===== 批量查询余额（多个 token）=====');
   const queries = [
-    { tokenAddress: USDT_ADDRESS, address: addresses[0] },
-    { tokenAddress: USDC_ADDRESS, address: addresses[0] },
-    { tokenAddress: USDT_ADDRESS, address: addresses[1] },
-    { tokenAddress: USDC_ADDRESS, address: addresses[1] },
+    { token_address: USDT_ADDRESS, address: addresses[0] },
+    { token_address: USDC_ADDRESS, address: addresses[0] },
+    { token_address: USDT_ADDRESS, address: addresses[1] },
+    { token_address: USDC_ADDRESS, address: addresses[1] },
   ];
 
   try {
     const multiTokenBalances =
-      await erc20Helper.batchGetBalancesMultipleTokens(queries);
+      await erc20Helper.batchGetBalancesMultipleTokens({ queries: queries as any });
 
     console.log('多 token 余额查询结果:');
     for (const result of multiTokenBalances) {
-      const symbol = result.tokenAddress === USDT_ADDRESS ? 'USDT' : 'USDC';
-      const decimals = await erc20Helper.getDecimals(result.tokenAddress);
+      const symbol = result.token_address === USDT_ADDRESS ? 'USDT' : 'USDC';
+      const decimals = await erc20Helper.getDecimals(result.token_address);
       const formatted = erc20Helper.formatTokenAmount(result.balance, decimals);
       console.log(
         `  ${result.address.slice(0, 10)}... - ${symbol}: ${formatted}`,
@@ -105,17 +108,17 @@ async function main() {
   const walletAddresses = addresses.slice(0, 2);
 
   try {
-    const groupedBalances = await erc20Helper.batchGetBalancesGrouped(
-      tokenAddresses,
-      walletAddresses,
-    );
+    const groupedBalances = await erc20Helper.batchGetBalancesGrouped({
+      token_addresses: tokenAddresses,
+      wallet_addresses: walletAddresses,
+    });
 
     console.log('按地址分组的余额:');
     for (const [address, tokens] of Object.entries(groupedBalances)) {
       console.log(`\n地址: ${address}`);
       for (const token of tokens) {
-        const symbol = token.tokenAddress === USDT_ADDRESS ? 'USDT' : 'USDC';
-        const decimals = await erc20Helper.getDecimals(token.tokenAddress);
+        const symbol = token.token_address === USDT_ADDRESS ? 'USDT' : 'USDC';
+        const decimals = await erc20Helper.getDecimals(token.token_address);
         const formatted = erc20Helper.formatTokenAmount(
           token.balance,
           decimals,
@@ -135,7 +138,11 @@ async function main() {
       const toAddress = '0xReceiverAddress';
       const amount = erc20Helper.parseTokenAmount('10', 6); // 转账 10 USDT (USDT 是 6 位精度)
 
-      const tx = await erc20Helper.transfer(USDT_ADDRESS, toAddress, amount);
+      const tx = await erc20Helper.transfer({
+        token_address: USDT_ADDRESS,
+        to: toAddress,
+        amount,
+      });
       console.log('转账交易哈希:', tx.hash);
     } catch (error) {
       console.error('转账失败:', error);
@@ -150,11 +157,11 @@ async function main() {
       const spenderAddress = '0xSpenderAddress';
       const amount = erc20Helper.parseTokenAmount('100', 6); // 授权 100 USDT
 
-      const tx = await erc20Helper.approve(
-        USDT_ADDRESS,
-        spenderAddress,
+      const tx = await erc20Helper.approve({
+        token_address: USDT_ADDRESS,
+        spender: spenderAddress,
         amount,
-      );
+      });
       console.log('授权交易哈希:', tx.hash);
     } catch (error) {
       console.error('授权失败:', error);
@@ -169,11 +176,11 @@ async function main() {
       const owner = '0xOwnerAddress';
       const spender = '0xSpenderAddress';
 
-      const allowance = await erc20Helper.allowance(
-        USDT_ADDRESS,
+      const allowance = await erc20Helper.allowance({
+        token_address: USDT_ADDRESS,
         owner,
         spender,
-      );
+      });
       const decimals = await erc20Helper.getDecimals(USDT_ADDRESS);
       const formatted = erc20Helper.formatTokenAmount(allowance, decimals);
 
@@ -192,12 +199,12 @@ async function main() {
       const toAddress = '0xToAddress';
       const amount = erc20Helper.parseTokenAmount('5', 6); // 转账 5 USDT
 
-      const tx = await erc20Helper.transferFrom(
-        USDT_ADDRESS,
-        fromAddress,
-        toAddress,
+      const tx = await erc20Helper.transferFrom({
+        token_address: USDT_ADDRESS,
+        from: fromAddress,
+        to: toAddress,
         amount,
-      );
+      });
       console.log('TransferFrom 交易哈希:', tx.hash);
     } catch (error) {
       console.error('TransferFrom 失败:', error);

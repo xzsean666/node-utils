@@ -4,8 +4,8 @@ interface LogFilter {
   fromBlock?: number | string;
   toBlock?: number | string;
   topics?:
-    | (string | string[] | null)[]
-    | Record<string, (string | number | null)[]>;
+  | (string | string[] | null)[]
+  | Record<string, (string | number | null)[]>;
 }
 
 interface GetRawContractLogsParams {
@@ -26,13 +26,19 @@ interface GetContractLogsParams {
   initial_batch_size?: number;
 }
 
-export { LogFilter, GetRawContractLogsParams, GetContractLogsParams };
+export type { LogFilter, GetRawContractLogsParams, GetContractLogsParams };
 
 export class EthersLogHelper {
-  public web3: ethers.JsonRpcProvider;
+  public web3: ethers.JsonRpcProvider | ethers.BrowserProvider;
 
-  constructor(node_provider: string) {
-    this.web3 = new ethers.JsonRpcProvider(node_provider);
+  constructor(
+    node_provider: string | ethers.BrowserProvider | ethers.JsonRpcProvider,
+  ) {
+    if (typeof node_provider == 'string') {
+      this.web3 = new ethers.JsonRpcProvider(node_provider);
+    } else {
+      this.web3 = node_provider;
+    }
   }
 
   /**
@@ -145,10 +151,10 @@ export class EthersLogHelper {
     // 如果指定了event_names，则过滤相应的事件
     const event_abis = event_names
       ? all_event_abis.filter((item: any) =>
-          Array.isArray(event_names)
-            ? event_names.includes(item.name)
-            : item.name === event_names,
-        )
+        Array.isArray(event_names)
+          ? event_names.includes(item.name)
+          : item.name === event_names,
+      )
       : all_event_abis;
 
     if (event_abis.length === 0) {
@@ -259,7 +265,7 @@ export class EthersLogHelper {
         const arg = filterArgs[i];
         const input = indexedInputs[i];
 
-        if (arg === null) {
+        if (arg === null || arg === undefined) {
           processedArgs.push(null);
         } else {
           processedArgs.push(this.encodeIndexedArg(arg, input.type));
@@ -300,7 +306,7 @@ export class EthersLogHelper {
       const firstValue = valuesAtPosition[0];
       const allSame = valuesAtPosition.every((val) => val === firstValue);
 
-      mergedTopics.push(allSame ? firstValue : null);
+      mergedTopics.push((allSame && firstValue !== undefined) ? firstValue : null);
     }
 
     return mergedTopics;
@@ -395,10 +401,10 @@ export class EthersLogHelper {
       // 如果未指定event_names，则使用所有事件，否则过滤指定的事件
       const event_abis = event_names
         ? all_event_abis.filter((item: any) =>
-            Array.isArray(event_names)
-              ? event_names.includes(item.name)
-              : item.name === event_names,
-          )
+          Array.isArray(event_names)
+            ? event_names.includes(item.name)
+            : item.name === event_names,
+        )
         : all_event_abis;
 
       // 检查是否有匹配的事件ABI

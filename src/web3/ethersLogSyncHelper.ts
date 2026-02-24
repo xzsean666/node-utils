@@ -4,13 +4,14 @@ import { PGKVDatabase } from '../dbUtils/KVPostgresql';
 import { SqliteKVDatabase } from '../dbUtils/KVSqlite';
 
 import { memoryCache } from '../dbUtils/MemoryCache';
+import { ethers } from 'ethers';
 
 export class EthersLogSyncHelper extends EthersLogHelper {
   private sqlite_path?: string;
   private postgres_path?: string;
 
   constructor(
-    node_provider: string,
+    node_provider: string | ethers.BrowserProvider | ethers.JsonRpcProvider,
     configs?: {
       sqlite_path?: string;
       postgres_path?: string;

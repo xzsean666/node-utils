@@ -1,14 +1,31 @@
-# TypeScript 项目模板
+# Node Utils (TypeScript 项目工具库)
 
-现代化的 TypeScript 项目模板，使用 ESM 模块系统和 Vitest 测试框架。
+现代化的 TypeScript 工具集合库，本项目提供了一系列 Web3、数据库（Database/Memory KV）以及 AI 调用封装的实用工具包，使用 ESM 模块系统并以 Vitest 作为测试框架支撑。
 
-## 特性
+## 简介 (Project Description)
+
+本项目汇聚了多个常用领域（Web3、DB、AI 等）的脚本及辅助类，旨在提供开箱即用、安全稳定的 Node.js 工程化组件：
+- **Web3 集成**: 包含完善的 `ethers.js` 智能合约的部署、调用工具（`EthersTxHelper`）以及 DeFi / Polymarket 的相关客户端集成代码。
+- **数据库组件**: 提供 `KVSqlite` 键值持久化方案与 `MemoryCache` 内存缓存系统。
+- **AI 助手**: 含对 Gemini 模型的简易调用（`GeminiHelper`）。
+
+## 特性 (Features)
 
 - 🚀 **ES Modules** - 使用原生 ESM 模块系统
-- 📦 **TypeScript** - 最新的 TypeScript 特性
-- ⚡ **Vitest** - 快速的单元测试框架
-- 🔥 **tsx** - 开发时直接运行 TypeScript
-- 📝 **类型声明** - 自动生成 .d.ts 文件
+- 📦 **TypeScript** - 最新版强类型特性与编译体验
+- ⚡ **Vitest** - 极速且直观的单元测试
+- 🔥 **tsx** - 支持开发环境中直接运行 `.ts` 脚本
+- 🌐 **Blockchain Ready** - 集成了针对 `Ethers v6` 等区块链组件调用最佳实践的类封装
+
+## 🤖 AI 变动记录 (AI Update Log)
+
+当 AI 助手进行操作、新增 / 删减功能后，将会于此处或 [ChangeLog.md](./ChangeLog.md) 中更新摘要。
+
+- **2026-02-24**: 
+  1. 优化 `src/web3/ethersTxHelper.ts` (去除了导致前端阻塞长达数十秒的 `.wait()` 强制调用，增设可选 `waitConfirm` 参量)。
+  2. 修复了基于 `ethers.BrowserProvider` (如 MetaMask) 发送或部署合约时因为空私钥崩溃的问题，使得助手类在全栈可用性大幅提升。
+  3. 重构了冗余的 `decodeDataByABI` 方法为 `decodeInputDataByABI` 等专用于解析请求和返回报文的函数。
+  4. 优化了 `src/web3/(ethersTxBatchHelper.ts | ethersLogSyncHelper.ts | ethersLogHelper.ts | erc20Helper.ts)` 系列代码，对齐了构造函数的 Provider 类型签名，修复了部分类型导出问题以及处理特定场景下 `undefined` 值可能导致的崩溃与警告。
 
 ## 可用的命令
 

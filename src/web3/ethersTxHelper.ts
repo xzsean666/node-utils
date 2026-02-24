@@ -2,16 +2,16 @@ import { ethers } from 'ethers';
 
 export class EthersTxHelper {
   web3!: ethers.JsonRpcProvider | ethers.BrowserProvider;
-  NODE_PROVIDER?: string | ethers.BrowserProvider;
+  NODE_PROVIDER?: string | ethers.BrowserProvider | ethers.JsonRpcProvider;
   private private_key?: string;
 
-  constructor(NODE_PROVIDER: string | ethers.BrowserProvider, config?: any) {
+  constructor(NODE_PROVIDER: string | ethers.BrowserProvider | ethers.JsonRpcProvider, config?: any) {
     this.NODE_PROVIDER = NODE_PROVIDER;
     this.private_key = config?.private_key;
 
     if (typeof NODE_PROVIDER == 'string') {
       this.web3 = new ethers.JsonRpcProvider(NODE_PROVIDER);
-    } else if (NODE_PROVIDER instanceof ethers.BrowserProvider) {
+    } else if (NODE_PROVIDER instanceof ethers.BrowserProvider || NODE_PROVIDER instanceof ethers.JsonRpcProvider) {
       this.web3 = NODE_PROVIDER;
     } else {
       throw new Error('Invalid NODE_PROVIDER type');
@@ -30,7 +30,15 @@ export class EthersTxHelper {
   }
   public async deployContract(abi: any[], bytecode: string): Promise<any> {
     try {
-      const signer = new ethers.Wallet(this.private_key || '', this.web3);
+      let signer: ethers.Signer;
+      if (this.private_key) {
+        signer = new ethers.Wallet(this.private_key, this.web3);
+      } else if (this.web3 instanceof ethers.BrowserProvider) {
+        signer = await this.web3.getSigner();
+      } else {
+        throw new Error('未提供可用的 Signer (需要 private_key 或 BrowserProvider)');
+      }
+
       const factory = new ethers.ContractFactory(abi, bytecode, signer);
       const contract = await factory.deploy();
       await contract.waitForDeployment();
@@ -63,14 +71,7 @@ export class EthersTxHelper {
       value: params.value,
     };
   }
-  decodeDataByABI(params: { abi: any[]; function_name: string; data: string }) {
-    const { abi, function_name, data } = params;
-    const iface = new ethers.Interface(abi);
-    // 解返回数据
-    const decoded_data = iface.decodeFunctionResult(function_name, data);
-    return decoded_data;
-  }
-
+  // 解返回的数据
   decodeResultDataByABI(params: {
     abi: any[];
     function_name: string;
@@ -78,9 +79,18 @@ export class EthersTxHelper {
   }) {
     const { abi, function_name, data } = params;
     const iface = new ethers.Interface(abi);
-    // 解返回数据
     const decoded_data = iface.decodeFunctionResult(function_name, data);
     return decoded_data;
+  }
+
+  // 解输入的 Data Payload
+  decodeInputDataByABI(params: {
+    abi: any[];
+    data: string;
+  }) {
+    const { abi, data } = params;
+    const iface = new ethers.Interface(abi);
+    return iface.parseTransaction({ data });
   }
   async sendEther(to_address: string, amount: string) {
     return await this.sendTransaction({
@@ -95,8 +105,9 @@ export class EthersTxHelper {
     abi: any[];
     execute_args: any[];
     value?: string;
+    waitConfirm?: boolean;
   }) {
-    const { abi, function_name, execute_args, target, value } = params;
+    const { abi, function_name, execute_args, target, value, waitConfirm } = params;
     const data = this.encodeDataByABI({
       abi: abi,
       function_name,
@@ -104,7 +115,10 @@ export class EthersTxHelper {
       target,
       value,
     });
-    const tx_result = await this.sendTransaction(data);
+    const tx_result = await this.sendTransaction({
+      ...data,
+      waitConfirm,
+    });
     return tx_result;
   }
 
@@ -127,10 +141,7 @@ export class EthersTxHelper {
       }
     } catch (error: any) {
       throw new Error(
-        '读取合约失败 (' +
-          function_name +
-          '): ' +
-          (error && (error.message || String(error))),
+        `读取合约失败 (${function_name}): ${error?.message || String(error)}`
       );
     }
   }
@@ -147,10 +158,7 @@ export class EthersTxHelper {
       return (await fn.staticCall(...args)) as T;
     } catch (error: any) {
       throw new Error(
-        '静态调用合约失败 (' +
-          function_name +
-          '): ' +
-          (error && (error.message || String(error))),
+        `静态调用合约失败 (${function_name}): ${error?.message || String(error)}`
       );
     }
   }
@@ -159,33 +167,31 @@ export class EthersTxHelper {
     to: string,
     data?: string,
     value: string = '0',
-  ): Promise<ethers.TransactionResponse> {
+    waitConfirm: boolean = false,
+  ): Promise<ethers.TransactionResponse | ethers.TransactionReceipt> {
     if (!this.web3 || !(this.web3 instanceof ethers.BrowserProvider)) {
       throw new Error('未找到有效的BrowserProvider');
     }
 
     try {
-      // 获取签名者
       const signer = await this.web3.getSigner();
 
-      // 构建交易对象
       const tx = {
         to,
         data: this.normalizeHexData(data),
         value: this.normalizeValue(value),
       };
 
-      // 发送交易
       const tx_response = await signer.sendTransaction(tx);
 
-      // 等待交易被确认
-      const receipt = await tx_response.wait();
-
-      if (!receipt) {
-        throw new Error('交易未被确认');
+      if (waitConfirm) {
+        const receipt = await tx_response.wait();
+        if (!receipt) {
+          throw new Error('交易未被确认');
+        }
+        return receipt;
       }
 
-      // 返回交易哈希
       return tx_response;
     } catch (error: any) {
       console.error('发送交易失败:', error);
@@ -197,7 +203,8 @@ export class EthersTxHelper {
     to: string,
     data?: string,
     value: string = '0',
-  ): Promise<ethers.TransactionResponse> {
+    waitConfirm: boolean = false,
+  ): Promise<ethers.TransactionResponse | ethers.TransactionReceipt> {
     if (!this.private_key) {
       throw new Error('Private key is required');
     }
@@ -208,7 +215,12 @@ export class EthersTxHelper {
       value: this.normalizeValue(value),
     });
 
-    await tx_response.wait();
+    if (waitConfirm) {
+      const receipt = await tx_response.wait();
+      if (!receipt) return tx_response;
+      return receipt;
+    }
+
     return tx_response;
   }
 
@@ -219,30 +231,30 @@ export class EthersTxHelper {
     abi?: any[];
     functionName?: string;
     executeArgs?: any[];
-  }): Promise<ethers.TransactionResponse> {
+    waitConfirm?: boolean;
+  }): Promise<ethers.TransactionResponse | ethers.TransactionReceipt> {
     if (!this.web3) {
       throw new Error('未找到有效的Provider');
     }
 
     try {
-      let tx_response: ethers.TransactionResponse;
-      // 保留原有的 Provider 判断逻辑
-      if (this.private_key && this.web3 instanceof ethers.JsonRpcProvider) {
-        tx_response = await this.sendWithPrivateKey(
+      if (this.private_key) {
+        return await this.sendWithPrivateKey(
           call.target,
           call.data,
           call.value || '0',
+          call.waitConfirm,
         );
       } else if (this.web3 instanceof ethers.BrowserProvider) {
-        tx_response = await this.sendWithBrowserProvider(
+        return await this.sendWithBrowserProvider(
           call.target,
           call.data,
           call.value || '0',
+          call.waitConfirm,
         );
       } else {
-        throw new Error('未找到有效的Provider');
+        throw new Error('未找到有效的Provider (需要 private_key 或者是 BrowserProvider)');
       }
-      return tx_response;
     } catch (error: any) {
       throw new Error(`发送交易失败: ${error.message}`);
     }

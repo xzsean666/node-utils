@@ -3,12 +3,17 @@ import { EthersTxHelper } from './ethersTxHelper';
 import { ethers } from 'ethers';
 
 export class EthersTxBatchHelper extends EthersTxHelper {
-  public batch_call_address;
-  constructor(NODE_PROVIDER: string | ethers.BrowserProvider, config?: any) {
+  public batch_call_address?: string;
+
+  constructor(
+    NODE_PROVIDER: string | ethers.BrowserProvider | ethers.JsonRpcProvider,
+    config?: any,
+  ) {
     super(NODE_PROVIDER, config);
     this.batch_call_address = config?.batch_call_address;
   }
-  async deployBatchCallContract() {
+
+  async deployBatchCallContract(): Promise<any> {
     const result = await this.deployContract(batchCallABI, batchCallBytesCode);
     return result;
   }
@@ -62,6 +67,7 @@ export class EthersTxBatchHelper extends EthersTxHelper {
       // 解码返回结果
       const batch_results = return_data.map((data: string, index: number) => {
         const call = batch_calls[index];
+        if (!call) return null;
 
         if (!successes[index]) {
           return {
@@ -98,7 +104,7 @@ export class EthersTxBatchHelper extends EthersTxHelper {
         }
       });
 
-      results.push(...batch_results);
+      results.push(...batch_results.filter((res) => res !== null) as any[]);
     }
     return results;
   }

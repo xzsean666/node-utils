@@ -21,7 +21,13 @@
 
 当 AI 助手进行操作、新增 / 删减功能后，将会于此处或 [ChangeLog.md](./ChangeLog.md) 中更新摘要。
 
-- **2026-02-25**: 
+- **2026-02-25** (第二次): S3 模块精简与上传 URL 增强
+  1. 删除 `S3Sync`（文件夹同步）与 `S3FolderUploader`（文件夹批量上传）模块，聚焦核心能力。
+  2. `S3Helper` 移除外部 KV 数据库依赖（`IKVDatabase`），防重复上传改用内存 `Map` 实现，零配置开箱即用。
+  3. `uploadFile` / `uploadBuffer` 统一返回 `UploadResult`（含 `wasUploaded` 标记），防重复逻辑内置无需单独调用 `Advanced` 版本。
+  4. `S3UrlGenerator` 新增上传 URL 生成：`generateOneTimeUploadUrl`（UUID 唯一 key，防覆盖）、`generateReusableUploadUrl`（固定 key，有效期内可重复使用）、`generateBatchOneTimeUploadUrls`。
+
+- **2026-02-25** (第一次): 
   1. 重构拆分了原近 3000 行的 `src/dbUtils/s3Helper.ts`，基于领域功能解耦为 `S3Helper`, `S3Sync`, `S3FolderUploader`, `S3UrlGenerator` 及对应的类型中心，并统一迁移至 `src/dbUtils/s3/`，实现了模块高内聚低耦合。
   2. 修复了 S3 `uploadFile/Buffer` 中 MD5 重复计算造成的性能损耗漏洞，以及 `DeleteObjects` 批量删除接口超过 1000 个对象容量引发崩溃等 P0 级严重异常。
   3. 通过原文件直接全量同名导出机制完美保留了向后兼容性（Backward Compatibility）。

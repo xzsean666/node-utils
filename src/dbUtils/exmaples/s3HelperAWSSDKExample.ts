@@ -10,8 +10,8 @@ async function awsSDKExamples() {
   const awsS3 = S3Helper.createAWS(
     process.env.AWS_ACCESS_KEY_ID || 'your-access-key',
     process.env.AWS_SECRET_ACCESS_KEY || 'your-secret-key',
-    'us-west-2',
     'my-test-bucket',
+    'us-west-2',
   );
 
   // 2. Cloudflare R2 - 零出站费用
@@ -35,12 +35,12 @@ async function awsSDKExamples() {
   // 4. MinIO - 自托管
   console.log('4. 连接到 MinIO');
   const minioS3 = S3Helper.createMinIO(
-    process.env.MINIO_ENDPOINT || 'localhost',
     process.env.MINIO_ACCESS_KEY || 'minioadmin',
     process.env.MINIO_SECRET_KEY || 'minioadmin',
+    process.env.MINIO_ENDPOINT || 'localhost',
+    'my-minio-bucket',
     false, // 本地开发通常不用 SSL
     9000,
-    'my-minio-bucket',
   );
 
   try {
@@ -114,7 +114,7 @@ SDK: @aws-sdk/client-s3`;
     console.log('📄 文件信息:', {
       name: fileInfo.name,
       size: `${fileInfo.size} bytes`,
-      lastModified: fileInfo.lastModified.toISOString(),
+      lastModified: fileInfo.lastModified?.toISOString(),
       contentType: fileInfo.contentType,
       metadata: fileInfo.metadata,
     });
@@ -193,8 +193,8 @@ async function performanceComparison() {
       helper: S3Helper.createAWS(
         process.env.AWS_ACCESS_KEY_ID || 'test-key',
         process.env.AWS_SECRET_ACCESS_KEY || 'test-secret',
-        'us-west-2',
         'test-bucket',
+        'us-west-2',
       ),
     },
     {
@@ -240,8 +240,8 @@ async function advancedFeatures() {
   const s3 = S3Helper.createAWS(
     process.env.AWS_ACCESS_KEY_ID || 'your-key',
     process.env.AWS_SECRET_ACCESS_KEY || 'your-secret',
-    'us-west-2',
     'advanced-test-bucket',
+    'us-west-2',
   );
 
   try {

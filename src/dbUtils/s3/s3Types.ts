@@ -14,32 +14,9 @@ export enum S3Provider {
     CUSTOM = 'custom',
 }
 
-/** 同步模式枚举 */
-export enum SyncMode {
-    LOCAL_TO_S3 = 'localToS3',
-    S3_TO_LOCAL = 's3ToLocal',
-    BIDIRECTIONAL = 'bidirectional',
-}
-
-/** 同步操作类型 */
-export enum SyncOperation {
-    UPLOAD = 'upload',
-    DOWNLOAD = 'download',
-    DELETE_LOCAL = 'deleteLocal',
-    DELETE_S3 = 'deleteS3',
-    SKIP = 'skip',
-    UPDATE = 'update',
-}
-
 // ============================================================
 // Core Interfaces
 // ============================================================
-
-/** KV 数据库接口 */
-export interface IKVDatabase<T = any> {
-    get(key: string, ttl?: number): Promise<T | null>;
-    put(key: string, value: T): Promise<void>;
-}
 
 /** S3 配置接口 */
 export interface S3Config {
@@ -62,13 +39,15 @@ export interface UploadOptions {
     contentType?: string;
     metadata?: Record<string, string>;
     acl?: 'private' | 'public-read' | 'public-read-write';
+    /** 设为 true 跳过防重复检查，强制上传 */
     forceUpload?: boolean;
 }
 
-/** 防重复上传的结果 */
+/** 上传结果（含防重复检测信息） */
 export interface UploadResult {
     etag: string;
     objectName: string;
+    /** true=实际上传了, false=命中缓存跳过 */
     wasUploaded: boolean;
 }
 
@@ -102,15 +81,43 @@ export interface BatchResult<T> {
 // URL Generation Interfaces
 // ============================================================
 
-/** 签名URL生成选项 */
+/** 签名URL生成选项（下载/查看） */
 export interface GenerateUrlOptions {
     bucket?: string;
     prefix?: string;
+    /** URL 有效期（秒），默认 86400（24 小时） */
     expiry?: number;
     downloadUrls?: boolean;
     uploadUrls?: boolean;
     includeMetadata?: boolean;
     simplify?: boolean;
+}
+
+/** 预签名上传 URL 选项 */
+export interface PresignedUploadUrlOptions {
+    bucket?: string;
+    /** URL 有效期（秒），默认 3600（1小时） */
+    expiry?: number;
+    /** 限制上传的 Content-Type */
+    contentType?: string;
+    /** 上传文件的最大大小（字节），仅部分 provider 支持 */
+    maxSize?: number;
+    /** 自定义元数据 */
+    metadata?: Record<string, string>;
+}
+
+/** 预签名上传 URL 结果 */
+export interface PresignedUploadUrlResult {
+    /** 上传使用的 presigned URL */
+    uploadUrl: string;
+    /** S3 中的 object key */
+    objectName: string;
+    /** URL 过期时间 */
+    expiresAt: Date;
+    /** URL 有效期（秒） */
+    expirySeconds: number;
+    /** 是否为一次性 URL（使用了唯一 key） */
+    oneTime: boolean;
 }
 
 /** 签名 URL 结果项 */
@@ -133,116 +140,6 @@ export interface SignedUrlSummary {
     successfulUrls: number;
     failedUrls: number;
     outputPath?: string;
-}
-
-// ============================================================
-// Folder Upload Interfaces
-// ============================================================
-
-/** 文件夹上传选项 */
-export interface FolderUploadOptions extends UploadOptions {
-    s3Prefix?: string;
-    bucket?: string;
-    depth?: number;
-    advanced?: boolean;
-}
-
-/** 文件夹上传结果（基础版） */
-export interface FolderUploadResult {
-    successful: Array<{
-        localPath: string;
-        s3Key: string;
-        fileInfo: FileInfo;
-        wasUploaded: boolean;
-    }>;
-    failed: Array<{ localPath: string; error: string }>;
-    totalFiles: number;
-    uploadedCount: number;
-    cachedCount: number;
-}
-
-/** 文件夹上传结果（高级版） */
-export interface FolderUploadResultAdvanced {
-    successful: Array<{
-        localPath: string;
-        s3Key: string;
-        uploadResult: UploadResult;
-    }>;
-    failed: Array<{ localPath: string; error: string }>;
-    totalFiles: number;
-    uploadedCount: number;
-    cachedCount: number;
-}
-
-// ============================================================
-// Sync Interfaces
-// ============================================================
-
-/** 文件过滤器接口 */
-export interface FileFilter {
-    extensions?: string[];
-    excludeExtensions?: string[];
-    includePatterns?: RegExp[];
-    excludePatterns?: RegExp[];
-    minSize?: number;
-    maxSize?: number;
-}
-
-/** 同步选项接口 */
-export interface SyncOptions extends UploadOptions {
-    syncMode?: SyncMode;
-    s3Prefix?: string;
-    bucket?: string;
-    depth?: number;
-    deleteExtraFiles?: boolean;
-    overwriteExisting?: boolean;
-    fileFilter?: FileFilter;
-    dryRun?: boolean;
-    compareBy?: 'etag' | 'size' | 'lastModified' | 'both';
-}
-
-/** 同步结果项 */
-export interface SyncResultItem {
-    operation: SyncOperation;
-    localPath?: string;
-    s3Key?: string;
-    size?: number;
-    error?: string;
-    skipped?: boolean;
-}
-
-/** 同步结果 */
-export interface SyncResult {
-    summary: {
-        totalFiles: number;
-        uploaded: number;
-        downloaded: number;
-        deleted: number;
-        skipped: number;
-        failed: number;
-        dryRun: boolean;
-    };
-    operations: SyncResultItem[];
-    errors: Array<{ path: string; error: string }>;
-}
-
-// ============================================================
-// Local File Info (used by sync & folder upload)
-// ============================================================
-
-export interface LocalFileInfo {
-    localPath: string;
-    relativePath: string;
-    size: number;
-    lastModified: Date;
-}
-
-export interface S3FileInfo {
-    s3Key: string;
-    relativePath: string;
-    size: number;
-    lastModified: Date;
-    etag: string;
 }
 
 // ============================================================
@@ -301,18 +198,68 @@ export const MIME_TYPE_MAP: Record<string, string> = {
     '.wav': 'audio/wav',
 };
 
-/** 支持的图片扩展名 */
-export const IMAGE_EXTENSIONS = [
-    '.jpg',
-    '.jpeg',
-    '.png',
-    '.gif',
-    '.bmp',
-    '.webp',
-    '.svg',
-    '.tiff',
-    '.ico',
-];
-
 /** S3 DeleteObjects API 单次最大删除数 */
 export const MAX_DELETE_OBJECTS_PER_REQUEST = 1000;
+
+// ============================================================
+// ContentType 常量（代替手写 MIME 字符串）
+// 用法: contentType: ContentType.GZIP  →  'application/gzip'
+// IDE 会提供完整自动补全，不用担心拼写错误
+// ============================================================
+
+/** 常用 MIME 类型常量，配合 contentType 字段使用 */
+export const ContentType = {
+    // 图片
+    JPEG: 'image/jpeg',
+    PNG: 'image/png',
+    GIF: 'image/gif',
+    WEBP: 'image/webp',
+    SVG: 'image/svg+xml',
+    BMP: 'image/bmp',
+    TIFF: 'image/tiff',
+    ICO: 'image/x-icon',
+
+    // 文档
+    PDF: 'application/pdf',
+    TEXT: 'text/plain',
+    HTML: 'text/html',
+    CSS: 'text/css',
+    CSV: 'text/csv',
+
+    // 数据 / 脚本
+    JSON: 'application/json',
+    XML: 'application/xml',
+    JS: 'application/javascript',
+    WASM: 'application/wasm',
+
+    // 压缩 / 归档
+    GZIP: 'application/gzip',
+    ZIP: 'application/zip',
+    TAR: 'application/x-tar',
+    BROTLI: 'application/x-brotli',
+    SEVEN_ZIP: 'application/x-7z-compressed',
+
+    // 音视频
+    MP4: 'video/mp4',
+    WEBM: 'video/webm',
+    MP3: 'audio/mpeg',
+    WAV: 'audio/wav',
+    OGG: 'audio/ogg',
+    AAC: 'audio/aac',
+
+    // 字体
+    WOFF: 'font/woff',
+    WOFF2: 'font/woff2',
+    TTF: 'font/ttf',
+
+    // 二进制流（通用）
+    BINARY: 'application/octet-stream',
+
+    // 表单
+    FORM: 'application/x-www-form-urlencoded',
+    MULTIPART: 'multipart/form-data',
+} as const;
+
+/** ContentType 值类型，可用于函数参数约束 */
+export type ContentTypeValue = (typeof ContentType)[keyof typeof ContentType];
+

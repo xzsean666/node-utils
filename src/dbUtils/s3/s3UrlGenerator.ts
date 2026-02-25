@@ -1,9 +1,17 @@
 // S3UrlGenerator - 签名 URL 生成器
-// 使用组合模式，依赖 S3Helper 实例的公开 API，不依赖 s3Sync / s3FolderUploader
+// 支持生成下载 URL 和上传 URL（一次性 / 可重复使用），均可设置有效期
+// 使用组合模式，依赖 S3Helper 实例的公开 API
 
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import { S3Helper } from './s3Helper';
-import type { GenerateUrlOptions, SignedUrlResult, SignedUrlSummary } from './s3Types';
+import type {
+    GenerateUrlOptions,
+    SignedUrlResult,
+    SignedUrlSummary,
+    PresignedUploadUrlOptions,
+    PresignedUploadUrlResult,
+} from './s3Types';
 
 export class S3UrlGenerator {
     private helper: S3Helper;
@@ -13,10 +21,165 @@ export class S3UrlGenerator {
     }
 
     // ============================================================
-    // 单个文件
+    // 上传 URL 生成
     // ============================================================
 
-    /** 为单个文件生成签名 URL */
+    /**
+     * 生成一次性上传 URL
+     *
+     * S3 预签名 URL 在生成时必须确定 object key（这是签名的一部分，不可更改）。
+     * 本方法通过服务端生成 UUID key 来实现「调用方无需预先知道文件名」的效果：
+     * 服务端决定 key，客户端只管往 uploadUrl 上传文件，上传成功后用 objectName 访问结果。
+     *
+     * @param prefix  - S3 路径前缀，如 `'uploads/images'`；传空字符串则不加前缀
+     * @param options - 上传选项（含可选的 fileName 和 ext）
+     *   - `fileName`：文件名（如 `'photo.jpg'`），会拼在 UUID 后面，可省略
+     *   - `ext`：扩展名（如 `'.jpg'`），fileName 省略时可单独指定，如 `'.jpg'`
+     *   - `expiry`：有效期（秒），默认 3600
+     *   - `contentType`：限制客户端只能上传指定 MIME 类型
+     * @returns 包含 `uploadUrl`（客户端用于 PUT）和 `objectName`（上传成功后的访问路径）
+     *
+     * @example
+     * // 指定文件名（UUID 前缀防覆盖）
+     * const r1 = await urlGen.generateOneTimeUploadUrl('uploads', {
+     *   fileName: 'photo.jpg',
+     *   expiry: 3600,
+     *   contentType: 'image/jpeg',
+     * });
+     * // r1.objectName -> 'uploads/<uuid>-photo.jpg'
+     *
+     * // 只指定扩展名，不关心文件名
+     * const r2 = await urlGen.generateOneTimeUploadUrl('uploads/avatars', {
+     *   ext: '.png',
+     *   expiry: 1800,
+     * });
+     * // r2.objectName -> 'uploads/avatars/<uuid>.png'
+     *
+     * // 完全不指定文件名，纯 UUID key
+     * const r3 = await urlGen.generateOneTimeUploadUrl('uploads/raw', {
+     *   expiry: 600,
+     * });
+     * // r3.objectName -> 'uploads/raw/<uuid>'
+     */
+    async generateOneTimeUploadUrl(
+        prefix: string,
+        options?: PresignedUploadUrlOptions & {
+            /** 文件名（如 'photo.jpg'），会拼在 UUID 后面 */
+            fileName?: string;
+            /** 扩展名（如 '.jpg'），fileName 省略时可单独指定 */
+            ext?: string;
+        },
+    ): Promise<PresignedUploadUrlResult> {
+        const expiry = options?.expiry ?? 3600;
+        const uuid = crypto.randomUUID();
+
+        // 构建 key 尾部：优先用 fileName，其次用 ext，最后纯 UUID
+        const suffix = options?.fileName
+            ? `-${options.fileName}`
+            : options?.ext
+                ? `${options.ext.startsWith('.') ? options.ext : `.${options.ext}`}`
+                : '';
+
+        const key = `${uuid}${suffix}`;
+        const object_name = prefix ? `${prefix}/${key}` : key;
+
+        try {
+            const upload_url = await this.helper.getPresignedUploadUrl(
+                object_name,
+                expiry,
+                options?.bucket,
+                options?.contentType,
+            );
+
+            return {
+                uploadUrl: upload_url,
+                objectName: object_name,
+                expiresAt: new Date(Date.now() + expiry * 1000),
+                expirySeconds: expiry,
+                oneTime: true,
+            };
+        } catch (error: any) {
+            throw new Error(`生成一次性上传URL失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 生成可重复使用的上传 URL
+     * 使用固定的 S3 key，在有效期内可反复使用同一 URL 上传（会覆盖同名文件）
+     *
+     * @param objectName - 固定的 S3 object key
+     * @param options - 上传选项
+     * @returns 包含上传 URL 和元信息的结果
+     *
+     * @example
+     * const urlGen = new S3UrlGenerator(s3Helper);
+     * const result = await urlGen.generateReusableUploadUrl('avatars/user-123.png', {
+     *   expiry: 86400, // 24 小时内可反复使用
+     *   contentType: 'image/png',
+     * });
+     */
+    async generateReusableUploadUrl(
+        objectName: string,
+        options?: PresignedUploadUrlOptions,
+    ): Promise<PresignedUploadUrlResult> {
+        const expiry = options?.expiry ?? 3600;
+
+        try {
+            const upload_url = await this.helper.getPresignedUploadUrl(
+                objectName,
+                expiry,
+                options?.bucket,
+                options?.contentType,
+            );
+
+            return {
+                uploadUrl: upload_url,
+                objectName: objectName,
+                expiresAt: new Date(Date.now() + expiry * 1000),
+                expirySeconds: expiry,
+                oneTime: false,
+            };
+        } catch (error: any) {
+            throw new Error(`生成可重复使用上传URL失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 批量生成一次性上传 URL
+     *
+     * @param prefix - S3 key 前缀
+     * @param items  - 文件描述列表，每项传给 `generateOneTimeUploadUrl` 的 options
+     * @param shared - 共享选项（expiry / contentType / bucket），会被 items 中的选项覆盖
+     * @returns 每个文件的上传 URL 结果数组
+     *
+     * @example
+     * // 批量指定文件名
+     * const results = await urlGen.generateBatchOneTimeUploadUrls('uploads', [
+     *   { fileName: 'photo1.jpg', contentType: 'image/jpeg' },
+     *   { fileName: 'photo2.png', contentType: 'image/png' },
+     *   { ext: '.pdf' },          // 只指定扩展名
+     *   {},                       // 纯 UUID key
+     * ], { expiry: 7200 });
+     */
+    async generateBatchOneTimeUploadUrls(
+        prefix: string,
+        items: Array<PresignedUploadUrlOptions & { fileName?: string; ext?: string }>,
+        shared?: PresignedUploadUrlOptions,
+    ): Promise<PresignedUploadUrlResult[]> {
+        return Promise.all(
+            items.map((item) =>
+                this.generateOneTimeUploadUrl(prefix, { ...shared, ...item }),
+            ),
+        );
+    }
+
+    // ============================================================
+    // 下载 URL 生成
+    // ============================================================
+
+    /**
+     * 为单个文件生成签名下载 URL
+     */
     async generateForFile(
         objectName: string,
         options?: Omit<GenerateUrlOptions, 'prefix'>,
@@ -24,20 +187,13 @@ export class S3UrlGenerator {
         const opts = this.resolveOptions(options);
 
         try {
-            console.log(`🔗 Generating URLs for: ${objectName}`);
-
-            // 先检查文件是否存在
             const exists = await this.helper.fileExists(objectName, opts.bucket);
             if (!exists) {
-                console.error(`✗ File not found: ${objectName}`);
                 return { objectName, error: 'File does not exist' };
             }
 
             return await this.generateUrlsForObject(objectName, opts);
         } catch (error: any) {
-            console.error(
-                `✗ Failed to generate URLs for: ${objectName} - ${error.message}`,
-            );
             return { objectName, error: error.message };
         }
     }
@@ -46,7 +202,9 @@ export class S3UrlGenerator {
     // 批量生成（写入 JSON）
     // ============================================================
 
-    /** 为 bucket 中所有文件生成签名 URL 并写入 JSON */
+    /**
+     * 为 bucket 中所有文件生成签名 URL 并写入 JSON
+     */
     async generateToJson(
         output_json_path: string,
         options?: GenerateUrlOptions & { batchSize?: number },
@@ -60,14 +218,9 @@ export class S3UrlGenerator {
                 .filter((f) => f.name && !f.name.endsWith('/'))
                 .map((f) => f.name!);
 
-            console.log(
-                `Found ${file_objects.length} files to generate URLs for (batch size: ${batch_size})`,
-            );
-
             const { results, successful_urls, failed_urls } =
                 await this.processBatches(file_objects, opts, batch_size);
 
-            // 写入 JSON 文件
             const output = {
                 generatedAt: new Date().toISOString(),
                 bucket: this.helper.getBucketName(opts.bucket),
@@ -88,11 +241,6 @@ export class S3UrlGenerator {
                 'utf8',
             );
 
-            console.log(`✓ Signed URLs written to: ${output_json_path}`);
-            console.log(
-                `📊 Final Summary: ${successful_urls} successful, ${failed_urls} failed out of ${file_objects.length} total files`,
-            );
-
             return {
                 totalFiles: file_objects.length,
                 successfulUrls: successful_urls,
@@ -104,7 +252,9 @@ export class S3UrlGenerator {
         }
     }
 
-    /** 批量为指定文件列表生成签名 URL 并写入 JSON */
+    /**
+     * 批量为指定文件列表生成签名 URL 并写入 JSON
+     */
     async generateForFilesToJson(
         object_names: string[],
         output_json_path: string,
@@ -114,17 +264,8 @@ export class S3UrlGenerator {
         const batch_size = (options as any)?.batchSize || 25;
 
         try {
-            console.log(
-                `Generating URLs for ${object_names.length} specified files (batch size: ${batch_size})`,
-            );
-
             const { results, successful_urls, failed_urls } =
-                await this.processBatches(
-                    object_names,
-                    opts,
-                    batch_size,
-                    true, // checkExists
-                );
+                await this.processBatches(object_names, opts, batch_size, true);
 
             const output = {
                 generatedAt: new Date().toISOString(),
@@ -143,11 +284,6 @@ export class S3UrlGenerator {
                 output_json_path,
                 JSON.stringify(output, null, 2),
                 'utf8',
-            );
-
-            console.log(`✓ Signed URLs written to: ${output_json_path}`);
-            console.log(
-                `📊 Final Summary: ${successful_urls} successful, ${failed_urls} failed out of ${object_names.length} total files`,
             );
 
             return {
@@ -190,7 +326,7 @@ export class S3UrlGenerator {
         return opts;
     }
 
-    /** 为单个对象生成签名 URL（核心逻辑，只执行一次） */
+    /** 为单个对象生成签名 URL（核心逻辑） */
     private async generateUrlsForObject(
         objectName: string,
         opts: ReturnType<typeof this.resolveOptions>,
@@ -205,12 +341,8 @@ export class S3UrlGenerator {
                     opts.expiry,
                     opts.bucket,
                 );
-                console.log(`✓ Generated download URL for: ${objectName}`);
             } catch (error: any) {
                 result.error = error.message;
-                console.error(
-                    `✗ Failed to generate download URL for: ${objectName} - ${error.message}`,
-                );
             }
             return result;
         }
@@ -272,11 +404,6 @@ export class S3UrlGenerator {
 
         if (errors.length > 0) {
             result.error = errors.join('; ');
-            console.error(
-                `✗ Some operations failed for: ${objectName} - ${result.error}`,
-            );
-        } else {
-            console.log(`✓ Generated URLs for: ${objectName}`);
         }
 
         return result;
@@ -299,17 +426,10 @@ export class S3UrlGenerator {
 
         for (let i = 0; i < objectNames.length; i += batchSize) {
             const batch = objectNames.slice(i, i + batchSize);
-            const batch_number = Math.floor(i / batchSize) + 1;
-            const total_batches = Math.ceil(objectNames.length / batchSize);
-
-            console.log(
-                `Processing batch ${batch_number}/${total_batches} (${batch.length} files)`,
-            );
 
             try {
                 const batch_promises = batch.map(async (objectName) => {
                     try {
-                        // 如果需要检查文件是否存在
                         if (checkExists) {
                             const exists = await this.helper.fileExists(
                                 objectName,
@@ -331,9 +451,6 @@ export class S3UrlGenerator {
                 for (const result of batch_results) {
                     if (result.error) {
                         failed_urls++;
-                        console.error(
-                            `✗ Failed to generate URLs for: ${result.objectName} - ${result.error}`,
-                        );
                     } else {
                         successful_urls++;
                     }
@@ -346,16 +463,8 @@ export class S3UrlGenerator {
                         error: `Batch processing failed: ${error.message}`,
                     });
                     failed_urls++;
-                    console.error(
-                        `✗ Batch failed for: ${objectName} - ${error.message}`,
-                    );
                 }
             }
-
-            const processed = Math.min(i + batchSize, objectNames.length);
-            console.log(
-                `Progress: ${processed}/${objectNames.length} files processed`,
-            );
         }
 
         return { results, successful_urls, failed_urls };

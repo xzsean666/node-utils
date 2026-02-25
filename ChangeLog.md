@@ -1,5 +1,31 @@
 # ChangeLog
 
+## 2026-02-25 (S3 模块精简与上传 URL 生成增强)
+
+### ⚠️ 重大变更 (Breaking Changes)
+- **删除 `S3Sync` 模块**：移除了 `s3Sync.ts` 文件及所有文件夹同步功能（`SyncMode`、`SyncOperation`、`SyncOptions`、`SyncResult` 等类型一并移除）。
+- **删除 `S3FolderUploader` 模块**：移除了 `s3FolderUploader.ts` 文件及文件夹批量上传功能（`FolderUploadOptions`、`FolderUploadResult`、`FolderUploadResultAdvanced` 等类型一并移除）。
+- **移除 `IKVDatabase` 外部数据库依赖**：`S3Helper` 构造函数不再接受 `kvdb` 参数，防重复上传现改为内存 `Map` 实现（进程生命周期内有效）。
+- **`uploadFile` / `uploadBuffer` 返回类型变更**：统一返回 `UploadResult`（含 `wasUploaded` 标记），而非原来的 `FileInfo`。
+- **移除 `uploadFileAdvanced` / `uploadBufferAdvanced`**：防重复逻辑已内置于 `uploadFile` / `uploadBuffer`，无需高级版本。
+- **移除 `uploadFileAndGetETag`**：为冗余封装，直接使用 `uploadFile` 获取 etag。
+- **移除 `getLocalFiles` / `applyFileFilter`**：为 Sync 专用方法，已随模块一同移除。
+- **工厂方法签名变更**：`createAWS`、`createCloudflareR2`、`createBackblazeB2`、`createMinIO` 均不再接受 `kvdb` 参数。
+
+### 新增功能 (New Features)
+1. **`S3UrlGenerator.generateOneTimeUploadUrl()`**：生成一次性预签名上传 URL，使用 UUID 构造唯一 S3 key 防止文件覆盖，支持自定义有效期。
+2. **`S3UrlGenerator.generateReusableUploadUrl()`**：生成可重复使用的预签名上传 URL，使用固定 S3 key，在有效期内可多次上传（会覆盖同名文件）。
+3. **`S3UrlGenerator.generateBatchOneTimeUploadUrls()`**：批量生成一次性上传 URL。
+4. **`S3Helper.clearDedupCache()` / `getDedupCacheSize()`**：管理内存防重复缓存。
+5. **新增类型 `PresignedUploadUrlOptions` / `PresignedUploadUrlResult`**：上传 URL 生成的选项与结果定义。
+
+### 优化 (Enhancements)
+1. **S3Helper 大幅精简**：从 1311 行精简至约 700 行，移除所有非核心功能。
+2. **防重复上传零外部依赖**：使用内存 `Map<MD5, objectName>` 实现，无需配置任何外部 KV 数据库。
+3. **`getPresignedUploadUrl` 增强**：支持传入 `contentType` 限制上传文件类型。
+4. **移除冗余日志输出**：`S3UrlGenerator` 中移除了大量 `console.log` 调用，生产环境更干净。
+5. **示例文件同步更新**：所有 `exmaples/s3Helper*.ts` 示例已适配新 API。
+
 ## 2026-02-25 (S3Helper 架构重构与 P0 修复)
 
 ### ⚠️ 重大变更 (Breaking Changes)

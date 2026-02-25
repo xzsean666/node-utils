@@ -7,8 +7,8 @@ async function examples() {
   const awsS3 = S3Helper.createAWS(
     'your-access-key',
     'your-secret-key',
-    'us-west-2', // 区域
     'my-bucket', // 默认 bucket
+    'us-west-2', // 区域
   );
 
   // 2. AWS S3 (使用构造函数)
@@ -39,12 +39,12 @@ async function examples() {
 
   // 5. MinIO (本地或自建)
   const minio = S3Helper.createMinIO(
-    'localhost', // 或你的 MinIO 服务器地址
     'minio-access-key',
     'minio-secret-key',
+    'localhost', // 或你的 MinIO 服务器地址
+    'my-minio-bucket',
     false, // 是否使用 SSL
     9000, // 端口
-    'my-minio-bucket',
   );
 
   // 6. 自定义 S3 兼容服务
@@ -140,8 +140,8 @@ async function migrationExample() {
   const sourceS3 = S3Helper.createAWS(
     'aws-key',
     'aws-secret',
-    'us-east-1',
     'source-bucket',
+    'us-east-1',
   );
   const targetR2 = S3Helper.createCloudflareR2(
     'r2-key',
@@ -181,8 +181,8 @@ async function multiStorageSync() {
   const primary = S3Helper.createAWS(
     'aws-key',
     'aws-secret',
-    'us-east-1',
     'primary-bucket',
+    'us-east-1',
   );
   const backup1 = S3Helper.createBackblazeB2(
     'b2-key-id',
@@ -191,12 +191,12 @@ async function multiStorageSync() {
     'backup-bucket',
   );
   const backup2 = S3Helper.createMinIO(
-    'minio.local',
     'minio-key',
     'minio-secret',
+    'minio.local',
+    'backup-bucket',
     false,
     9000,
-    'backup-bucket',
   );
 
   const storages = [primary, backup1, backup2];

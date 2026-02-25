@@ -1,5 +1,6 @@
-// S3Helper - 核心 S3 操作类
-// 提供 bucket 管理、文件上传/下载/删除/列表、签名 URL、MD5 计算等基础能力
+// S3Helper - 核心 S3 操作类（精简版）
+// 提供 bucket 管理、文件上传/下载/删除/列表、签名 URL、防重复上传等基础能力
+// 不依赖外部数据库，使用内存 Map 实现防重复上传
 //
 // 需要安装: pnpm add @aws-sdk/client-s3 @aws-sdk/s3-request-presigner
 
@@ -30,17 +31,13 @@ import * as path from 'path';
 
 import {
     type S3Config,
-    type IKVDatabase,
     type UploadOptions,
     type UploadResult,
     type FileInfo,
     type S3Object,
     type BatchResult,
-    type FileFilter,
-    type LocalFileInfo,
     S3Provider,
     PROVIDER_CONFIGS,
-    MIME_TYPE_MAP,
     MAX_DELETE_OBJECTS_PER_REQUEST,
 } from './s3Types';
 
@@ -48,9 +45,14 @@ export class S3Helper {
     private client: S3Client;
     private config: S3Config;
     private defaultBucket?: string;
-    private kvdb?: IKVDatabase;
 
-    constructor(config: S3Config, kvdb?: IKVDatabase) {
+    /**
+     * 内存防重复上传缓存：MD5 -> objectName
+     * 用于同一进程生命周期内避免重复上传相同内容
+     */
+    private dedupCache: Map<string, string> = new Map();
+
+    constructor(config: S3Config) {
         const provider_defaults = PROVIDER_CONFIGS[config.provider] || {};
         this.config = { ...provider_defaults, ...config };
 
@@ -81,7 +83,6 @@ export class S3Helper {
         });
 
         this.defaultBucket = config.bucket;
-        this.kvdb = kvdb;
     }
 
     // ============================================================
@@ -93,19 +94,15 @@ export class S3Helper {
         secretKey: string,
         bucket?: string,
         region: string = 'us-east-1',
-        kvdb?: IKVDatabase,
     ): S3Helper {
-        return new S3Helper(
-            {
-                provider: S3Provider.AWS_S3,
-                endPoint: `s3.${region}.amazonaws.com`,
-                accessKey,
-                secretKey,
-                region,
-                bucket,
-            },
-            kvdb,
-        );
+        return new S3Helper({
+            provider: S3Provider.AWS_S3,
+            endPoint: `s3.${region}.amazonaws.com`,
+            accessKey,
+            secretKey,
+            region,
+            bucket,
+        });
     }
 
     static createBackblazeB2(
@@ -113,18 +110,14 @@ export class S3Helper {
         applicationKey: string,
         bucketEndpoint: string,
         bucket?: string,
-        kvdb?: IKVDatabase,
     ): S3Helper {
-        return new S3Helper(
-            {
-                provider: S3Provider.BACKBLAZE_B2,
-                endPoint: bucketEndpoint,
-                accessKey: applicationKeyId,
-                secretKey: applicationKey,
-                bucket,
-            },
-            kvdb,
-        );
+        return new S3Helper({
+            provider: S3Provider.BACKBLAZE_B2,
+            endPoint: bucketEndpoint,
+            accessKey: applicationKeyId,
+            secretKey: applicationKey,
+            bucket,
+        });
     }
 
     static createCloudflareR2(
@@ -132,18 +125,14 @@ export class S3Helper {
         secretAccessKey: string,
         accountId: string,
         bucket?: string,
-        kvdb?: IKVDatabase,
     ): S3Helper {
-        return new S3Helper(
-            {
-                provider: S3Provider.CLOUDFLARE_R2,
-                endPoint: `${accountId}.r2.cloudflarestorage.com`,
-                accessKey: accessKeyId,
-                secretKey: secretAccessKey,
-                bucket,
-            },
-            kvdb,
-        );
+        return new S3Helper({
+            provider: S3Provider.CLOUDFLARE_R2,
+            endPoint: `${accountId}.r2.cloudflarestorage.com`,
+            accessKey: accessKeyId,
+            secretKey: secretAccessKey,
+            bucket,
+        });
     }
 
     static createMinIO(
@@ -153,20 +142,16 @@ export class S3Helper {
         bucket?: string,
         useSSL: boolean = false,
         port?: number,
-        kvdb?: IKVDatabase,
     ): S3Helper {
-        return new S3Helper(
-            {
-                provider: S3Provider.MINIO,
-                endPoint,
-                port,
-                useSSL,
-                accessKey,
-                secretKey,
-                bucket,
-            },
-            kvdb,
-        );
+        return new S3Helper({
+            provider: S3Provider.MINIO,
+            endPoint,
+            port,
+            useSSL,
+            accessKey,
+            secretKey,
+            bucket,
+        });
     }
 
     // ============================================================
@@ -234,95 +219,84 @@ export class S3Helper {
     }
 
     // ============================================================
-    // 文件上传
+    // 文件上传（内置防重复逻辑）
     // ============================================================
 
+    /**
+     * 上传本地文件到 S3
+     * 默认启用防重复上传：计算文件 MD5，若内存缓存命中且 S3 上文件仍存在则跳过
+     */
     async uploadFile(
         object_name: string,
         file_path: string,
         bucket?: string,
         options?: UploadOptions,
-    ): Promise<FileInfo> {
+    ): Promise<UploadResult> {
         try {
-            // 如果不是强制上传，先进行重复检查
             if (!options?.forceUpload) {
                 const file_md5 = await this.calculateFileMD5(file_path);
-                const cached_info = await this.tryGetCachedFile(
-                    file_md5,
-                    bucket,
-                );
-                if (cached_info) return cached_info;
+                const cached = this.dedupCache.get(file_md5);
+                if (cached) {
+                    const exists = await this.fileExists(cached, bucket);
+                    if (exists) {
+                        return { etag: file_md5, objectName: cached, wasUploaded: false };
+                    }
+                }
 
-                // 执行实际上传
-                const file_info = await this.doUploadFile(
-                    object_name,
-                    file_path,
-                    bucket,
-                    options,
-                );
-
-                // 存储映射
-                await this.storeDuplicate(file_md5, object_name);
-                return file_info;
+                const file_info = await this.doUploadFile(object_name, file_path, bucket, options);
+                this.dedupCache.set(file_md5, object_name);
+                return { etag: file_info.etag, objectName: object_name, wasUploaded: true };
             }
 
-            return await this.doUploadFile(
-                object_name,
-                file_path,
-                bucket,
-                options,
-            );
+            const file_info = await this.doUploadFile(object_name, file_path, bucket, options);
+            return { etag: file_info.etag, objectName: object_name, wasUploaded: true };
         } catch (error: any) {
             throw new Error(`上传文件失败: ${error.message}`);
         }
     }
 
+    /**
+     * 上传 Buffer 到 S3
+     * 默认启用防重复上传
+     */
     async uploadBuffer(
         object_name: string,
         buffer: Buffer,
         bucket?: string,
         options?: UploadOptions,
-    ): Promise<FileInfo> {
+    ): Promise<UploadResult> {
         try {
-            // 如果不是强制上传，先进行重复检查
             if (!options?.forceUpload) {
                 const buffer_md5 = this.calculateBufferMD5(buffer);
-                const cached_info = await this.tryGetCachedFile(
-                    buffer_md5,
-                    bucket,
-                );
-                if (cached_info) return cached_info;
+                const cached = this.dedupCache.get(buffer_md5);
+                if (cached) {
+                    const exists = await this.fileExists(cached, bucket);
+                    if (exists) {
+                        return { etag: buffer_md5, objectName: cached, wasUploaded: false };
+                    }
+                }
 
-                // 执行实际上传
-                const file_info = await this.doUploadBuffer(
-                    object_name,
-                    buffer,
-                    bucket,
-                    options,
-                );
-
-                // 存储映射
-                await this.storeDuplicate(buffer_md5, object_name);
-                return file_info;
+                const file_info = await this.doUploadBuffer(object_name, buffer, bucket, options);
+                this.dedupCache.set(buffer_md5, object_name);
+                return { etag: file_info.etag, objectName: object_name, wasUploaded: true };
             }
 
-            return await this.doUploadBuffer(
-                object_name,
-                buffer,
-                bucket,
-                options,
-            );
+            const file_info = await this.doUploadBuffer(object_name, buffer, bucket, options);
+            return { etag: file_info.etag, objectName: object_name, wasUploaded: true };
         } catch (error: any) {
             throw new Error(`上传缓冲区失败: ${error.message}`);
         }
     }
 
+    /**
+     * 上传 Buffer 并 gzip 压缩
+     */
     async uploadBufferGzip(
         object_name: string,
         buffer: Buffer,
         bucket?: string,
         options?: UploadOptions,
-    ): Promise<FileInfo> {
+    ): Promise<UploadResult> {
         try {
             const gzip_async = promisify(gzip);
             const compressed_buffer = await gzip_async(buffer);
@@ -341,17 +315,15 @@ export class S3Helper {
                 },
             };
 
-            return await this.uploadBuffer(
-                gzipped_object_name,
-                compressed_buffer,
-                bucket,
-                gzip_options,
-            );
+            return await this.uploadBuffer(gzipped_object_name, compressed_buffer, bucket, gzip_options);
         } catch (error: any) {
             throw new Error(`上传压缩缓冲区失败: ${error.message}`);
         }
     }
 
+    /**
+     * 上传流到 S3（不支持防重复，流无法预先算 MD5）
+     */
     async uploadStream(
         object_name: string,
         stream: Readable,
@@ -361,12 +333,7 @@ export class S3Helper {
     ): Promise<FileInfo> {
         try {
             const bucket_name = this.getBucketName(bucket);
-            const put_input = this.buildPutObjectInput(
-                bucket_name,
-                object_name,
-                stream,
-                options,
-            );
+            const put_input = this.buildPutObjectInput(bucket_name, object_name, stream, options);
 
             if (size) {
                 put_input.ContentLength = size;
@@ -388,6 +355,9 @@ export class S3Helper {
         }
     }
 
+    /**
+     * 上传文件并 gzip 压缩（流式处理，内存友好）
+     */
     async uploadFileGzip(
         object_name: string,
         file_path: string,
@@ -424,81 +394,6 @@ export class S3Helper {
         }
     }
 
-    // 高级上传方法，返回详细结果
-    async uploadFileAdvanced(
-        object_name: string,
-        file_path: string,
-        bucket?: string,
-        options?: UploadOptions,
-    ): Promise<UploadResult> {
-        try {
-            if (!options?.forceUpload) {
-                const file_md5 = await this.calculateFileMD5(file_path);
-                const existing_object_name = await this.checkDuplicate(file_md5);
-                if (existing_object_name) {
-                    const exists = await this.fileExists(existing_object_name, bucket);
-                    if (exists) {
-                        return {
-                            etag: file_md5,
-                            objectName: existing_object_name,
-                            wasUploaded: false,
-                        };
-                    }
-                }
-            }
-
-            const file_info = await this.uploadFile(object_name, file_path, bucket, {
-                ...options,
-                forceUpload: true,
-            });
-
-            return {
-                etag: file_info.etag,
-                objectName: object_name,
-                wasUploaded: true,
-            };
-        } catch (error: any) {
-            throw new Error(`高级上传文件失败: ${error.message}`);
-        }
-    }
-
-    async uploadBufferAdvanced(
-        object_name: string,
-        buffer: Buffer,
-        bucket?: string,
-        options?: UploadOptions,
-    ): Promise<UploadResult> {
-        try {
-            if (!options?.forceUpload) {
-                const buffer_md5 = this.calculateBufferMD5(buffer);
-                const existing_object_name = await this.checkDuplicate(buffer_md5);
-                if (existing_object_name) {
-                    const exists = await this.fileExists(existing_object_name, bucket);
-                    if (exists) {
-                        return {
-                            etag: buffer_md5,
-                            objectName: existing_object_name,
-                            wasUploaded: false,
-                        };
-                    }
-                }
-            }
-
-            const file_info = await this.uploadBuffer(object_name, buffer, bucket, {
-                ...options,
-                forceUpload: true,
-            });
-
-            return {
-                etag: file_info.etag,
-                objectName: object_name,
-                wasUploaded: true,
-            };
-        } catch (error: any) {
-            throw new Error(`高级上传缓冲区失败: ${error.message}`);
-        }
-    }
-
     // ============================================================
     // 文件下载
     // ============================================================
@@ -509,7 +404,6 @@ export class S3Helper {
         bucket?: string,
     ): Promise<void> {
         try {
-            // 确保目标目录存在
             const dir = path.dirname(file_path);
             await fs.promises.mkdir(dir, { recursive: true });
 
@@ -583,7 +477,6 @@ export class S3Helper {
                 require('zlib').gunzip as typeof import('zlib').gunzip,
             );
             const decompressed_buffer = await gunzip_async(compressed_buffer);
-
             return decompressed_buffer;
         } catch (error: any) {
             throw new Error(`下载解压缓冲区失败: ${error.message}`);
@@ -713,30 +606,9 @@ export class S3Helper {
     async getObjectETag(object_name: string, bucket?: string): Promise<string> {
         try {
             const file_info = await this.getFileInfo(object_name, bucket);
-            return file_info.etag; // getFileInfo 已做 normalizeETag
-        } catch (error: any) {
-            throw new Error(`获取对象 ${object_name} 的 ETag 失败: ${error.message}`);
-        }
-    }
-
-    async uploadFileAndGetETag(
-        object_name: string,
-        file_path: string,
-        bucket?: string,
-        options?: UploadOptions,
-    ): Promise<string> {
-        try {
-            const file_info = await this.uploadFile(
-                object_name,
-                file_path,
-                bucket,
-                options,
-            );
             return file_info.etag;
         } catch (error: any) {
-            throw new Error(
-                `上传文件 ${file_path} 并获取 ETag 失败: ${error.message}`,
-            );
+            throw new Error(`获取对象 ${object_name} 的 ETag 失败: ${error.message}`);
         }
     }
 
@@ -764,16 +636,12 @@ export class S3Helper {
         const successful: string[] = [];
         const failed: Array<{ item: string; error: string }> = [];
 
-        // 分批处理，每批最多 1000 个（AWS S3 限制）
         for (
             let i = 0;
             i < object_names.length;
             i += MAX_DELETE_OBJECTS_PER_REQUEST
         ) {
-            const batch = object_names.slice(
-                i,
-                i + MAX_DELETE_OBJECTS_PER_REQUEST,
-            );
+            const batch = object_names.slice(i, i + MAX_DELETE_OBJECTS_PER_REQUEST);
 
             try {
                 const command = new DeleteObjectsCommand({
@@ -805,7 +673,7 @@ export class S3Helper {
                     }
                 }
             } catch (error: any) {
-                // 如果批量删除失败，尝试逐个删除
+                // 批量删除失败时，逐个删除
                 for (const object_name of batch) {
                     try {
                         await this.deleteFile(object_name, bucket);
@@ -849,12 +717,7 @@ export class S3Helper {
         dest_bucket?: string,
     ): Promise<void> {
         try {
-            await this.copyFile(
-                source_object,
-                dest_object,
-                source_bucket,
-                dest_bucket,
-            );
+            await this.copyFile(source_object, dest_object, source_bucket, dest_bucket);
             await this.deleteFile(source_object, source_bucket);
         } catch (error: any) {
             throw new Error(`移动文件失败: ${error.message}`);
@@ -862,7 +725,7 @@ export class S3Helper {
     }
 
     // ============================================================
-    // URL 生成
+    // 签名 URL
     // ============================================================
 
     async getPresignedDownloadUrl(
@@ -886,13 +749,19 @@ export class S3Helper {
         object_name: string,
         expiry: number = 24 * 60 * 60,
         bucket?: string,
+        contentType?: string,
     ): Promise<string> {
         try {
-            const command = new PutObjectCommand({
+            const put_input: PutObjectCommandInput = {
                 Bucket: this.getBucketName(bucket),
                 Key: object_name,
-            });
+            };
 
+            if (contentType) {
+                put_input.ContentType = contentType;
+            }
+
+            const command = new PutObjectCommand(put_input);
             return await getSignedUrl(this.client, command, { expiresIn: expiry });
         } catch (error: any) {
             throw new Error(`获取上传URL失败: ${error.message}`);
@@ -951,33 +820,17 @@ export class S3Helper {
         try {
             const bucket_name = this.getBucketName(bucket);
 
-            console.log(
-                `🔍 Scanning for files older than ${expireSeconds} seconds...`,
-            );
-            console.log(
-                `🪣 Bucket: ${bucket_name}${prefix ? ` (prefix: ${prefix})` : ''}`,
-            );
-
             const allFiles = await this.listFiles(prefix, bucket_name, true);
             const file_objects = allFiles.filter(
                 (f) => f.name && !f.name.endsWith('/'),
             );
 
-            console.log(`📁 Found ${file_objects.length} files to check`);
-
             const expireTime = new Date(Date.now() - expireSeconds * 1000);
-            console.log(
-                `⏰ Files older than ${expireTime.toISOString()} will be deleted`,
-            );
-
             const expired_files: string[] = [];
 
             for (const file of file_objects) {
                 if (file.name && file.lastModified && file.lastModified < expireTime) {
                     expired_files.push(file.name);
-                    console.log(
-                        `🕒 Expired: ${file.name} (modified: ${file.lastModified.toISOString()})`,
-                    );
                 }
             }
 
@@ -990,11 +843,8 @@ export class S3Helper {
             };
 
             if (expired_files.length === 0) {
-                console.log('✨ No expired files found');
                 return result;
             }
-
-            console.log(`🗑️ Found ${expired_files.length} expired files to delete`);
 
             const deleteResult = await this.deleteFiles(expired_files, bucket_name);
 
@@ -1004,18 +854,6 @@ export class S3Helper {
                 objectName: f.item,
                 error: f.error,
             }));
-
-            console.log(`\n📊 Delete Expire Summary:`);
-            console.log(`Total files checked: ${result.totalFiles}`);
-            console.log(`Expired files found: ${result.expiredFiles}`);
-            console.log(`✓ Successfully deleted: ${result.deletedFiles}`);
-
-            if (result.failedFiles > 0) {
-                console.log(`✗ Failed to delete: ${result.failedFiles}`);
-                result.errors.forEach((error) => {
-                    console.error(`  - ${error.objectName}: ${error.error}`);
-                });
-            }
 
             return result;
         } catch (error: any) {
@@ -1033,13 +871,18 @@ export class S3Helper {
         return { ...this.config };
     }
 
-    /** 检查是否启用了防重复上传功能 */
-    isDuplicationCheckEnabled(): boolean {
-        return !!this.kvdb;
+    /** 清空防重复缓存 */
+    clearDedupCache(): void {
+        this.dedupCache.clear();
+    }
+
+    /** 获取防重复缓存大小 */
+    getDedupCacheSize(): number {
+        return this.dedupCache.size;
     }
 
     // ============================================================
-    // 公开的工具方法 (供 s3Sync / s3FolderUploader / s3UrlGenerator 使用)
+    // 公开的工具方法（供 S3UrlGenerator 等使用）
     // ============================================================
 
     /** 获取 bucket 名称 */
@@ -1080,151 +923,16 @@ export class S3Helper {
         });
     }
 
-    /** 计算 Buffer 的 MD5 Hash（同步操作） */
+    /** 计算 Buffer 的 MD5 Hash（同步） */
     calculateBufferMD5(buffer: Buffer): string {
         const md5_hash = crypto.createHash('md5');
         md5_hash.update(buffer);
         return md5_hash.digest('hex');
     }
 
-    /** 应用文件过滤器 */
-    applyFileFilter(
-        file_path: string,
-        file_size?: number,
-        filter?: FileFilter,
-    ): boolean {
-        if (!filter) return true;
-
-        const file_name = path.basename(file_path);
-        const file_ext = path.extname(file_name).toLowerCase();
-
-        if (filter.extensions && filter.extensions.length > 0) {
-            if (!filter.extensions.some((ext) => file_ext === ext.toLowerCase())) {
-                return false;
-            }
-        }
-
-        if (filter.excludeExtensions && filter.excludeExtensions.length > 0) {
-            if (
-                filter.excludeExtensions.some((ext) => file_ext === ext.toLowerCase())
-            ) {
-                return false;
-            }
-        }
-
-        if (filter.includePatterns && filter.includePatterns.length > 0) {
-            if (!filter.includePatterns.some((pattern) => pattern.test(file_name))) {
-                return false;
-            }
-        }
-
-        if (filter.excludePatterns && filter.excludePatterns.length > 0) {
-            if (filter.excludePatterns.some((pattern) => pattern.test(file_name))) {
-                return false;
-            }
-        }
-
-        if (file_size !== undefined) {
-            if (filter.minSize && file_size < filter.minSize) {
-                return false;
-            }
-            if (filter.maxSize && file_size > filter.maxSize) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /** 获取本地文件列表（支持深度控制和过滤） */
-    async getLocalFiles(
-        local_folder_path: string,
-        filter?: FileFilter,
-        depth: number = -1,
-    ): Promise<LocalFileInfo[]> {
-        const files: LocalFileInfo[] = [];
-
-        const scan_directory = async (
-            dir_path: string,
-            base_path: string,
-            current_depth: number = 0,
-        ): Promise<void> => {
-            const items = await fs.promises.readdir(dir_path, {
-                withFileTypes: true,
-            });
-
-            for (const item of items) {
-                const full_path = path.join(dir_path, item.name);
-
-                if (item.isDirectory()) {
-                    if (depth === -1 || current_depth < depth) {
-                        await scan_directory(full_path, base_path, current_depth + 1);
-                    }
-                } else if (item.isFile()) {
-                    const stats = await fs.promises.stat(full_path);
-                    const relative_path = path.relative(base_path, full_path);
-
-                    if (this.applyFileFilter(relative_path, stats.size, filter)) {
-                        files.push({
-                            localPath: full_path,
-                            relativePath: relative_path,
-                            size: stats.size,
-                            lastModified: stats.mtime,
-                        });
-                    }
-                }
-            }
-        };
-
-        await scan_directory(local_folder_path, local_folder_path, 0);
-        return files;
-    }
-
     // ============================================================
     // 私有方法
     // ============================================================
-
-    /** 检查文件是否已经上传过 */
-    private async checkDuplicate(etag: string): Promise<string | null> {
-        if (!this.kvdb) return null;
-        try {
-            return await this.kvdb.get(etag);
-        } catch {
-            return null;
-        }
-    }
-
-    /** 存储文件 ETag 和 objectName 的映射 */
-    private async storeDuplicate(
-        etag: string,
-        objectName: string,
-    ): Promise<void> {
-        if (!this.kvdb) return;
-        try {
-            await this.kvdb.put(etag, objectName);
-        } catch (error: any) {
-            console.warn(`Failed to store duplicate mapping: ${error.message}`);
-        }
-    }
-
-    /** 尝试从缓存获取已上传文件信息 */
-    private async tryGetCachedFile(
-        md5: string,
-        bucket?: string,
-    ): Promise<FileInfo | null> {
-        const existing_object_name = await this.checkDuplicate(md5);
-        if (!existing_object_name) return null;
-
-        try {
-            const info = await this.getFileInfo(existing_object_name, bucket);
-            if (this.normalizeETag(info.etag) === md5) {
-                return info;
-            }
-        } catch {
-            // 文件可能已被删除，继续上传
-        }
-        return null;
-    }
 
     /** 构建 PutObjectInput */
     private buildPutObjectInput(
@@ -1288,12 +996,7 @@ export class S3Helper {
         options?: UploadOptions,
     ): Promise<FileInfo> {
         const bucket_name = this.getBucketName(bucket);
-        const put_input = this.buildPutObjectInput(
-            bucket_name,
-            object_name,
-            buffer,
-            options,
-        );
+        const put_input = this.buildPutObjectInput(bucket_name, object_name, buffer, options);
 
         const command = new PutObjectCommand(put_input);
         const response = await this.client.send(command);

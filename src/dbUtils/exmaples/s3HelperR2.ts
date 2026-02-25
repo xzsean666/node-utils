@@ -1,48 +1,22 @@
-import { S3Helper, S3Provider } from '../s3Helper';
+import { S3Helper, S3UrlGenerator } from '../s3Helper';
 import dotenv from 'dotenv';
-import { SqliteKVDatabase } from '../KVSqlite';
 
 dotenv.config();
 
-// AWS SDK v3 版本的 S3Helper 使用示例
-const kvdb = new SqliteKVDatabase('./db/r2test.db');
-
+// Cloudflare R2 使用示例
 async function awsSDKExamples() {
-  // 2. Cloudflare R2 - 零出站费用
-  console.log('2. 连接到 Cloudflare R2');
-  const awsS3 = S3Helper.createCloudflareR2(
+  console.log('连接到 Cloudflare R2');
+  const r2 = S3Helper.createCloudflareR2(
     process.env.CLOUDFLARE_R2_ACCESS_KEY_ID || 'your-access-key',
     process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY || 'your-secret-key',
     process.env.CLOUDFLARE_ACCOUNT_ID || 'your-account-id',
     'arts400',
-    kvdb,
   );
 
   try {
-    // 使用 AWS S3 进行演示
-    // 上传 JSON 数据
-    // const jsonData = {
-    //   message: 'Hello from S3Helper with AWS SDK v3 7779',
-    //   features: [
-    //     'Multi-provider support',
-    //     'TypeScript support',
-    //     'Batch operations',
-    //     'Presigned URLs',
-    //   ],
-    // };
-    // const res = await awsS3.uploadBufferGzip(
-    //   'data12.json',
-    //   Buffer.from(JSON.stringify(jsonData, null, 2), 'utf-8'),
-    // );
-    // console.log(res);
-    // const res = await awsS3.getObjectETag('data1.json');
-    // console.log(res);
-    // const res2 = await awsS3.getPresignedDownloadUrl('data1.json');
-    // console.log(res2);
-    // const uploadPath = '/media/sean/901996121CEB8E14/arts_converted';
-    // const res = await awsS3.uploadFolderImages(uploadPath);
-    // console.log(res);
-    const res = await awsS3.generateSignedUrlsToJson(
+    // 使用 S3UrlGenerator 生成签名 URL 到 JSON
+    const urlGen = new S3UrlGenerator(r2);
+    const res = await urlGen.generateToJson(
       'src/utils/dbUtils/exmaples/arts_converted.json',
     );
     console.log(res);
@@ -55,8 +29,6 @@ async function awsSDKExamples() {
 async function main() {
   try {
     await awsSDKExamples();
-    // await performanceComparison();
-    // await advancedFeatures();
   } catch (error) {
     console.error('示例运行失败:', error);
   }

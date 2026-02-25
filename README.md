@@ -21,6 +21,11 @@
 
 当 AI 助手进行操作、新增 / 删减功能后，将会于此处或 [ChangeLog.md](./ChangeLog.md) 中更新摘要。
 
+- **2026-02-25**: 
+  1. 重构拆分了原近 3000 行的 `src/dbUtils/s3Helper.ts`，基于领域功能解耦为 `S3Helper`, `S3Sync`, `S3FolderUploader`, `S3UrlGenerator` 及对应的类型中心，并统一迁移至 `src/dbUtils/s3/`，实现了模块高内聚低耦合。
+  2. 修复了 S3 `uploadFile/Buffer` 中 MD5 重复计算造成的性能损耗漏洞，以及 `DeleteObjects` 批量删除接口超过 1000 个对象容量引发崩溃等 P0 级严重异常。
+  3. 通过原文件直接全量同名导出机制完美保留了向后兼容性（Backward Compatibility）。
+
 - **2026-02-24**: 
   1. 优化 `src/web3/ethersTxHelper.ts` (去除了导致前端阻塞长达数十秒的 `.wait()` 强制调用，增设可选 `waitConfirm` 参量)。
   2. 修复了基于 `ethers.BrowserProvider` (如 MetaMask) 发送或部署合约时因为空私钥崩溃的问题，使得助手类在全栈可用性大幅提升。

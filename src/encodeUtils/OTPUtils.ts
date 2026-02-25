@@ -1,4 +1,5 @@
-import { authenticator } from 'otplib';
+import otplib from 'otplib';
+const { authenticator } = otplib;
 import * as qrcode from 'qrcode';
 
 export interface OTPOptions {

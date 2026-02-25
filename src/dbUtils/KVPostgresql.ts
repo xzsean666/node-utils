@@ -1,10 +1,10 @@
-import { DataSource, Repository, Table, In } from 'typeorm';
+import 'reflect-metadata';
 import {
-  Entity,
-  PrimaryColumn,
-  Column,
-  CreateDateColumn,
-  UpdateDateColumn,
+  DataSource,
+  Repository,
+  Table,
+  In,
+  EntitySchema,
 } from 'typeorm';
 
 // 添加值类型定义
@@ -32,7 +32,7 @@ interface SaveArrayOptions {
 }
 
 export class PGKVDatabase {
-  db: Repository<KVEntity>;
+  db!: Repository<KVEntity>;
   private data_source: DataSource;
   private initialized = false;
   private table_name: string;
@@ -50,20 +50,32 @@ export class PGKVDatabase {
       throw new Error('datasource_or_url is required');
     }
 
-    @Entity(table_name)
-    class CustomKVStore implements KVEntity {
-      @PrimaryColumn('varchar', { length: 255 })
-      key: string;
+    console.log(`[PGKVDatabase] Creating instance for table: ${table_name}`);
 
-      @Column(this.getColumnType(value_type))
-      value: any;
-
-      @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
-      created_at: Date;
-
-      @UpdateDateColumn({ type: 'timestamptz', name: 'updated_at' })
-      updated_at: Date;
-    }
+    const CustomKVStore = new EntitySchema<KVEntity>({
+      name: table_name,
+      columns: {
+        key: {
+          type: 'varchar',
+          length: 255,
+          primary: true,
+        },
+        value: {
+          type: this.getPostgreSQLColumnType(value_type) as any,
+          nullable: true,
+        },
+        created_at: {
+          type: 'timestamptz',
+          createDate: true,
+          name: 'created_at',
+        },
+        updated_at: {
+          type: 'timestamptz',
+          updateDate: true,
+          name: 'updated_at',
+        },
+      },
+    });
 
     this.custom_kv_store = CustomKVStore;
 
@@ -73,18 +85,17 @@ export class PGKVDatabase {
       entities: [CustomKVStore],
       synchronize: false,
       extra: {
-        max: 50,
-        min: 5,
+        max: 10,
+        min: 2,
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 3000,
         statement_timeout: 15000,
         query_timeout: 15000,
         keepAlive: true,
         keepAliveInitialDelay: 10000,
-        poolSize: 100,
         maxUses: 7500,
       },
-      logging: ['error', 'warn'],
+      logging: ['error', 'warn', 'info'],
     });
   }
 
@@ -145,8 +156,7 @@ export class PGKVDatabase {
   ): void {
     if (!supported_types.includes(this.value_type)) {
       throw new Error(
-        `Operation '${operation}' is not supported for value type '${
-          this.value_type
+        `Operation '${operation}' is not supported for value type '${this.value_type
         }'. Supported types: ${supported_types.join(', ')}`,
       );
     }
@@ -188,7 +198,14 @@ export class PGKVDatabase {
 
   private async ensureInitialized(): Promise<void> {
     if (!this.initialized) {
-      await this.data_source.initialize();
+      console.log(`[PGKVDatabase] Initializing DataSource for ${this.table_name}...`);
+      try {
+        await this.data_source.initialize();
+        console.log(`[PGKVDatabase] DataSource initialized for ${this.table_name}`);
+      } catch (e) {
+        console.error(`[PGKVDatabase] Failed to initialize DataSource for ${this.table_name}:`, e);
+        throw e;
+      }
       this.db = this.data_source.getRepository(this.custom_kv_store);
 
       // 手动创建表和索引
@@ -329,9 +346,9 @@ export class PGKVDatabase {
     options_or_expire?:
       | number
       | {
-          expire?: number;
-          include_timestamps?: boolean;
-        },
+        expire?: number;
+        include_timestamps?: boolean;
+      },
   ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null> {
     await this.ensureInitialized();
     const record = await this.db.findOne({ where: { key } });
@@ -524,10 +541,10 @@ export class PGKVDatabase {
         ) => {
           acc[record.key] = include_timestamps
             ? {
-                value: record.value,
-                created_at: record.created_at,
-                updated_at: record.updated_at,
-              }
+              value: record.value,
+              created_at: record.created_at,
+              updated_at: record.updated_at,
+            }
             : record.value;
           return acc;
         },
@@ -626,10 +643,10 @@ export class PGKVDatabase {
           const value = this.deserializeValue(record.value) as T;
           acc[record.key] = include_timestamps
             ? {
-                value,
-                created_at: record.created_at,
-                updated_at: record.updated_at,
-              }
+              value,
+              created_at: record.created_at,
+              updated_at: record.updated_at,
+            }
             : value;
           return acc;
         },
@@ -728,10 +745,10 @@ export class PGKVDatabase {
           const value = this.deserializeValue(record.value) as T;
           acc[record.key] = include_timestamps
             ? {
-                value,
-                created_at: record.created_at,
-                updated_at: record.updated_at,
-              }
+              value,
+              created_at: record.created_at,
+              updated_at: record.updated_at,
+            }
             : value;
           return acc;
         },
@@ -888,10 +905,10 @@ export class PGKVDatabase {
         const value = this.deserializeValue(record.value) as T;
         acc[record.key] = include_timestamps
           ? {
-              value,
-              created_at: record.created_at,
-              updated_at: record.updated_at,
-            }
+            value,
+            created_at: record.created_at,
+            updated_at: record.updated_at,
+          }
           : value;
         return acc;
       },
@@ -1039,10 +1056,10 @@ export class PGKVDatabase {
         const value = this.deserializeValue(record.value) as T;
         acc[record.key] = include_timestamps
           ? {
-              value,
-              created_at: record.created_at,
-              updated_at: record.updated_at,
-            }
+            value,
+            created_at: record.created_at,
+            updated_at: record.updated_at,
+          }
           : value;
         return acc;
       },
@@ -1081,30 +1098,34 @@ export class PGKVDatabase {
       // 使用 VALUES 语法构建批量插入语句
       for (let i = 0; i < entries.length; i += batch_size) {
         const batch = entries.slice(i, i + batch_size);
-        const values = batch
-          .map(([key, value]) => {
-            let serialized_value: string;
-            if (this.value_type === 'jsonb') {
-              serialized_value = `'${JSON.stringify(value)}'`;
-            } else if (this.value_type === 'bytea') {
-              // 对于 bytea 类型，使用 bytea 字面量语法
-              const buffer = this.serializeValue(value);
-              serialized_value = `'\\x${buffer.toString('hex')}'`;
-            } else {
-              serialized_value = `'${String(value)}'`;
-            }
-            return `('${key}', ${serialized_value}, NOW(), NOW())`;
-          })
-          .join(',');
+        const valuePlaceholders: string[] = [];
+        const params: any[] = [];
+        let paramIndex = 1;
+
+        batch.forEach(([key, value]) => {
+          let serialized_value: string;
+          if (this.value_type === 'jsonb') {
+            serialized_value = JSON.stringify(value);
+          } else if (this.value_type === 'bytea') {
+            const buffer = this.serializeValue(value);
+            serialized_value = buffer.toString('hex');
+          } else {
+            serialized_value = String(value);
+          }
+          valuePlaceholders.push(`($${paramIndex}, $${paramIndex + 1}, NOW(), NOW())`);
+          params.push(key, serialized_value);
+          paramIndex += 2;
+        });
+
 
         await query_runner.query(`
           INSERT INTO "${this.table_name}" (key, value, created_at, updated_at)
-          VALUES ${values}
-          ON CONFLICT (key) 
-          DO UPDATE SET 
+          VALUES ${valuePlaceholders.join(',')}
+          ON CONFLICT (key)
+          DO UPDATE SET
             value = EXCLUDED.value,
             updated_at = EXCLUDED.updated_at
-        `);
+        `, params);
       }
 
       await query_runner.commitTransaction();
@@ -1700,9 +1721,8 @@ export class PGKVDatabase {
           if (bulk_values.length > 0) {
             statements.push({
               query: `
-              INSERT INTO "${
-                this.table_name
-              }" (key, value, created_at, updated_at)
+              INSERT INTO "${this.table_name
+                }" (key, value, created_at, updated_at)
               VALUES ${bulk_values.join(',')}
             `,
               params: bulk_params,
@@ -1724,8 +1744,8 @@ export class PGKVDatabase {
           this.value_type === 'jsonb'
             ? JSON.stringify(updated_meta)
             : // For non-jsonb/bytea types, ensure the value is stringifiable, or throw error
-              // If valueType is not jsonb and the value is an object, serialize it as JSON string
-              typeof updated_meta === 'object'
+            // If valueType is not jsonb and the value is an object, serialize it as JSON string
+            typeof updated_meta === 'object'
               ? JSON.stringify(updated_meta)
               : String(updated_meta); // Stringify primitive types for other types
 
@@ -1815,8 +1835,8 @@ export class PGKVDatabase {
           this.value_type === 'jsonb'
             ? JSON.stringify(meta_data)
             : // For non-jsonb/bytea types, ensure the value is stringifiable, or throw error
-              // If valueType is not jsonb and the value is an object, serialize it as JSON string
-              typeof meta_data === 'object'
+            // If valueType is not jsonb and the value is an object, serialize it as JSON string
+            typeof meta_data === 'object'
               ? JSON.stringify(meta_data)
               : String(meta_data); // Stringify primitive types for other types
 

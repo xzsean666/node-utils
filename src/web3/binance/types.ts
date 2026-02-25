@@ -10,22 +10,31 @@ export interface BinanceBalance {
   locked: string;
 }
 
+export interface BinanceAccountInfo {
+  balances: BinanceBalance[];
+  canTrade: boolean;
+  canWithdraw: boolean;
+  canDeposit: boolean;
+  updateTime: number;
+  accountType: string;
+}
+
 export interface BinanceTrade {
   symbol: string;
   id: number;
   orderId: number;
-  side: string;
+  orderListId: number;
   price: string;
   qty: string;
-  realizedPnl: string;
   quoteQty: string;
   commission: string;
   commissionAsset: string;
   time: number;
-  positionSide: string;
-  maker: boolean;
-  buyer: boolean;
-  rawData?: any;
+  isBuyer: boolean;
+  isMaker: boolean;
+  isBestMatch: boolean;
+  realizedPnl?: string;
+  side: string;
 }
 
 export interface BinanceOrder {
@@ -49,38 +58,33 @@ export interface BinanceOrder {
   origQuoteOrderQty: string;
 }
 
-export interface FuturesAsset {
-  asset: string;
-  walletBalance: string;
-  unrealizedProfit: string;
-  marginBalance: string;
-  maintMargin: string;
-  initialMargin: string;
-  positionInitialMargin: string;
-  openOrderInitialMargin: string;
-  crossWalletBalance: string;
-  crossUnPnl: string;
-  availableBalance: string;
-  maxWithdrawAmount: string;
-  marginAvailable: boolean;
-  updateTime: number;
-}
-
 export interface FuturesPosition {
   symbol: string;
-  positionSide: string;
   positionAmt: string;
+  entryPrice: string;
+  markPrice: string;
   unrealizedProfit: string;
+  liquidationPrice: string;
+  leverage: string;
+  maxNotionalValue: string;
+  marginType: string;
+  isAutoAddMargin: string;
   isolatedMargin: string;
   notional: string;
   isolatedWallet: string;
+  updateTime: number;
+  positionSide: string;
   initialMargin: string;
   maintMargin: string;
-  updateTime: number;
-  entryPrice: string;
 }
 
 export interface FuturesAccountInfo {
+  assets: any[];
+  positions: FuturesPosition[];
+  canTrade: boolean;
+  canWithdraw: boolean;
+  canDeposit: boolean;
+  updateTime: number;
   totalInitialMargin: string;
   totalMaintMargin: string;
   totalWalletBalance: string;
@@ -92,35 +96,9 @@ export interface FuturesAccountInfo {
   totalCrossUnPnl: string;
   availableBalance: string;
   maxWithdrawAmount: string;
-  assets: FuturesAsset[];
-  positions: FuturesPosition[];
 }
 
-export interface BinanceAccountInfo {
-  makerCommission: number;
-  takerCommission: number;
-  buyerCommission: number;
-  sellerCommission: number;
-  canTrade: boolean;
-  canWithdraw: boolean;
-  canDeposit: boolean;
-  updateTime: number;
-  accountType: string;
-  balances: BinanceBalance[];
-  permissions: string[];
-}
-
-export interface FormattedPosition {
-  symbol: string;
-  positionSide: string;
-  positionAmt: string;
-  unrealizedProfit: string;
-  isolatedMargin: string;
-  notional: string;
-  isolatedWallet: string;
-  initialMargin: string;
-  maintMargin: string;
-  updateTime: number;
+export interface FormattedPosition extends FuturesPosition {
   healthStatus: {
     riskRatio: number;
     marginRatio: number;
@@ -138,9 +116,6 @@ export interface FormattedPosition {
   };
 }
 
-/**
- * 期货账户状态接口，用于当前和历史账户状态查询
- */
 export interface FuturesAccountState {
   totalInitialMargin: string;
   totalMaintMargin: string;
@@ -163,43 +138,14 @@ export interface FuturesAccountState {
   }>;
 }
 
-/**
- * 期货账户状态变化接口，用于展示一段时间内的账户变化
- */
 export interface FuturesAccountChanges {
-  timeSpan: {
-    fromTime: number;
-    toTime: number;
-    minutes: number;
-  };
-  balanceChanges: {
-    walletBalance: string;
-    walletBalanceChange: string;
-    walletBalanceChangePercent: string;
-    unrealizedProfit: string;
-    unrealizedProfitChange: string;
-    unrealizedProfitChangePercent: string;
-    marginBalance: string;
-    marginBalanceChange: string;
-    marginBalanceChangePercent: string;
-    availableBalance: string;
-    availableBalanceChange: string;
-    availableBalanceChangePercent: string;
-  };
-  positionChanges: Array<{
-    symbol: string;
-    currentPositionAmt: string;
-    previousPositionAmt: string;
-    positionAmtChange: string;
-    currentEntryPrice: string;
-    previousEntryPrice: string;
-    entryPriceChange: string;
-    currentUnrealizedProfit: string;
-    previousUnrealizedProfit: string;
-    unrealizedProfitChange: string;
-    unrealizedProfitChangePercent: string;
-    isNew: boolean;
-    isClosed: boolean;
-    directionChanged?: boolean;
-  }>;
+  walletBalanceChange: number;
+  walletBalanceChangePercent: number;
+  unrealizedProfitChange: number;
+  unrealizedProfitChangePercent: number | string;
+  marginBalanceChange: number;
+  marginBalanceChangePercent: number;
+  availableBalanceChange: number;
+  availableBalanceChangePercent: number;
+  positionChanges: any[];
 }

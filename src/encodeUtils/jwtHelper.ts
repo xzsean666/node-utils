@@ -1,4 +1,4 @@
-import * as jwt from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
 
 export interface JWTPayload {
   [key: string]: any;
@@ -33,18 +33,17 @@ export class JWTHelper {
     try {
       const decoded = jwt.verify(token, this.secretKey) as JWTPayload;
       return decoded;
-    } catch (error) {
-      // jwt库会抛出不同类型的错误
+    } catch (error: any) {
       if (error.name === 'TokenExpiredError') {
-        throw new Error('TOKEN_EXPIRED');
+        throw new Error('Token has expired');
       }
       if (error.name === 'JsonWebTokenError') {
-        throw new Error('INVALID_TOKEN');
+        throw new Error('Invalid token');
       }
       if (error.name === 'NotBeforeError') {
-        throw new Error('TOKEN_NOT_ACTIVE');
+        throw new Error('Token not active yet');
       }
-      throw new Error('INVALID_TOKEN');
+      throw new Error(`Token verification failed: ${error.message}`);
     }
   }
 

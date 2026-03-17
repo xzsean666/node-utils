@@ -40,12 +40,15 @@ async function jsonbExample() {
 
     console.log('Search results:', results);
 
-    // 保存数组
-    await db.saveArray('numbers', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    // 用前缀建模一个集合
+    await db.putMany([
+      ['numbers:1', { value: 1 }],
+      ['numbers:2', { value: 2 }],
+      ['numbers:3', { value: 3 }],
+    ]);
 
-    // 获取数组
-    const array = await db.getAllArray('numbers');
-    console.log('Array:', array);
+    const numbers = await db.scan({ prefix: 'numbers:' });
+    console.log('Numbers:', numbers);
   } finally {
     await db.close();
   }
@@ -155,9 +158,8 @@ async function floatExample() {
     const price = await db.get<number>('price:1');
     console.log('Price:', price, typeof price);
 
-    // 获取随机数据
-    const randomData = await db.getRandomData(2);
-    console.log('Random data:', randomData);
+    const allPrices = await db.scan();
+    console.log('All prices:', allPrices);
   } finally {
     await db.close();
   }
@@ -199,9 +201,8 @@ async function byteaExample() {
     const exists = await db.isValueExists(imageBuffer);
     console.log('Image buffer exists:', exists);
 
-    // 获取随机二进制数据
-    const randomData = await db.getRandomData(1);
-    console.log('Random binary data:', randomData);
+    const allBinaryData = await db.scan({ include_timestamps: true });
+    console.log('Binary data:', allBinaryData);
   } finally {
     await db.close();
   }
@@ -228,7 +229,7 @@ async function typeComparisonExample() {
     console.log('- merge:', db.isOperationSupported('merge'));
     console.log('- searchJson:', db.isOperationSupported('searchJson'));
     console.log('- findBoolValues:', db.isOperationSupported('findBoolValues'));
-    console.log('- saveArray:', db.isOperationSupported('saveArray'));
+    console.log('- scan:', db.isOperationSupported('scan'));
 
     await db.close();
   }

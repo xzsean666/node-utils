@@ -48,14 +48,10 @@ const blobDB = new PGKVDatabase('postgresql://...', 'blob_store', 'bytea');
 | `putMany/deleteMany` | ✅    | ✅      | ✅   | ✅      | ✅      | ✅    | ✅    |
 | `getAll/count/clear` | ✅    | ✅      | ✅   | ✅      | ✅      | ✅    | ✅    |
 | `searchByTime`       | ✅    | ✅      | ✅   | ✅      | ✅      | ✅    | ✅    |
-| `getRandomData`      | ✅    | ✅      | ✅   | ✅      | ✅      | ✅    | ✅    |
 | `merge`              | ✅    | ❌      | ❌   | ❌      | ❌      | ❌    | ❌    |
 | `searchJson`         | ✅    | ❌      | ❌   | ❌      | ❌      | ❌    | ❌    |
 | `searchJsonByTime`   | ✅    | ❌      | ❌   | ❌      | ❌      | ❌    | ❌    |
 | `findBoolValues`     | ✅    | ❌      | ❌   | ❌      | ✅      | ❌    | ❌    |
-| `saveArray`\*        | ✅    | ⚠️      | ⚠️   | ⚠️      | ⚠️      | ⚠️    | ⚠️    |
-
-\*⚠️ 表示提供基本支持，但针对 JSONB 优化
 
 ## 类型检查
 
@@ -93,9 +89,10 @@ const results = await db.searchJson({
   contains: { name: 'John' },
 });
 
-// 数组操作
-await db.saveArray('items', [1, 2, 3, 4, 5]);
-const items = await db.getAllArray('items');
+// 用前缀建模集合
+await db.put('items:1', { id: 1, value: 'a' });
+await db.put('items:2', { id: 2, value: 'b' });
+const items = await db.scan({ prefix: 'items:' });
 ```
 
 ### VARCHAR 类型（字符串）
@@ -214,6 +211,7 @@ try {
    - INTEGER/FLOAT：适合数值计算和范围查询
    - BOOLEAN：适合简单的真/假标记
    - BYTEA：适合二进制数据存储，但查询性能较低
+   - 集合/列表数据优先建模成多条 key（如 `items:1`、`items:2`），再配合 `scan(prefix)` 分页读取
 
 ## 完整示例
 

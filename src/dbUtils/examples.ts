@@ -1,5 +1,5 @@
 import { SqliteKVDatabase, SqliteValueType } from './KVSqlite';
-import { PGKVDatabase, PostgreSQLValueType, ValueType } from './KVPostgresql';
+import { PGKVDatabase, ValueType } from './KVPostgresql';
 
 // SQLite 使用示例
 async function sqliteExamples() {
@@ -95,7 +95,7 @@ async function postgresExamples() {
   const jsonbDb = new PGKVDatabase(
     connectionString,
     'jsonb_table',
-    PostgreSQLValueType.JSONB,
+    'jsonb',
   );
   await jsonbDb.put('product1', {
     name: 'Laptop',
@@ -118,7 +118,7 @@ async function postgresExamples() {
   const textDb = new PGKVDatabase(
     connectionString,
     'text_table',
-    PostgreSQLValueType.TEXT,
+    'text',
   );
   await textDb.put('description1', 'This is a detailed product description...');
   const description = await textDb.get('description1');
@@ -128,7 +128,7 @@ async function postgresExamples() {
   const byteaDb = new PGKVDatabase(
     connectionString,
     'bytea_table',
-    PostgreSQLValueType.BYTEA,
+    'bytea',
   );
   const imageBuffer = Buffer.from('fake image data', 'utf8');
   await byteaDb.put('image1', imageBuffer);
@@ -139,94 +139,47 @@ async function postgresExamples() {
   const intDb = new PGKVDatabase(
     connectionString,
     'int_table',
-    PostgreSQLValueType.INTEGER,
+    'integer',
   );
   await intDb.put('counter1', 42);
   const counter = await intDb.get('counter1');
   console.log('Integer value:', counter, typeof counter);
 
-  // 5. BIGINT 类型
-  const bigintDb = new PGKVDatabase(
-    connectionString,
-    'bigint_table',
-    PostgreSQLValueType.BIGINT,
-  );
-  await bigintDb.put('largeNumber1', 9007199254740991n);
-  const largeNumber = await bigintDb.get('largeNumber1');
-  console.log('BigInt value:', largeNumber, typeof largeNumber);
-
-  // 6. BOOLEAN 类型
+  // 5. BOOLEAN 类型
   const boolDb = new PGKVDatabase(
     connectionString,
     'bool_table',
-    PostgreSQLValueType.BOOLEAN,
+    'boolean',
   );
   await boolDb.put('isActive1', true);
   const isActive = await boolDb.get('isActive1');
   console.log('Boolean value:', isActive, typeof isActive);
 
-  // 7. TIMESTAMP 类型
-  const timestampDb = new PGKVDatabase(
+  // 6. FLOAT 类型
+  const floatDb = new PGKVDatabase(
     connectionString,
-    'timestamp_table',
-    PostgreSQLValueType.TIMESTAMP,
+    'float_table',
+    'float',
   );
-  await timestampDb.put('created1', new Date());
-  const created = await timestampDb.get('created1');
-  console.log('Timestamp value:', created, created instanceof Date);
-
-  // 8. UUID 类型
-  const uuidDb = new PGKVDatabase(
-    connectionString,
-    'uuid_table',
-    PostgreSQLValueType.UUID,
-  );
-  await uuidDb.put('session1', '550e8400-e29b-41d4-a716-446655440000');
-  const sessionId = await uuidDb.get('session1');
-  console.log('UUID value:', sessionId);
-
-  // 9. ARRAY 类型
-  const arrayTextDb = new PGKVDatabase(
-    connectionString,
-    'array_text_table',
-    PostgreSQLValueType.ARRAY_TEXT,
-  );
-  await arrayTextDb.put('tags1', ['red', 'blue', 'green']);
-  const tags = await arrayTextDb.get('tags1');
-  console.log('Text Array value:', tags);
-
-  const arrayIntDb = new PGKVDatabase(
-    connectionString,
-    'array_int_table',
-    PostgreSQLValueType.ARRAY_INTEGER,
-  );
-  await arrayIntDb.put('scores1', [100, 85, 92, 78]);
-  const scores = await arrayIntDb.get('scores1');
-  console.log('Integer Array value:', scores);
+  await floatDb.put('ratio1', 0.618);
+  const ratio = await floatDb.get('ratio1');
+  console.log('Float value:', ratio, typeof ratio);
 
   // 类型支持检查
   console.log('JSONB supports merge:', jsonbDb.isOperationSupported('merge'));
   console.log('TEXT supports merge:', textDb.isOperationSupported('merge'));
-  console.log(
-    'ARRAY_TEXT supports array operations:',
-    arrayTextDb.isOperationSupported('arrayOperations'),
-  );
 
   // 类型信息
-  console.log('JSONB Type Info:', jsonbDb.getTypeInfo());
-  console.log('Array Text Type Info:', arrayTextDb.getTypeInfo());
+  console.log('JSONB value type:', jsonbDb.getValueType());
+  console.log('FLOAT value type:', floatDb.getValueType());
 
   // 清理
   await jsonbDb.close();
   await textDb.close();
   await byteaDb.close();
   await intDb.close();
-  await bigintDb.close();
   await boolDb.close();
-  await timestampDb.close();
-  await uuidDb.close();
-  await arrayTextDb.close();
-  await arrayIntDb.close();
+  await floatDb.close();
 }
 
 // 错误处理示例
@@ -246,25 +199,25 @@ async function errorHandlingExamples() {
     console.log('SQLite Integer type error:', error.message);
   }
 
-  // PostgreSQL UUID 类型错误示例
+  // PostgreSQL 类型错误示例
   if (process.env.POSTGRES_URL) {
-    const uuidDb = new PGKVDatabase(
+    const intDb = new PGKVDatabase(
       process.env.POSTGRES_URL,
-      'test_uuid',
-      PostgreSQLValueType.UUID,
+      'test_pg_int',
+      'integer',
     );
 
     try {
-      await uuidDb.put('invalid_uuid', 'not-a-valid-uuid');
+      await intDb.put('invalid_int', 'not-a-valid-int');
     } catch (error: any) {
-      console.log('PostgreSQL UUID type error:', error.message);
+      console.log('PostgreSQL Integer type error:', error.message);
     }
 
     // 不支持的操作示例
     const textDb = new PGKVDatabase(
       process.env.POSTGRES_URL,
       'test_text',
-      PostgreSQLValueType.TEXT,
+      'text',
     );
 
     try {
@@ -273,7 +226,7 @@ async function errorHandlingExamples() {
       console.log('Unsupported merge operation error:', error.message);
     }
 
-    await uuidDb.close();
+    await intDb.close();
     await textDb.close();
   }
 
@@ -348,12 +301,15 @@ async function jsonbExample() {
 
     console.log('Search results:', results);
 
-    // 保存数组
-    await db.saveArray('numbers', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    // 用前缀建模一个集合
+    await db.putMany([
+      ['numbers:1', { value: 1 }],
+      ['numbers:2', { value: 2 }],
+      ['numbers:3', { value: 3 }],
+    ]);
 
-    // 获取数组
-    const array = await db.getAllArray('numbers');
-    console.log('Array:', array);
+    const numbers = await db.scan({ prefix: 'numbers:' });
+    console.log('Numbers:', numbers);
   } finally {
     await db.close();
   }
@@ -463,9 +419,8 @@ async function floatExample() {
     const price = await db.get<number>('price:1');
     console.log('Price:', price, typeof price);
 
-    // 获取随机数据
-    const randomData = await db.getRandomData(2);
-    console.log('Random data:', randomData);
+    const allPrices = await db.scan();
+    console.log('All prices:', allPrices);
   } finally {
     await db.close();
   }
@@ -490,7 +445,7 @@ async function typeComparisonExample() {
     console.log('- merge:', db.isOperationSupported('merge'));
     console.log('- searchJson:', db.isOperationSupported('searchJson'));
     console.log('- findBoolValues:', db.isOperationSupported('findBoolValues'));
-    console.log('- saveArray:', db.isOperationSupported('saveArray'));
+    console.log('- scan:', db.isOperationSupported('scan'));
 
     await db.close();
   }

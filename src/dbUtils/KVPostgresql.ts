@@ -1,15 +1,10 @@
 import 'reflect-metadata';
-import {
-  DataSource,
-  EntitySchema,
-  QueryRunner,
-  Repository,
-  Table,
-} from 'typeorm';
+import { DataSource, EntitySchema, Repository, Table } from 'typeorm';
+import type { QueryRunner } from 'typeorm';
 
 const POSTGRES_SAFE_WRITE_BATCH_SIZE = 5000;
 const POSTGRES_SAFE_IN_BATCH_SIZE = 10000;
-const DEFAULT_ARRAY_BATCH_SIZE = 1000;
+const KV_SCAN_PAGE_SIZE = 1000;
 
 export type ValueType =
   | 'jsonb'
@@ -29,12 +24,6 @@ interface KVEntity {
   updated_at: Date;
 }
 
-interface SaveArrayOptions {
-  batch_size?: number;
-  force_update_batch_size?: boolean;
-  overwrite?: boolean;
-}
-
 interface PgRawRecord {
   key: string;
   value: any;
@@ -42,11 +31,21 @@ interface PgRawRecord {
   updated_at?: string | Date;
 }
 
-interface ArrayMeta {
-  batch_count: number;
-  total_items: number;
-  batch_size: number;
-  last_updated: string;
+interface ParsedSearchCursor {
+  value: string;
+  key: string | null;
+}
+
+interface KeyScanOptions {
+  cursor?: string;
+  limit?: number;
+  order_by?: 'ASC' | 'DESC';
+  prefix?: string;
+}
+
+interface GetOptions {
+  expire?: number;
+  include_timestamps?: boolean;
 }
 
 function bigintJsonReplacer(_key: string, value: any) {
@@ -72,6 +71,16 @@ function dedupeEntriesByKey(entries: Array<[string, any]>): Array<[string, any]>
   return Array.from(deduped.entries());
 }
 
+function assertSafeIdentifier(name: string, label: string): void {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new Error(`${label} must match ^[A-Za-z_][A-Za-z0-9_]*$`);
+  }
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, '\\$&');
+}
+
 export class PGKVDatabase {
   db!: Repository<KVEntity>;
   private data_source: DataSource;
@@ -86,6 +95,7 @@ export class PGKVDatabase {
     table_name: string = 'kv_store',
     value_type: ValueType = 'jsonb',
   ) {
+    assertSafeIdentifier(table_name, 'table_name');
     this.table_name = table_name;
     this.value_type = value_type;
 
@@ -203,31 +213,18 @@ export class PGKVDatabase {
     return value;
   }
 
-  private serializeStructuredValue(value: any): any {
-    const serialized = JSON.stringify(value, bigintJsonReplacer);
-    if (this.value_type === 'jsonb') {
-      return serialized;
-    }
-    if (this.value_type === 'bytea') {
-      return Buffer.from(serialized, 'utf8');
-    }
-    return serialized;
-  }
+  private getValueIdentity(value: any): string {
+    const serialized_value = this.serializeValueForWrite(value);
 
-  private deserializeStructuredValue<T>(value: any): T | null {
-    if (value == null) {
-      return null;
+    if (Buffer.isBuffer(serialized_value) || serialized_value instanceof Uint8Array) {
+      return `${this.value_type}:buffer:${Buffer.from(serialized_value).toString('base64')}`;
     }
-    if (this.value_type === 'jsonb') {
-      return value as T;
+
+    if (serialized_value instanceof Date) {
+      return `${this.value_type}:date:${serialized_value.toISOString()}`;
     }
-    if (Buffer.isBuffer(value)) {
-      return JSON.parse(value.toString('utf8')) as T;
-    }
-    if (typeof value === 'string') {
-      return JSON.parse(value) as T;
-    }
-    return value as T;
+
+    return `${this.value_type}:${String(serialized_value)}`;
   }
 
   private buildSelectFields(include_timestamps: boolean): string {
@@ -375,6 +372,202 @@ export class PGKVDatabase {
     return String(value);
   }
 
+  private parseSearchCursor(cursor: string): ParsedSearchCursor {
+    try {
+      const parsed = JSON.parse(cursor) as Partial<ParsedSearchCursor>;
+      if (parsed && typeof parsed.value === 'string') {
+        return {
+          value: parsed.value,
+          key: typeof parsed.key === 'string' ? parsed.key : null,
+        };
+      }
+    } catch {
+      // Backward compatibility for legacy plain-string cursors.
+    }
+
+    return {
+      value: cursor,
+      key: null,
+    };
+  }
+
+  private resolveGetOptions(
+    options_or_expire?: number | GetOptions,
+  ): Required<Pick<GetOptions, 'include_timestamps'>> & Pick<GetOptions, 'expire'> {
+    if (typeof options_or_expire === 'number') {
+      return {
+        expire: options_or_expire,
+        include_timestamps: false,
+      };
+    }
+
+    return {
+      expire: options_or_expire?.expire,
+      include_timestamps: options_or_expire?.include_timestamps === true,
+    };
+  }
+
+  private isExpired(created_at: Date, expire?: number): boolean {
+    return (
+      expire !== undefined &&
+      Math.floor(Date.now() / 1000) - Math.floor(created_at.getTime() / 1000) >
+        expire
+    );
+  }
+
+  private async getInternal<T = any>(
+    key: string,
+    options_or_expire?: number | GetOptions,
+    delete_expired: boolean = true,
+  ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null> {
+    await this.ensureInitialized();
+
+    const record = await this.getRawRecordByKey(key, true);
+    if (!record) {
+      return null;
+    }
+
+    const { expire, include_timestamps } = this.resolveGetOptions(options_or_expire);
+    const created_at = this.normalizeDate(record.created_at);
+
+    if (this.isExpired(created_at, expire)) {
+      if (delete_expired) {
+        await this.deleteRecordIfCurrent(record);
+      }
+      return null;
+    }
+
+    const deserialized_value = this.deserializeValue(record.value) as T;
+
+    if (!include_timestamps) {
+      return deserialized_value;
+    }
+
+    return {
+      value: deserialized_value,
+      created_at,
+      updated_at: this.normalizeDate(record.updated_at),
+    };
+  }
+
+  private formatSearchCursor(value: unknown, key?: string): string | null {
+    const formatted_value = this.formatCursorValue(value);
+    if (formatted_value == null) {
+      return null;
+    }
+
+    if (!key) {
+      return formatted_value;
+    }
+
+    return JSON.stringify({
+      value: formatted_value,
+      key,
+    });
+  }
+
+  private buildSafeNumericCompareSql(
+    extract_sql: string,
+    operator: '>' | '<' | '>=' | '<=' | '=' | '!=',
+    parameter_index: number,
+  ): string {
+    return `
+      CASE
+        WHEN ${extract_sql} ~ '^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[eE][+-]?\\d+)?$'
+        THEN (${extract_sql})::numeric ${operator} $${parameter_index}
+        ELSE FALSE
+      END
+    `;
+  }
+
+  private buildSafeTimestampCompareSql(
+    extract_sql: string,
+    operator: '>' | '<' | '>=' | '<=' | '=' | '!=',
+    parameter_index: number,
+  ): string {
+    return `
+      CASE
+        WHEN ${extract_sql} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$'
+        THEN (${extract_sql})::timestamptz ${operator} $${parameter_index}::timestamptz
+        ELSE FALSE
+      END
+    `;
+  }
+
+  private async deleteRecordIfCurrent(
+    record: PgRawRecord,
+    query_runner?: QueryRunner,
+  ): Promise<boolean> {
+    if (record.created_at == null || record.updated_at == null) {
+      return false;
+    }
+
+    const executor = this.getQueryExecutor(query_runner);
+    const rows = await executor.query(
+      `
+        DELETE FROM "${this.table_name}"
+        WHERE "key" = $1
+          AND "created_at" = $2::timestamptz
+          AND "updated_at" = $3::timestamptz
+        RETURNING "key"
+      `,
+      [
+        record.key,
+        this.normalizeDate(record.created_at),
+        this.normalizeDate(record.updated_at),
+      ],
+    );
+
+    return rows.length > 0;
+  }
+
+  private async acquireTransactionLock(
+    query_runner: QueryRunner,
+    lock_key: string,
+  ): Promise<void> {
+    await query_runner.query(
+      `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
+      [this.table_name, lock_key],
+    );
+  }
+
+  private async queryBySuffix<T = any>(
+    suffix: string,
+    options?: {
+      limit?: number;
+      offset?: number;
+      order_by?: 'ASC' | 'DESC';
+      case_sensitive?: boolean;
+      include_timestamps?: boolean;
+    },
+  ): Promise<
+    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
+  > {
+    const include_timestamps = options?.include_timestamps === true;
+    const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
+    const like_operator = options?.case_sensitive === false ? 'ILIKE' : 'LIKE';
+    const params: any[] = [`%${escapeLikePattern(suffix)}`];
+    let query = `
+      SELECT ${this.buildSelectFields(include_timestamps)}
+      FROM "${this.table_name}"
+      WHERE "key" ${like_operator} $1 ESCAPE '\\'
+      ORDER BY "key" ${order_by}
+    `;
+
+    if (typeof options?.limit === 'number' && options.limit > 0) {
+      params.push(Math.floor(options.limit));
+      query += ` LIMIT $${params.length}`;
+    }
+
+    if (typeof options?.offset === 'number' && options.offset > 0) {
+      params.push(Math.floor(options.offset));
+      query += ` OFFSET $${params.length}`;
+    }
+
+    const records = (await this.data_source.query(query, params)) as PgRawRecord[];
+    return this.mapRawRecordsToObject<T>(records, include_timestamps);
+  }
+
   private async getRawRecordsByKeys(
     keys: string[],
     include_timestamps: boolean,
@@ -507,24 +700,6 @@ export class PGKVDatabase {
     return deleted_count;
   }
 
-  private async getStructuredValue<T>(
-    key: string,
-    query_runner?: QueryRunner,
-  ): Promise<T | null> {
-    const record = await this.getRawRecordByKey(key, false, query_runner);
-    if (!record) {
-      return null;
-    }
-    return this.deserializeStructuredValue<T>(record.value);
-  }
-
-  private async getArrayMeta(
-    key: string,
-    query_runner?: QueryRunner,
-  ): Promise<ArrayMeta | null> {
-    return this.getStructuredValue<ArrayMeta>(`${key}_meta`, query_runner);
-  }
-
   private async ensureInitialized(): Promise<void> {
     if (this.initialized && this.data_source.isInitialized) {
       return;
@@ -637,16 +812,20 @@ export class PGKVDatabase {
     this.checkTypeSupport('merge', ['jsonb']);
     await this.ensureInitialized();
 
+    const merged_value_sql = `
+      CASE
+        WHEN "${this.table_name}"."value" IS NULL THEN EXCLUDED."value"
+        ELSE jsonb_deep_merge("${this.table_name}"."value", EXCLUDED."value")
+      END
+    `;
     const result = await this.data_source.query(
       `
         INSERT INTO "${this.table_name}" ("key", "value", "created_at", "updated_at")
         VALUES ($1, $2::jsonb, NOW(), NOW())
         ON CONFLICT ("key") DO UPDATE SET
-          "value" = CASE
-            WHEN "${this.table_name}"."value" IS NULL THEN $2::jsonb
-            ELSE jsonb_deep_merge("${this.table_name}"."value", $2::jsonb)
-          END,
+          "value" = ${merged_value_sql},
           "updated_at" = NOW()
+        WHERE "${this.table_name}"."value" IS DISTINCT FROM ${merged_value_sql}
         RETURNING "key"
       `,
       [key, this.serializeValueForWrite(partial_value)],
@@ -672,42 +851,27 @@ export class PGKVDatabase {
           include_timestamps?: boolean;
         },
   ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null> {
-    await this.ensureInitialized();
+    return this.getInternal<T>(key, options_or_expire, true);
+  }
 
-    const record = await this.getRawRecordByKey(key, true);
-    if (!record) {
-      return null;
-    }
-
-    let expire: number | undefined;
-    let include_timestamps = false;
-
-    if (typeof options_or_expire === 'number') {
-      expire = options_or_expire;
-    } else if (options_or_expire) {
-      expire = options_or_expire.expire;
-      include_timestamps = options_or_expire.include_timestamps === true;
-    }
-
-    const created_at = this.normalizeDate(record.created_at);
-    if (
-      expire !== undefined &&
-      Math.floor(Date.now() / 1000) - Math.floor(created_at.getTime() / 1000) >
-        expire
-    ) {
-      await this.delete(key);
-      return null;
-    }
-
-    if (!include_timestamps) {
-      return this.deserializeValue(record.value) as T;
-    }
-
-    return {
-      value: this.deserializeValue(record.value) as T,
-      created_at,
-      updated_at: this.normalizeDate(record.updated_at),
-    };
+  async getIfFresh<T = any>(key: string, expire: number): Promise<T | null>;
+  async getIfFresh<T = any>(
+    key: string,
+    options: {
+      expire: number;
+      include_timestamps?: boolean;
+    },
+  ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null>;
+  async getIfFresh<T = any>(
+    key: string,
+    options_or_expire:
+      | number
+      | {
+          expire: number;
+          include_timestamps?: boolean;
+        },
+  ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null> {
+    return this.getInternal<T>(key, options_or_expire, false);
   }
 
   async getWithPrefix<T = any>(
@@ -734,13 +898,14 @@ export class PGKVDatabase {
     const include_timestamps = options?.include_timestamps === true;
     const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
     const case_sensitive = options?.case_sensitive !== false;
-    const params: any[] = [prefix, `${prefix}\xFF`];
-    const where_conditions = ['"key" >= $1', '"key" < $2'];
+    const like_operator = case_sensitive ? 'LIKE' : 'ILIKE';
+    const params: any[] = [`${escapeLikePattern(prefix)}%`];
+    const where_conditions = [`"key" ${like_operator} $1 ESCAPE '\\'`];
 
     if (options?.contains) {
-      params.push(`%${options.contains}%`);
+      params.push(`%${escapeLikePattern(options.contains)}%`);
       where_conditions.push(
-        `"key" ${case_sensitive ? 'LIKE' : 'ILIKE'} $${params.length}`,
+        `"key" ${like_operator} $${params.length} ESCAPE '\\'`,
       );
     }
 
@@ -781,92 +946,6 @@ export class PGKVDatabase {
     return this.mapRawRecordsToObject<T>(records, include_timestamps);
   }
 
-  async getWithContains<T = any>(
-    substring: string,
-    options?: {
-      limit?: number;
-      offset?: number;
-      order_by?: 'ASC' | 'DESC';
-      case_sensitive?: boolean;
-      include_timestamps?: boolean;
-    },
-  ): Promise<
-    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
-  > {
-    await this.ensureInitialized();
-
-    if (!substring) {
-      throw new Error('Substring cannot be empty');
-    }
-
-    const include_timestamps = options?.include_timestamps === true;
-    const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
-    const like_operator = options?.case_sensitive === false ? 'ILIKE' : 'LIKE';
-    const params: any[] = [`%${substring}%`];
-    let query = `
-      SELECT ${this.buildSelectFields(include_timestamps)}
-      FROM "${this.table_name}"
-      WHERE "key" ${like_operator} $1
-      ORDER BY "key" ${order_by}
-    `;
-
-    if (typeof options?.limit === 'number' && options.limit > 0) {
-      params.push(Math.floor(options.limit));
-      query += ` LIMIT $${params.length}`;
-    }
-
-    if (typeof options?.offset === 'number' && options.offset > 0) {
-      params.push(Math.floor(options.offset));
-      query += ` OFFSET $${params.length}`;
-    }
-
-    const records = (await this.data_source.query(query, params)) as PgRawRecord[];
-    return this.mapRawRecordsToObject<T>(records, include_timestamps);
-  }
-
-  async getWithSuffix<T = any>(
-    suffix: string,
-    options?: {
-      limit?: number;
-      offset?: number;
-      order_by?: 'ASC' | 'DESC';
-      case_sensitive?: boolean;
-      include_timestamps?: boolean;
-    },
-  ): Promise<
-    Record<string, T | { value: T; created_at: Date; updated_at: Date }>
-  > {
-    await this.ensureInitialized();
-
-    if (!suffix) {
-      throw new Error('Suffix cannot be empty');
-    }
-
-    const include_timestamps = options?.include_timestamps === true;
-    const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
-    const like_operator = options?.case_sensitive === false ? 'ILIKE' : 'LIKE';
-    const params: any[] = [`%${suffix}`];
-    let query = `
-      SELECT ${this.buildSelectFields(include_timestamps)}
-      FROM "${this.table_name}"
-      WHERE "key" ${like_operator} $1
-      ORDER BY "key" ${order_by}
-    `;
-
-    if (typeof options?.limit === 'number' && options.limit > 0) {
-      params.push(Math.floor(options.limit));
-      query += ` LIMIT $${params.length}`;
-    }
-
-    if (typeof options?.offset === 'number' && options.offset > 0) {
-      params.push(Math.floor(options.offset));
-      query += ` OFFSET $${params.length}`;
-    }
-
-    const records = (await this.data_source.query(query, params)) as PgRawRecord[];
-    return this.mapRawRecordsToObject<T>(records, include_timestamps);
-  }
-
   async getWithSuffixOptimized<T = any>(
     suffix: string,
     options?: {
@@ -883,12 +962,16 @@ export class PGKVDatabase {
       throw new Error('Suffix cannot be empty');
     }
 
-    const reversed_suffix = suffix.split('').reverse().join('');
+    const reversed_suffix = Array.from(suffix).reverse().join('');
     const reverse_prefix = `reverse:${reversed_suffix}`;
     const reverse_results = await this.getWithPrefix<{
       original_key: string;
       value: T;
     }>(reverse_prefix, options);
+
+    if (Object.keys(reverse_results).length === 0) {
+      return this.queryBySuffix<T>(suffix, options);
+    }
 
     const reverse_values = Object.values(reverse_results).map((entry) => {
       if (entry && typeof entry === 'object' && 'value' in (entry as any)) {
@@ -913,23 +996,6 @@ export class PGKVDatabase {
       params,
     );
     return rows.length > 0;
-  }
-
-  async getValues(value: any): Promise<any> {
-    await this.ensureInitialized();
-    const params: any[] = [];
-    const where_sql = this.buildValueEqualsSql('"value"', value, params);
-    const records = (await this.data_source.query(
-      `
-        SELECT "key", "value", "created_at", "updated_at"
-        FROM "${this.table_name}"
-        WHERE ${where_sql}
-        ORDER BY "key" ASC
-      `,
-      params,
-    )) as PgRawRecord[];
-
-    return records.map((record) => this.mapRawRecord(record, true));
   }
 
   async delete(key: string): Promise<boolean> {
@@ -962,57 +1028,105 @@ export class PGKVDatabase {
 
   async add(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
-    try {
-      await this.data_source.query(
-        `
-          INSERT INTO "${this.table_name}" ("key", "value", "created_at", "updated_at")
-          VALUES ($1, ${this.value_type === 'jsonb' ? '$2::jsonb' : '$2'}, NOW(), NOW())
-        `,
-        [key, this.serializeValueForWrite(value)],
-      );
-    } catch (error: any) {
-      if (error?.code === '23505') {
-        throw new Error(`Key "${key}" already exists`);
-      }
-      throw error;
+    if (!(await this.putIfAbsent(key, value))) {
+      throw new Error(`Key "${key}" already exists`);
     }
+  }
+
+  async putIfAbsent(key: string, value: any): Promise<boolean> {
+    await this.ensureInitialized();
+
+    const rows = await this.data_source.query(
+      `
+        INSERT INTO "${this.table_name}" ("key", "value", "created_at", "updated_at")
+        VALUES ($1, ${this.value_type === 'jsonb' ? '$2::jsonb' : '$2'}, NOW(), NOW())
+        ON CONFLICT ("key") DO NOTHING
+        RETURNING "key"
+      `,
+      [key, this.serializeValueForWrite(value)],
+    );
+
+    return rows.length > 0;
+  }
+
+  async putIfChanged(key: string, value: any): Promise<boolean> {
+    await this.ensureInitialized();
+
+    const rows = await this.data_source.query(
+      `
+        INSERT INTO "${this.table_name}" ("key", "value", "created_at", "updated_at")
+        VALUES ($1, ${this.value_type === 'jsonb' ? '$2::jsonb' : '$2'}, NOW(), NOW())
+        ON CONFLICT ("key") DO UPDATE SET
+          "value" = EXCLUDED."value",
+          "updated_at" = NOW()
+        WHERE "${this.table_name}"."value" IS DISTINCT FROM EXCLUDED."value"
+        RETURNING "key"
+      `,
+      [key, this.serializeValueForWrite(value)],
+    );
+
+    return rows.length > 0;
   }
 
   async addUniquePair(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
-
-    const params: any[] = [key];
-    const value_where_sql = this.buildValueEqualsSql('"value"', value, params);
-    const existing = await this.data_source.query(
-      `SELECT 1 FROM "${this.table_name}" WHERE "key" = $1 AND ${value_where_sql} LIMIT 1`,
-      params,
-    );
-
-    if (existing.length > 0) {
+    if (!(await this.putIfChanged(key, value))) {
       throw new Error(`Key-value pair already exists for key "${key}"`);
     }
-
-    await this.upsertEntries([[key, value]]);
   }
 
   async addUniqueValue(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
 
-    const params: any[] = [];
-    const value_where_sql = this.buildValueEqualsSql('"value"', value, params);
-    const existing = await this.data_source.query(
-      `SELECT "key" FROM "${this.table_name}" WHERE ${value_where_sql} LIMIT 1`,
-      params,
-    );
+    const query_runner = this.data_source.createQueryRunner();
+    await query_runner.connect();
+    await query_runner.startTransaction();
 
-    if (existing.length > 0) {
-      throw new Error(`Value already exists with key "${existing[0].key}"`);
+    try {
+      await this.acquireTransactionLock(
+        query_runner,
+        `value:${this.getValueIdentity(value)}`,
+      );
+
+      const params: any[] = [];
+      const value_where_sql = this.buildValueEqualsSql('"value"', value, params);
+      const existing = await query_runner.query(
+        `SELECT "key" FROM "${this.table_name}" WHERE ${value_where_sql} LIMIT 1`,
+        params,
+      );
+
+      if (existing.length > 0) {
+        throw new Error(`Value already exists with key "${existing[0].key}"`);
+      }
+
+      const rows = await query_runner.query(
+        `
+          INSERT INTO "${this.table_name}" ("key", "value", "created_at", "updated_at")
+          VALUES ($1, ${this.value_type === 'jsonb' ? '$2::jsonb' : '$2'}, NOW(), NOW())
+          ON CONFLICT ("key") DO NOTHING
+          RETURNING "key"
+        `,
+        [key, this.serializeValueForWrite(value)],
+      );
+
+      if (rows.length === 0) {
+        throw new Error(`Key "${key}" already exists`);
+      }
+
+      await query_runner.commitTransaction();
+    } catch (error) {
+      await query_runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await query_runner.release();
     }
-
-    await this.upsertEntries([[key, value]]);
   }
 
   async close(): Promise<void> {
+    if (this.initializing_promise) {
+      await this.initializing_promise;
+    }
+
     if (this.data_source.isInitialized) {
       await this.data_source.destroy();
     }
@@ -1029,6 +1143,34 @@ export class PGKVDatabase {
   > {
     await this.ensureInitialized();
     const include_timestamps = options?.include_timestamps === true;
+
+    if (
+      (options?.offset === undefined || options.offset <= 0) &&
+      (options?.limit === undefined || options.limit <= 0)
+    ) {
+      const data: Record<
+        string,
+        T | { value: T; created_at: Date; updated_at: Date }
+      > = {};
+      let cursor: string | undefined;
+
+      while (true) {
+        const page = await this.scan<T>({
+          cursor,
+          limit: KV_SCAN_PAGE_SIZE,
+          include_timestamps,
+        });
+
+        Object.assign(data, page.data);
+
+        if (!page.next_cursor) {
+          return data;
+        }
+
+        cursor = page.next_cursor;
+      }
+    }
+
     const params: any[] = [];
     let query = `
       SELECT ${this.buildSelectFields(include_timestamps)}
@@ -1052,10 +1194,106 @@ export class PGKVDatabase {
 
   async keys(): Promise<string[]> {
     await this.ensureInitialized();
-    const rows = await this.data_source.query(
-      `SELECT "key" FROM "${this.table_name}" ORDER BY "key" ASC`,
-    );
-    return (rows as Array<{ key: string }>).map((record) => record.key);
+    const keys: string[] = [];
+    let cursor: string | undefined;
+
+    while (true) {
+      const page = await this.scanKeys({
+        cursor,
+        limit: KV_SCAN_PAGE_SIZE,
+      });
+      keys.push(...page.data);
+
+      if (!page.next_cursor) {
+        return keys;
+      }
+
+      cursor = page.next_cursor;
+    }
+  }
+
+  async scanKeys(
+    options?: KeyScanOptions,
+  ): Promise<{ data: string[]; next_cursor: string | null }> {
+    await this.ensureInitialized();
+
+    const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
+    const cursor_operator = order_by === 'DESC' ? '<' : '>';
+    const limit = normalizePositiveInteger(options?.limit, 100, 1000);
+    const params: any[] = [];
+    const where_conditions: string[] = [];
+
+    if (options?.prefix) {
+      params.push(`${escapeLikePattern(options.prefix)}%`);
+      where_conditions.push(`"key" LIKE $${params.length} ESCAPE '\\'`);
+    }
+
+    if (options?.cursor) {
+      params.push(options.cursor);
+      where_conditions.push(`"key" ${cursor_operator} $${params.length}`);
+    }
+
+    let query = `SELECT "key" FROM "${this.table_name}"`;
+    if (where_conditions.length > 0) {
+      query += ` WHERE ${where_conditions.join(' AND ')}`;
+    }
+    params.push(limit + 1);
+    query += ` ORDER BY "key" ${order_by} LIMIT $${params.length}`;
+
+    const rows = (await this.data_source.query(query, params)) as Array<{
+      key: string;
+    }>;
+    const has_more = rows.length > limit;
+    const page_rows = has_more ? rows.slice(0, limit) : rows;
+
+    return {
+      data: page_rows.map((row) => row.key),
+      next_cursor: has_more ? page_rows[page_rows.length - 1]?.key || null : null,
+    };
+  }
+
+  async scan<T = any>(
+    options?: KeyScanOptions & { include_timestamps?: boolean },
+  ): Promise<{
+    data: Record<string, T | { value: T; created_at: Date; updated_at: Date }>;
+    next_cursor: string | null;
+  }> {
+    await this.ensureInitialized();
+
+    const include_timestamps = options?.include_timestamps === true;
+    const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
+    const cursor_operator = order_by === 'DESC' ? '<' : '>';
+    const limit = normalizePositiveInteger(options?.limit, 100, 1000);
+    const params: any[] = [];
+    const where_conditions: string[] = [];
+
+    if (options?.prefix) {
+      params.push(`${escapeLikePattern(options.prefix)}%`);
+      where_conditions.push(`"key" LIKE $${params.length} ESCAPE '\\'`);
+    }
+
+    if (options?.cursor) {
+      params.push(options.cursor);
+      where_conditions.push(`"key" ${cursor_operator} $${params.length}`);
+    }
+
+    let query = `SELECT ${this.buildSelectFields(include_timestamps)} FROM "${this.table_name}"`;
+    if (where_conditions.length > 0) {
+      query += ` WHERE ${where_conditions.join(' AND ')}`;
+    }
+    params.push(limit + 1);
+    query += ` ORDER BY "key" ${order_by} LIMIT $${params.length}`;
+
+    const rows = (await this.data_source.query(query, params)) as PgRawRecord[];
+    const has_more = rows.length > limit;
+    const page_rows = has_more ? rows.slice(0, limit) : rows;
+
+    return {
+      data: this.mapRawRecordsToObject<T>(page_rows, include_timestamps),
+      next_cursor: has_more
+        ? page_rows[page_rows.length - 1]?.key || null
+        : null,
+    };
   }
 
   async has(key: string): Promise<boolean> {
@@ -1187,6 +1425,14 @@ export class PGKVDatabase {
         : order_by_field === 'created_at'
           ? '"created_at"'
           : '"updated_at"';
+    const select_fields =
+      !include_timestamps && order_by_field !== 'key'
+        ? `${this.buildSelectFields(false)}, ${order_column}`
+        : this.buildSelectFields(include_timestamps);
+    const order_by_clause =
+      order_by_field === 'key'
+        ? `${order_column} ${order_by}`
+        : `${order_column} ${order_by}, "key" ${order_by}`;
 
     const params: any[] = [];
     const where_conditions: string[] = [];
@@ -1202,7 +1448,11 @@ export class PGKVDatabase {
         if (typeof condition.value === 'number') {
           params.push(condition.value);
           where_conditions.push(
-            `NULLIF(${extract_sql}, '')::numeric ${condition.operator} $${params.length}`,
+            this.buildSafeNumericCompareSql(
+              extract_sql,
+              condition.operator,
+              params.length,
+            ),
           );
           continue;
         }
@@ -1210,7 +1460,11 @@ export class PGKVDatabase {
         if (condition.value instanceof Date) {
           params.push(condition.value.toISOString());
           where_conditions.push(
-            `NULLIF(${extract_sql}, '')::timestamptz ${condition.operator} $${params.length}::timestamptz`,
+            this.buildSafeTimestampCompareSql(
+              extract_sql,
+              condition.operator,
+              params.length,
+            ),
           );
           continue;
         }
@@ -1223,26 +1477,39 @@ export class PGKVDatabase {
     if (search_options.text_search) {
       for (const condition of search_options.text_search) {
         const extract_sql = this.buildJsonExtractTextSql('"value"', condition.path, params);
-        params.push(`%${condition.text}%`);
+        params.push(`%${escapeLikePattern(condition.text)}%`);
         where_conditions.push(
-          `${extract_sql} ${condition.case_sensitive ? 'LIKE' : 'ILIKE'} $${params.length}`,
+          `${extract_sql} ${condition.case_sensitive ? 'LIKE' : 'ILIKE'} $${params.length} ESCAPE '\\'`,
         );
       }
     }
 
     if (search_options.cursor) {
+      const parsed_cursor = this.parseSearchCursor(search_options.cursor);
       const operator = order_by === 'ASC' ? '>' : '<';
       if (order_by_field === 'key') {
-        params.push(search_options.cursor);
+        params.push(parsed_cursor.value);
         where_conditions.push(`${order_column} ${operator} $${params.length}`);
       } else {
-        params.push(new Date(search_options.cursor));
-        where_conditions.push(`${order_column} ${operator} $${params.length}::timestamptz`);
+        params.push(new Date(parsed_cursor.value));
+        const cursor_value_index = params.length;
+
+        if (parsed_cursor.key) {
+          params.push(parsed_cursor.key);
+          const cursor_key_index = params.length;
+          where_conditions.push(
+            `(${order_column} ${operator} $${cursor_value_index}::timestamptz OR (${order_column} = $${cursor_value_index}::timestamptz AND "key" ${operator} $${cursor_key_index}))`,
+          );
+        } else {
+          where_conditions.push(
+            `${order_column} ${operator} $${cursor_value_index}::timestamptz`,
+          );
+        }
       }
     }
 
     let query = `
-      SELECT ${this.buildSelectFields(include_timestamps)}
+      SELECT ${select_fields}
       FROM "${this.table_name}"
     `;
 
@@ -1251,7 +1518,7 @@ export class PGKVDatabase {
     }
 
     query += `
-      ORDER BY ${order_column} ${order_by}
+      ORDER BY ${order_by_clause}
       LIMIT ${limit + 1}
     `;
 
@@ -1265,13 +1532,14 @@ export class PGKVDatabase {
       data,
       next_cursor:
         has_more && last_record
-          ? this.formatCursorValue(
-              order_by_field === 'key'
-                ? last_record.key
-                : order_by_field === 'created_at'
+          ? order_by_field === 'key'
+            ? this.formatSearchCursor(last_record.key)
+            : this.formatSearchCursor(
+                order_by_field === 'created_at'
                   ? this.normalizeDate(last_record.created_at)
                   : this.normalizeDate(last_record.updated_at),
-            )
+                last_record.key,
+              )
           : null,
     };
   }
@@ -1403,313 +1671,6 @@ export class PGKVDatabase {
     return records.map((record) => this.mapRawRecord(record, include_timestamps));
   }
 
-  async saveArray(
-    key: string,
-    array: any[],
-    options?: SaveArrayOptions,
-  ): Promise<void> {
-    let batch_size = normalizePositiveInteger(
-      options?.batch_size,
-      DEFAULT_ARRAY_BATCH_SIZE,
-      POSTGRES_SAFE_WRITE_BATCH_SIZE,
-    );
-    const force_update_batch_size = options?.force_update_batch_size === true;
-    const overwrite = options?.overwrite === true;
-
-    if (this.value_type !== 'jsonb') {
-      console.warn(
-        `Warning: saveArray is optimized for JSONB type but current type is '${this.value_type}'.`,
-      );
-    }
-
-    await this.ensureInitialized();
-
-    const meta_key = `${key}_meta`;
-    const existing_meta = await this.getArrayMeta(key);
-
-    if (existing_meta && existing_meta.batch_count > 0 && !overwrite) {
-      const stored_batch_size = normalizePositiveInteger(
-        existing_meta.batch_size,
-        DEFAULT_ARRAY_BATCH_SIZE,
-        POSTGRES_SAFE_WRITE_BATCH_SIZE,
-      );
-
-      if (force_update_batch_size && stored_batch_size !== batch_size) {
-        const all_data = await this.getAllArray<any>(key);
-        return this.saveArray(key, [...all_data, ...array], {
-          batch_size,
-          overwrite: true,
-        });
-      }
-
-      batch_size = stored_batch_size;
-    }
-
-    const query_runner = this.data_source.createQueryRunner();
-    await query_runner.connect();
-    await query_runner.startTransaction();
-
-    try {
-      const current_meta = await this.getArrayMeta(key, query_runner);
-
-      if (overwrite && current_meta) {
-        const keys_to_delete = [meta_key];
-        for (let i = 0; i < current_meta.batch_count; i++) {
-          keys_to_delete.push(`${key}_${i}`);
-        }
-        await this.deleteKeys(keys_to_delete, query_runner);
-      }
-
-      if (!overwrite && current_meta && current_meta.batch_count > 0) {
-        const last_batch_index = current_meta.batch_count - 1;
-        const last_batch_key = `${key}_${last_batch_index}`;
-        const last_batch =
-          (await this.getStructuredValue<any[]>(last_batch_key, query_runner)) || [];
-        const remaining_space = Math.max(0, batch_size - last_batch.length);
-        const items_for_last_batch = array.slice(0, remaining_space);
-        const remaining_items = array.slice(items_for_last_batch.length);
-
-        if (items_for_last_batch.length > 0) {
-          await this.upsertSerializedEntries(
-            [
-              [
-                last_batch_key,
-                this.serializeStructuredValue([...last_batch, ...items_for_last_batch]),
-              ],
-            ],
-            query_runner,
-            1,
-          );
-        }
-
-        const new_batch_entries: Array<[string, any]> = [];
-        let batch_index = current_meta.batch_count;
-        for (let i = 0; i < remaining_items.length; i += batch_size) {
-          const batch = remaining_items.slice(i, i + batch_size);
-          new_batch_entries.push([
-            `${key}_${batch_index}`,
-            this.serializeStructuredValue(batch),
-          ]);
-          batch_index += 1;
-        }
-
-        if (new_batch_entries.length > 0) {
-          await this.upsertSerializedEntries(
-            new_batch_entries,
-            query_runner,
-            batch_size,
-          );
-        }
-
-        const updated_meta: ArrayMeta = {
-          batch_count: current_meta.batch_count + new_batch_entries.length,
-          total_items: current_meta.total_items + array.length,
-          batch_size,
-          last_updated: new Date().toISOString(),
-        };
-
-        await this.upsertSerializedEntries(
-          [[meta_key, this.serializeStructuredValue(updated_meta)]],
-          query_runner,
-          1,
-        );
-      } else {
-        const batch_entries: Array<[string, any]> = [];
-        for (let i = 0; i < array.length; i += batch_size) {
-          const batch = array.slice(i, i + batch_size);
-          batch_entries.push([
-            `${key}_${batch_entries.length}`,
-            this.serializeStructuredValue(batch),
-          ]);
-        }
-
-        if (batch_entries.length > 0) {
-          await this.upsertSerializedEntries(
-            batch_entries,
-            query_runner,
-            batch_size,
-          );
-        }
-
-        const meta: ArrayMeta = {
-          batch_count: batch_entries.length,
-          total_items: array.length,
-          batch_size,
-          last_updated: new Date().toISOString(),
-        };
-
-        await this.upsertSerializedEntries(
-          [[meta_key, this.serializeStructuredValue(meta)]],
-          query_runner,
-          1,
-        );
-      }
-
-      await query_runner.commitTransaction();
-    } catch (error) {
-      await query_runner.rollbackTransaction();
-      throw error;
-    } finally {
-      await query_runner.release();
-    }
-  }
-
-  async getAllArray<T = any>(key: string): Promise<T[]> {
-    await this.ensureInitialized();
-
-    const meta = await this.getArrayMeta(key);
-    if (!meta || meta.batch_count <= 0) {
-      return [];
-    }
-
-    const batch_keys = Array.from(
-      { length: meta.batch_count },
-      (_, index) => `${key}_${index}`,
-    );
-    const records = await this.getRawRecordsByKeys(batch_keys, false);
-    const record_map = new Map(records.map((record) => [record.key, record.value]));
-    const result: T[] = [];
-
-    for (let i = 0; i < meta.batch_count; i++) {
-      const batch = this.deserializeStructuredValue<T[]>(
-        record_map.get(`${key}_${i}`),
-      );
-      if (Array.isArray(batch)) {
-        result.push(...batch);
-      }
-    }
-
-    return result;
-  }
-
-  async getRecentArray<T = any>(
-    key: string,
-    count: number,
-    offset: number = 0,
-  ): Promise<T[]> {
-    await this.ensureInitialized();
-
-    if (count <= 0 || offset < 0) {
-      return [];
-    }
-
-    const meta = await this.getArrayMeta(key);
-    if (!meta || meta.total_items <= 0 || offset >= meta.total_items) {
-      return [];
-    }
-
-    const end_index = meta.total_items - offset;
-    const start_index = Math.max(0, end_index - count);
-    return this.getArrayRange<T>(key, start_index, end_index);
-  }
-
-  async getArrayRange<T = any>(
-    key: string,
-    start_index: number,
-    end_index: number,
-  ): Promise<T[]> {
-    await this.ensureInitialized();
-
-    if (start_index < 0 || end_index <= start_index) {
-      return [];
-    }
-
-    const meta = await this.getArrayMeta(key);
-    if (!meta || meta.batch_count <= 0 || start_index >= meta.total_items) {
-      return [];
-    }
-
-    const batch_size = normalizePositiveInteger(
-      meta.batch_size,
-      DEFAULT_ARRAY_BATCH_SIZE,
-      POSTGRES_SAFE_WRITE_BATCH_SIZE,
-    );
-    const safe_end_index = Math.min(end_index, meta.total_items);
-    const start_batch = Math.floor(start_index / batch_size);
-    const end_batch = Math.floor((safe_end_index - 1) / batch_size);
-    const batch_keys = Array.from(
-      { length: end_batch - start_batch + 1 },
-      (_, index) => `${key}_${start_batch + index}`,
-    );
-    const records = await this.getRawRecordsByKeys(batch_keys, false);
-    const record_map = new Map(records.map((record) => [record.key, record.value]));
-    const result: T[] = [];
-
-    for (let batch_index = start_batch; batch_index <= end_batch; batch_index++) {
-      const batch = this.deserializeStructuredValue<T[]>(
-        record_map.get(`${key}_${batch_index}`),
-      );
-
-      if (!Array.isArray(batch) || batch.length === 0) {
-        continue;
-      }
-
-      const batch_start_index = batch_index * batch_size;
-      const local_start = Math.max(0, start_index - batch_start_index);
-      const local_end = Math.min(batch.length, safe_end_index - batch_start_index);
-
-      if (local_start < local_end) {
-        result.push(...batch.slice(local_start, local_end));
-      }
-    }
-
-    return result;
-  }
-
-  async getRandomData(
-    count: number = 1,
-    options?: {
-      include_timestamps?: boolean;
-    },
-  ): Promise<
-    Array<{
-      key: string;
-      value: any;
-      created_at?: Date;
-      updated_at?: Date;
-    }>
-  > {
-    await this.ensureInitialized();
-
-    if (count <= 0) {
-      return [];
-    }
-
-    const include_timestamps = options?.include_timestamps === true;
-
-    if (count === 1) {
-      const total = await this.count();
-      if (total <= 0) {
-        return [];
-      }
-
-      const offset = Math.floor(Math.random() * total);
-      const rows = (await this.data_source.query(
-        `
-          SELECT ${this.buildSelectFields(include_timestamps)}
-          FROM "${this.table_name}"
-          ORDER BY "key" ASC
-          LIMIT 1 OFFSET $1
-        `,
-        [offset],
-      )) as PgRawRecord[];
-
-      return rows.map((record) => this.mapRawRecord(record, include_timestamps));
-    }
-
-    const rows = (await this.data_source.query(
-      `
-        SELECT ${this.buildSelectFields(include_timestamps)}
-        FROM "${this.table_name}"
-        ORDER BY RANDOM()
-        LIMIT $1
-      `,
-      [count],
-    )) as PgRawRecord[];
-
-    return rows.map((record) => this.mapRawRecord(record, include_timestamps));
-  }
-
   getValueType(): ValueType {
     return this.value_type;
   }
@@ -1724,10 +1685,6 @@ export class PGKVDatabase {
       searchJson: ['jsonb'],
       searchJsonByTime: ['jsonb'],
       findBoolValues: ['boolean', 'jsonb'],
-      saveArray: ['jsonb'],
-      getAllArray: ['jsonb'],
-      getRecentArray: ['jsonb'],
-      getArrayRange: ['jsonb'],
     };
 
     const supported_types = operation_type_map[operation];

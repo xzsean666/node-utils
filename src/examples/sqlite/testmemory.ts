@@ -42,10 +42,13 @@ async function testMemoryDatabase() {
     await db.putMany(entries);
     console.log('批量添加用户数据成功');
 
-    // 测试条件查询
-    console.log('\n3. 测试条件查询');
-    const youngUsers = await db.findByCondition(
-      (value) => value.age && value.age < 30,
+    // 测试前缀扫描
+    console.log('\n3. 测试前缀扫描');
+    const userPage = await db.scan({ prefix: 'user' });
+    const youngUsers = Object.fromEntries(
+      Object.entries(userPage.data).filter(
+        ([, value]) => (value as { age?: number }).age && (value as { age?: number }).age! < 30,
+      ),
     );
     console.log('30岁以下的用户:', youngUsers);
 

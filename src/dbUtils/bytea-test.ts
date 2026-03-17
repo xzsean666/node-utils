@@ -53,10 +53,10 @@ async function testByteaFunctionality() {
     const exists = await db.isValueExists(buffer1);
     console.log('Buffer 存在:', exists);
 
-    // 测试 6: 获取所有匹配的值
-    console.log('\n测试 6: 获取匹配值');
-    const matchingValues = await db.getValues(binaryData);
-    console.log('匹配的值数量:', matchingValues.length);
+    // 测试 6: 再次检查值是否存在
+    console.log('\n测试 6: 二进制值存在性检查');
+    const binaryExists = await db.isValueExists(binaryData);
+    console.log('二进制值存在:', binaryExists);
 
     // 测试 7: 批量操作
     console.log('\n测试 7: 批量操作');
@@ -77,17 +77,10 @@ async function testByteaFunctionality() {
     const allData = await db.getAll();
     console.log('总记录数:', allData.size);
 
-    // 测试 9: 随机数据
-    console.log('\n测试 9: 随机数据');
-    const randomData = await db.getRandomData(2);
-    randomData.forEach((item, index) => {
-      console.log(
-        `随机数据 ${index + 1}:`,
-        item.key,
-        '长度:',
-        (item.value as Buffer)?.length,
-      );
-    });
+    // 测试 9: 列出所有键
+    console.log('\n测试 9: 列出所有键');
+    const keys = await db.keys();
+    console.log('所有键:', keys);
 
     console.log('\n=== 所有测试完成 ===');
   } catch (error) {

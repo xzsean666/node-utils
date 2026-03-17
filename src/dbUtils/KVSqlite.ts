@@ -1,10 +1,12 @@
 import 'reflect-metadata';
 import { DataSource, EntitySchema, Repository, Table } from 'typeorm';
+import type { QueryRunner } from 'typeorm';
 
 const SQLITE_SAFE_WRITE_BATCH_SIZE = 400;
 const SQLITE_SAFE_IN_BATCH_SIZE = 800;
 const SQLITE_BUSY_RETRY_TIMES = 3;
 const SQLITE_BUSY_RETRY_DELAY_MS = 100;
+const KV_SCAN_PAGE_SIZE = 1000;
 
 // 支持的数据类型枚举
 export enum SqliteValueType {
@@ -30,10 +32,23 @@ interface KVEntity {
 }
 
 interface SqliteRawRecord {
+  __rowid?: number;
   key: string;
   value: any;
   created_at?: string | Date;
   updated_at?: string | Date;
+}
+
+interface KeyScanOptions {
+  cursor?: string;
+  limit?: number;
+  order_by?: 'ASC' | 'DESC';
+  prefix?: string;
+}
+
+interface GetOptions {
+  expire?: number;
+  include_timestamps?: boolean;
 }
 
 const TYPE_HANDLERS: Record<SqliteValueType, TypeHandler> = {
@@ -103,11 +118,75 @@ function dedupeEntriesByKey(entries: Array<[string, any]>): Array<[string, any]>
   return Array.from(deduped.entries());
 }
 
+function assertSafeIdentifier(name: string, label: string): void {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new Error(`${label} must match ^[A-Za-z_][A-Za-z0-9_]*$`);
+  }
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, '\\$&');
+}
+
+function isMergeableJsonObject(value: unknown): value is Record<string, any> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    (Object.getPrototypeOf(value) === Object.prototype ||
+      Object.getPrototypeOf(value) === null)
+  );
+}
+
+function deepMergeJsonValues(existing_value: any, incoming_value: any): any {
+  if (!isMergeableJsonObject(existing_value) || !isMergeableJsonObject(incoming_value)) {
+    return incoming_value;
+  }
+
+  const merged: Record<string, any> = { ...existing_value };
+
+  for (const [key, incoming_child] of Object.entries(incoming_value)) {
+    merged[key] =
+      key in merged
+        ? deepMergeJsonValues(merged[key], incoming_child)
+        : incoming_child;
+  }
+
+  return merged;
+}
+
+function appendSqliteLimitOffset(
+  query: string,
+  params: any[],
+  options?: {
+    limit?: number;
+    offset?: number;
+  },
+): string {
+  const has_limit = typeof options?.limit === 'number' && options.limit > 0;
+  const has_offset = typeof options?.offset === 'number' && options.offset > 0;
+
+  if (has_limit) {
+    query += ' LIMIT ?';
+    params.push(Math.floor(options!.limit!));
+  } else if (has_offset) {
+    query += ' LIMIT -1';
+  }
+
+  if (has_offset) {
+    query += ' OFFSET ?';
+    params.push(Math.floor(options!.offset!));
+  }
+
+  return query;
+}
+
 export class SqliteKVDatabase {
   private db!: Repository<KVEntity>;
   private data_source: DataSource;
   private initialized = false;
   private initializing_promise: Promise<void> | null = null;
+  private write_lock: Promise<void> = Promise.resolve();
   private table_name: string;
   private custom_kv_store: EntitySchema<KVEntity>;
   private value_type: SqliteValueType;
@@ -118,6 +197,7 @@ export class SqliteKVDatabase {
     table_name: string = 'kv_store',
     value_type: SqliteValueType = SqliteValueType.JSON,
   ) {
+    assertSafeIdentifier(table_name, 'table_name');
     this.table_name = table_name;
     this.value_type = value_type;
     this.type_handler = TYPE_HANDLERS[value_type];
@@ -214,9 +294,60 @@ export class SqliteKVDatabase {
     };
   }
 
+  private async executeQuery<T = any>(
+    query: string,
+    params: any[] = [],
+    query_runner?: QueryRunner,
+  ): Promise<T> {
+    if (query_runner) {
+      return (await query_runner.query(query, params)) as T;
+    }
+
+    return (await this._withRetry(() =>
+      this.data_source.query(query, params),
+    )) as T;
+  }
+
+  private async withTransaction<T>(
+    operation: (query_runner: QueryRunner) => Promise<T>,
+  ): Promise<T> {
+    const query_runner = this.data_source.createQueryRunner();
+    await query_runner.connect();
+    await query_runner.startTransaction();
+
+    try {
+      const result = await operation(query_runner);
+      await query_runner.commitTransaction();
+      return result;
+    } catch (error) {
+      await query_runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await query_runner.release();
+    }
+  }
+
+  private async withWriteLock<T>(operation: () => Promise<T>): Promise<T> {
+    const previous_lock = this.write_lock;
+    let release_lock!: () => void;
+
+    this.write_lock = new Promise<void>((resolve) => {
+      release_lock = resolve;
+    });
+
+    await previous_lock;
+
+    try {
+      return await operation();
+    } finally {
+      release_lock();
+    }
+  }
+
   private async getRawRecordsByKeys(
     keys: string[],
     include_timestamps: boolean,
+    query_runner?: QueryRunner,
   ): Promise<SqliteRawRecord[]> {
     const unique_keys = Array.from(new Set(keys));
     if (unique_keys.length === 0) {
@@ -230,11 +361,10 @@ export class SqliteKVDatabase {
     for (let i = 0; i < unique_keys.length; i += chunk_size) {
       const chunk = unique_keys.slice(i, i + chunk_size);
       const placeholders = chunk.map(() => '?').join(', ');
-      const rows = await this._withRetry(() =>
-        this.data_source.query(
-          `SELECT ${select_fields} FROM "${this.table_name}" WHERE "key" IN (${placeholders})`,
-          chunk,
-        ),
+      const rows = await this.executeQuery<SqliteRawRecord[]>(
+        `SELECT ${select_fields} FROM "${this.table_name}" WHERE "key" IN (${placeholders})`,
+        chunk,
+        query_runner,
       );
       records.push(...rows);
     }
@@ -242,7 +372,45 @@ export class SqliteKVDatabase {
     return records;
   }
 
-  private async upsertEntries(entries: Array<[string, any]>): Promise<void> {
+  private async getRawRecordByKey(
+    key: string,
+    query_runner?: QueryRunner,
+  ): Promise<SqliteRawRecord | null> {
+    const rows = await this.executeQuery<SqliteRawRecord[]>(
+      `SELECT rowid AS "__rowid", "key", "value", "created_at", "updated_at" FROM "${this.table_name}" WHERE "key" = ? LIMIT 1`,
+      [key],
+      query_runner,
+    );
+    return rows[0] || null;
+  }
+
+  private async deleteRecordIfCurrent(
+    record: SqliteRawRecord,
+    query_runner?: QueryRunner,
+  ): Promise<boolean> {
+    if (record.__rowid == null || record.updated_at == null) {
+      return false;
+    }
+
+    await this.executeQuery(
+      `DELETE FROM "${this.table_name}" WHERE rowid = ? AND "updated_at" = ?`,
+      [record.__rowid, record.updated_at],
+      query_runner,
+    );
+
+    const rows = await this.executeQuery<Array<{ count?: number | string }>>(
+      `SELECT changes() AS "count"`,
+      [],
+      query_runner,
+    );
+
+    return Number((rows[0] as { count?: number | string })?.count || 0) > 0;
+  }
+
+  private async upsertEntries(
+    entries: Array<[string, any]>,
+    query_runner?: QueryRunner,
+  ): Promise<void> {
     const deduped_entries = dedupeEntriesByKey(entries);
     if (deduped_entries.length === 0) {
       return;
@@ -264,19 +432,142 @@ export class SqliteKVDatabase {
         params.push(key, this.type_handler.serialize(value));
       }
 
-      await this._withRetry(() =>
-        this.data_source.query(
-          `
-            INSERT INTO "${this.table_name}" ("key", "value", "created_at", "updated_at")
-            VALUES ${values_sql.join(', ')}
-            ON CONFLICT("key") DO UPDATE SET
-              "value" = excluded."value",
-              "updated_at" = CURRENT_TIMESTAMP
-          `,
-          params,
-        ),
+      await this.executeQuery(
+        `
+          INSERT INTO "${this.table_name}" ("key", "value", "created_at", "updated_at")
+          VALUES ${values_sql.join(', ')}
+          ON CONFLICT("key") DO UPDATE SET
+            "value" = excluded."value",
+            "updated_at" = CURRENT_TIMESTAMP
+        `,
+        params,
+        query_runner,
       );
     }
+  }
+
+  private async deleteKeys(
+    keys: string[],
+    query_runner?: QueryRunner,
+  ): Promise<number> {
+    const unique_keys = Array.from(new Set(keys));
+    if (unique_keys.length === 0) {
+      return 0;
+    }
+
+    let deleted_count = 0;
+
+    for (let i = 0; i < unique_keys.length; i += SQLITE_SAFE_IN_BATCH_SIZE) {
+      const chunk = unique_keys.slice(i, i + SQLITE_SAFE_IN_BATCH_SIZE);
+      const placeholders = chunk.map(() => '?').join(', ');
+      await this.executeQuery(
+        `DELETE FROM "${this.table_name}" WHERE "key" IN (${placeholders})`,
+        chunk,
+        query_runner,
+      );
+      const rows = await this.executeQuery<Array<{ count?: number | string }>>(
+        `SELECT changes() AS "count"`,
+        [],
+        query_runner,
+      );
+      deleted_count += Number((rows[0] as { count?: number | string })?.count || 0);
+    }
+
+    return deleted_count;
+  }
+
+  private resolveGetOptions(
+    options_or_expire?: number | GetOptions,
+  ): Required<Pick<GetOptions, 'include_timestamps'>> & Pick<GetOptions, 'expire'> {
+    if (typeof options_or_expire === 'number') {
+      return {
+        expire: options_or_expire,
+        include_timestamps: false,
+      };
+    }
+
+    return {
+      expire: options_or_expire?.expire,
+      include_timestamps: options_or_expire?.include_timestamps === true,
+    };
+  }
+
+  private isExpired(created_at: Date, expire?: number): boolean {
+    return (
+      expire !== undefined &&
+      Math.floor(Date.now() / 1000) - Math.floor(created_at.getTime() / 1000) >
+        expire
+    );
+  }
+
+  private serializedValuesEqual(left: any, right: any): boolean {
+    if (Buffer.isBuffer(left) || left instanceof Uint8Array) {
+      const right_buffer =
+        Buffer.isBuffer(right) || right instanceof Uint8Array
+          ? Buffer.from(right)
+          : null;
+      return right_buffer ? Buffer.from(left).equals(right_buffer) : false;
+    }
+
+    if (Buffer.isBuffer(right) || right instanceof Uint8Array) {
+      return false;
+    }
+
+    return left === right;
+  }
+
+  private async putValueIfChanged(
+    key: string,
+    value: any,
+    query_runner?: QueryRunner,
+  ): Promise<boolean> {
+    const existing_record = await this.getRawRecordByKey(key, query_runner);
+    const serialized_value = this.type_handler.serialize(value);
+
+    if (
+      existing_record &&
+      this.serializedValuesEqual(existing_record.value, serialized_value)
+    ) {
+      return false;
+    }
+
+    await this.upsertEntries([[key, value]], query_runner);
+    return true;
+  }
+
+  private async getInternal<T = any>(
+    key: string,
+    options_or_expire?: number | GetOptions,
+    delete_expired: boolean = true,
+  ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null> {
+    await this.ensureInitialized();
+
+    const record = await this.getRawRecordByKey(key);
+    if (!record) {
+      return null;
+    }
+
+    const { expire, include_timestamps } = this.resolveGetOptions(options_or_expire);
+    const created_at = this.normalizeDate(record.created_at);
+
+    if (this.isExpired(created_at, expire)) {
+      if (delete_expired) {
+        await this.withWriteLock(() => this.deleteRecordIfCurrent(record));
+      }
+      return null;
+    }
+
+    const deserialized_value = this.type_handler.deserialize(record.value) as T;
+
+    if (!include_timestamps) {
+      return deserialized_value;
+    }
+
+    return {
+      value: deserialized_value,
+      created_at,
+      updated_at: this.normalizeDate(record.updated_at),
+    };
   }
 
   private async ensureInitialized(): Promise<void> {
@@ -358,7 +649,7 @@ export class SqliteKVDatabase {
 
   async put(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
-    await this.upsertEntries([[key, value]]);
+    await this.withWriteLock(() => this.upsertEntries([[key, value]]));
   }
 
   async get<T = any>(key: string, expire?: number): Promise<T | null>;
@@ -378,49 +669,27 @@ export class SqliteKVDatabase {
           include_timestamps?: boolean;
         },
   ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null> {
-    await this.ensureInitialized();
+    return this.getInternal<T>(key, options_or_expire, true);
+  }
 
-    const rows = await this._withRetry(() =>
-      this.data_source.query(
-        `SELECT "key", "value", "created_at", "updated_at" FROM "${this.table_name}" WHERE "key" = ? LIMIT 1`,
-        [key],
-      ),
-    );
-    const record = rows[0] as SqliteRawRecord | undefined;
-
-    if (!record) {
-      return null;
-    }
-
-    let expire: number | undefined;
-    let include_timestamps = false;
-
-    if (typeof options_or_expire === 'number') {
-      expire = options_or_expire;
-    } else if (options_or_expire) {
-      expire = options_or_expire.expire;
-      include_timestamps = options_or_expire.include_timestamps === true;
-    }
-
-    const created_at = this.normalizeDate(record.created_at);
-    if (
-      expire !== undefined &&
-      Math.floor(Date.now() / 1000) - Math.floor(created_at.getTime() / 1000) >
-        expire
-    ) {
-      await this.delete(key);
-      return null;
-    }
-
-    if (!include_timestamps) {
-      return this.type_handler.deserialize(record.value) as T;
-    }
-
-    return {
-      value: this.type_handler.deserialize(record.value) as T,
-      created_at,
-      updated_at: this.normalizeDate(record.updated_at),
-    };
+  async getIfFresh<T = any>(key: string, expire: number): Promise<T | null>;
+  async getIfFresh<T = any>(
+    key: string,
+    options: {
+      expire: number;
+      include_timestamps?: boolean;
+    },
+  ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null>;
+  async getIfFresh<T = any>(
+    key: string,
+    options_or_expire:
+      | number
+      | {
+          expire: number;
+          include_timestamps?: boolean;
+        },
+  ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null> {
+    return this.getInternal<T>(key, options_or_expire, false);
   }
 
   async merge(key: string, value: any): Promise<void> {
@@ -432,61 +701,80 @@ export class SqliteKVDatabase {
       );
     }
 
-    const existing_value = await this.get(key);
-    let merged_value = value;
+    await this.withWriteLock(() =>
+      this._withRetry(() =>
+        this.withTransaction(async (query_runner) => {
+          const rows = await this.executeQuery<SqliteRawRecord[]>(
+            `SELECT "value" FROM "${this.table_name}" WHERE "key" = ? LIMIT 1`,
+            [key],
+            query_runner,
+          );
+          const existing_value =
+            rows.length > 0 ? this.type_handler.deserialize(rows[0]!.value) : null;
+          const merged_value = deepMergeJsonValues(existing_value, value);
+          const serialized_merged_value = this.type_handler.serialize(merged_value);
 
-    if (
-      existing_value &&
-      typeof existing_value === 'object' &&
-      typeof value === 'object' &&
-      !Array.isArray(existing_value) &&
-      !Array.isArray(value)
-    ) {
-      merged_value = { ...existing_value, ...value };
-    }
+          if (
+            rows.length > 0 &&
+            this.serializedValuesEqual(rows[0]!.value, serialized_merged_value)
+          ) {
+            return;
+          }
 
-    await this.upsertEntries([[key, merged_value]]);
+          await this.upsertEntries([[key, merged_value]], query_runner);
+        }),
+      ),
+    );
   }
 
   async delete(key: string): Promise<boolean> {
     await this.ensureInitialized();
-    await this._withRetry(() =>
-      this.data_source.query(
-        `DELETE FROM "${this.table_name}" WHERE "key" = ?`,
-        [key],
-      ),
-    );
-    const rows = await this._withRetry(() =>
-      this.data_source.query('SELECT changes() AS "count"'),
-    );
-    return Number((rows[0] as { count?: number | string })?.count || 0) > 0;
+    return this.withWriteLock(async () => (await this.deleteKeys([key])) > 0);
   }
 
   async add(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
-    try {
-      await this._withRetry(() =>
+    if (!(await this.putIfAbsent(key, value))) {
+      throw new Error(`Key "${key}" already exists`);
+    }
+  }
+
+  async putIfAbsent(key: string, value: any): Promise<boolean> {
+    await this.ensureInitialized();
+    return this.withWriteLock(async () => {
+      const rows = await this._withRetry(() =>
         this.data_source.query(
           `
             INSERT INTO "${this.table_name}" ("key", "value", "created_at", "updated_at")
             VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT("key") DO NOTHING
+            RETURNING "key"
           `,
           [key, this.type_handler.serialize(value)],
         ),
       );
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (
-        message.includes('UNIQUE constraint failed') ||
-        message.includes('SQLITE_CONSTRAINT')
-      ) {
-        throw new Error(`Key "${key}" already exists`);
-      }
-      throw error;
-    }
+      return rows.length > 0;
+    });
+  }
+
+  async putIfChanged(key: string, value: any): Promise<boolean> {
+    await this.ensureInitialized();
+    return this.withWriteLock(() =>
+      this._withRetry(() =>
+        this.withTransaction((query_runner) =>
+          this.putValueIfChanged(key, value, query_runner),
+        ),
+      ),
+    );
   }
 
   async close(): Promise<void> {
+    if (this.initializing_promise) {
+      await this.initializing_promise;
+    }
+
+    await this.write_lock;
+
     if (this.data_source.isInitialized) {
       await this.data_source.destroy();
     }
@@ -507,6 +795,38 @@ export class SqliteKVDatabase {
   > {
     await this.ensureInitialized();
     const include_timestamps = options?.include_timestamps === true;
+
+    if (
+      !options?.created_after &&
+      !options?.created_before &&
+      !options?.updated_after &&
+      !options?.updated_before &&
+      (options?.offset === undefined || options.offset <= 0) &&
+      (options?.limit === undefined || options.limit <= 0)
+    ) {
+      const data: Record<
+        string,
+        T | { value: T; created_at: Date; updated_at: Date }
+      > = {};
+      let cursor: string | undefined;
+
+      while (true) {
+        const page = await this.scan<T>({
+          cursor,
+          limit: KV_SCAN_PAGE_SIZE,
+          include_timestamps,
+        });
+
+        Object.assign(data, page.data);
+
+        if (!page.next_cursor) {
+          return data;
+        }
+
+        cursor = page.next_cursor;
+      }
+    }
+
     const select_fields = this.buildSelectFields(include_timestamps);
     const where_conditions: string[] = [];
     const params: any[] = [];
@@ -534,18 +854,9 @@ export class SqliteKVDatabase {
     }
     query += ' ORDER BY "key" ASC';
 
-    if (typeof options?.limit === 'number' && options.limit > 0) {
-      query += ' LIMIT ?';
-      params.push(Math.floor(options.limit));
-    }
-    if (typeof options?.offset === 'number' && options.offset > 0) {
-      query += ' OFFSET ?';
-      params.push(Math.floor(options.offset));
-    }
+    query = appendSqliteLimitOffset(query, params, options);
 
-    const records = (await this._withRetry(() =>
-      this.data_source.query(query, params),
-    )) as SqliteRawRecord[];
+    const records = await this.executeQuery<SqliteRawRecord[]>(query, params);
 
     return records.reduce(
       (acc, record) => {
@@ -637,12 +948,22 @@ export class SqliteKVDatabase {
 
   async keys(): Promise<string[]> {
     await this.ensureInitialized();
-    const records = await this._withRetry(() =>
-      this.data_source.query(
-        `SELECT "key" FROM "${this.table_name}" ORDER BY "key" ASC`,
-      ),
-    );
-    return (records as Array<{ key: string }>).map((record) => record.key);
+    const keys: string[] = [];
+    let cursor: string | undefined;
+
+    while (true) {
+      const page = await this.scanKeys({
+        cursor,
+        limit: KV_SCAN_PAGE_SIZE,
+      });
+      keys.push(...page.data);
+
+      if (!page.next_cursor) {
+        return keys;
+      }
+
+      cursor = page.next_cursor;
+    }
   }
 
   async has(key: string): Promise<boolean> {
@@ -656,55 +977,139 @@ export class SqliteKVDatabase {
     return rows.length > 0;
   }
 
+  async scanKeys(
+    options?: KeyScanOptions,
+  ): Promise<{ data: string[]; next_cursor: string | null }> {
+    await this.ensureInitialized();
+
+    const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
+    const cursor_operator = order_by === 'DESC' ? '<' : '>';
+    const limit = normalizePositiveInteger(options?.limit, 100, 1000);
+    const params: any[] = [];
+    const where_conditions: string[] = [];
+
+    if (options?.prefix) {
+      params.push(`${escapeLikePattern(options.prefix)}%`);
+      where_conditions.push(`"key" LIKE ? ESCAPE '\\'`);
+    }
+
+    if (options?.cursor) {
+      params.push(options.cursor);
+      where_conditions.push(`"key" ${cursor_operator} ?`);
+    }
+
+    let query = `SELECT "key" FROM "${this.table_name}"`;
+    if (where_conditions.length > 0) {
+      query += ` WHERE ${where_conditions.join(' AND ')}`;
+    }
+    query += ` ORDER BY "key" ${order_by} LIMIT ?`;
+    params.push(limit + 1);
+
+    const rows = (await this.executeQuery<Array<{ key: string }>>(
+      query,
+      params,
+    )) as Array<{ key: string }>;
+    const has_more = rows.length > limit;
+    const page_rows = has_more ? rows.slice(0, limit) : rows;
+
+    return {
+      data: page_rows.map((row) => row.key),
+      next_cursor: has_more ? page_rows[page_rows.length - 1]?.key || null : null,
+    };
+  }
+
+  async scan<T = any>(
+    options?: KeyScanOptions & { include_timestamps?: boolean },
+  ): Promise<{
+    data: Record<string, T | { value: T; created_at: Date; updated_at: Date }>;
+    next_cursor: string | null;
+  }> {
+    await this.ensureInitialized();
+
+    const include_timestamps = options?.include_timestamps === true;
+    const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
+    const cursor_operator = order_by === 'DESC' ? '<' : '>';
+    const limit = normalizePositiveInteger(options?.limit, 100, 1000);
+    const params: any[] = [];
+    const where_conditions: string[] = [];
+
+    if (options?.prefix) {
+      params.push(`${escapeLikePattern(options.prefix)}%`);
+      where_conditions.push(`"key" LIKE ? ESCAPE '\\'`);
+    }
+
+    if (options?.cursor) {
+      params.push(options.cursor);
+      where_conditions.push(`"key" ${cursor_operator} ?`);
+    }
+
+    let query = `SELECT ${this.buildSelectFields(include_timestamps)} FROM "${this.table_name}"`;
+    if (where_conditions.length > 0) {
+      query += ` WHERE ${where_conditions.join(' AND ')}`;
+    }
+    query += ` ORDER BY "key" ${order_by} LIMIT ?`;
+    params.push(limit + 1);
+
+    const rows = await this.executeQuery<SqliteRawRecord[]>(query, params);
+    const has_more = rows.length > limit;
+    const page_rows = has_more ? rows.slice(0, limit) : rows;
+
+    return {
+      data: page_rows.reduce(
+        (acc, record) => {
+          acc[record.key] = this.formatRecordValue<T>(record, include_timestamps);
+          return acc;
+        },
+        {} as Record<
+          string,
+          T | { value: T; created_at: Date; updated_at: Date }
+        >,
+      ),
+      next_cursor: has_more
+        ? page_rows[page_rows.length - 1]?.key || null
+        : null,
+    };
+  }
+
   async putMany(
     entries: Array<[string, any]>,
     batch_size: number = SQLITE_SAFE_WRITE_BATCH_SIZE,
   ): Promise<void> {
     await this.ensureInitialized();
-    const safe_batch_size = normalizePositiveInteger(
-      batch_size,
-      SQLITE_SAFE_WRITE_BATCH_SIZE,
-      SQLITE_SAFE_WRITE_BATCH_SIZE,
-    );
-    const deduped_entries = dedupeEntriesByKey(entries);
+    await this.withWriteLock(() =>
+      this._withRetry(() =>
+        this.withTransaction(async (query_runner) => {
+          const safe_batch_size = normalizePositiveInteger(
+            batch_size,
+            SQLITE_SAFE_WRITE_BATCH_SIZE,
+            SQLITE_SAFE_WRITE_BATCH_SIZE,
+          );
+          const deduped_entries = dedupeEntriesByKey(entries);
 
-    for (let i = 0; i < deduped_entries.length; i += safe_batch_size) {
-      await this.upsertEntries(deduped_entries.slice(i, i + safe_batch_size));
-    }
+          for (let i = 0; i < deduped_entries.length; i += safe_batch_size) {
+            await this.upsertEntries(
+              deduped_entries.slice(i, i + safe_batch_size),
+              query_runner,
+            );
+          }
+        }),
+      ),
+    );
   }
 
   async deleteMany(keys: string[]): Promise<number> {
     await this.ensureInitialized();
-    const unique_keys = Array.from(new Set(keys));
-    if (unique_keys.length === 0) {
-      return 0;
-    }
-
-    let deleted_count = 0;
-    for (let i = 0; i < unique_keys.length; i += SQLITE_SAFE_IN_BATCH_SIZE) {
-      const chunk = unique_keys.slice(i, i + SQLITE_SAFE_IN_BATCH_SIZE);
-      const placeholders = chunk.map(() => '?').join(', ');
-      await this._withRetry(() =>
-        this.data_source.query(
-          `DELETE FROM "${this.table_name}" WHERE "key" IN (${placeholders})`,
-          chunk,
-        ),
-      );
-      const rows = await this._withRetry(() =>
-        this.data_source.query('SELECT changes() AS "count"'),
-      );
-      deleted_count += Number(
-        (rows[0] as { count?: number | string })?.count || 0,
-      );
-    }
-
-    return deleted_count;
+    return this.withWriteLock(() =>
+      this._withRetry(() =>
+        this.withTransaction((query_runner) => this.deleteKeys(keys, query_runner)),
+      ),
+    );
   }
 
   async clear(): Promise<void> {
     await this.ensureInitialized();
-    await this._withRetry(() =>
-      this.data_source.query(`DELETE FROM "${this.table_name}"`),
+    await this.withWriteLock(() =>
+      this._withRetry(() => this.data_source.query(`DELETE FROM "${this.table_name}"`)),
     );
   }
 
@@ -731,8 +1136,8 @@ export class SqliteKVDatabase {
 
       const rows = await this._withRetry(() =>
         this.data_source.query(
-          `SELECT "key" FROM "${this.table_name}" WHERE "value" LIKE ? ORDER BY "key" ASC`,
-          [`%${this.type_handler.serialize(value)}%`],
+          `SELECT "key" FROM "${this.table_name}" WHERE "value" LIKE ? ESCAPE '\\' ORDER BY "key" ASC`,
+          [`%${escapeLikePattern(String(this.type_handler.serialize(value)))}%`],
         ),
       );
       return (rows as Array<{ key: string }>).map((record) => record.key);
@@ -745,27 +1150,6 @@ export class SqliteKVDatabase {
       ),
     );
     return (rows as Array<{ key: string }>).map((record) => record.key);
-  }
-
-  async findByCondition(
-    condition: (value: any) => boolean,
-  ): Promise<Map<string, any>> {
-    await this.ensureInitialized();
-    const rows = (await this._withRetry(() =>
-      this.data_source.query(
-        `SELECT "key", "value" FROM "${this.table_name}" ORDER BY "key" ASC`,
-      ),
-    )) as Array<{ key: string; value: any }>;
-
-    const result = new Map<string, any>();
-    for (const record of rows) {
-      const deserialized = this.type_handler.deserialize(record.value);
-      if (condition(deserialized)) {
-        result.set(record.key, deserialized);
-      }
-    }
-
-    return result;
   }
 
   getValueType(): SqliteValueType {
@@ -798,27 +1182,18 @@ export class SqliteKVDatabase {
 
     const include_timestamps = options?.include_timestamps === true;
     const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
-    const params: any[] = [prefix, `${prefix}${String.fromCharCode(255)}`];
+    const params: any[] = [`${escapeLikePattern(prefix)}%`];
     const select_fields = this.buildSelectFields(include_timestamps);
     let query = `
       SELECT ${select_fields}
       FROM "${this.table_name}"
-      WHERE "key" >= ? AND "key" < ?
+      WHERE "key" LIKE ? ESCAPE '\\'
       ORDER BY "key" ${order_by}
     `;
 
-    if (typeof options?.limit === 'number' && options.limit > 0) {
-      query += ' LIMIT ?';
-      params.push(Math.floor(options.limit));
-    }
-    if (typeof options?.offset === 'number' && options.offset > 0) {
-      query += ' OFFSET ?';
-      params.push(Math.floor(options.offset));
-    }
+    query = appendSqliteLimitOffset(query, params, options);
 
-    const rows = (await this._withRetry(() =>
-      this.data_source.query(query, params),
-    )) as SqliteRawRecord[];
+    const rows = await this.executeQuery<SqliteRawRecord[]>(query, params);
 
     return rows.reduce(
       (acc, record) => {

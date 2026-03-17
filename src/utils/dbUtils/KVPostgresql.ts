@@ -1,4 +1,4 @@
-import { DataSource, Repository, Table, In } from 'typeorm';
+import { DataSource, Repository, Table, In, QueryRunner } from 'typeorm';
 import {
   Entity,
   PrimaryColumn,
@@ -141,12 +141,16 @@ interface SaveArrayOptions {
  * );
  */
 export class PGKVDatabase {
+  private static readonly POSTGRES_SAFE_WRITE_BATCH_SIZE = 5000;
+  private static readonly POSTGRES_SAFE_IN_BATCH_SIZE = 10000;
   db: Repository<KVEntity>;
   private data_source: DataSource;
   private initialized = false;
+  private initializing_promise: Promise<void> | null = null;
   private table_name: string;
   private value_type: ValueType;
   private custom_kv_store: any;
+  private readonly query_alias = 'kv';
 
   constructor(
     datasource_or_url?: string,
@@ -295,9 +299,248 @@ export class PGKVDatabase {
     return value; // TypeORM 会自动处理类型转换
   }
 
+  private serializeValueForWrite(value: any): any {
+    if (this.value_type === 'jsonb') {
+      return JSON.stringify(value);
+    }
+
+    return this.serializeValue(value);
+  }
+
+  private normalizeJsonPath(path: string): string[] {
+    const segments = path
+      .split('.')
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+
+    if (segments.length === 0) {
+      throw new Error('JSON path cannot be empty');
+    }
+
+    return segments;
+  }
+
+  private buildJsonExtractTextSql(
+    column_expression: string,
+    param_index: number,
+  ): string {
+    return `jsonb_extract_path_text(${column_expression}, VARIADIC $${param_index}::text[])`;
+  }
+
+  private buildJsonExtractSql(
+    column_expression: string,
+    param_index: number,
+  ): string {
+    return `jsonb_extract_path(${column_expression}, VARIADIC $${param_index}::text[])`;
+  }
+
+  private getSafeWriteBatchSize(batch_size: number): number {
+    const normalized_batch_size = this.normalizePositiveInteger(
+      batch_size,
+      PGKVDatabase.POSTGRES_SAFE_WRITE_BATCH_SIZE,
+    );
+    return Math.max(
+      1,
+      Math.min(
+        normalized_batch_size,
+        PGKVDatabase.POSTGRES_SAFE_WRITE_BATCH_SIZE,
+      ),
+    );
+  }
+
+  private getSafeInBatchSize(batch_size: number): number {
+    const normalized_batch_size = this.normalizePositiveInteger(
+      batch_size,
+      PGKVDatabase.POSTGRES_SAFE_IN_BATCH_SIZE,
+    );
+    return Math.max(
+      1,
+      Math.min(
+        normalized_batch_size,
+        PGKVDatabase.POSTGRES_SAFE_IN_BATCH_SIZE,
+      ),
+    );
+  }
+
+  private normalizePositiveInteger(value: number, fallback: number): number {
+    if (!Number.isFinite(value)) {
+      return fallback;
+    }
+
+    return Math.max(1, Math.floor(value));
+  }
+
+  private buildSelectFields(include_timestamps: boolean = false): string[] {
+    const alias = this.query_alias;
+    const select_fields = [
+      `${alias}.key as "key"`,
+      `${alias}.value as "value"`,
+    ];
+
+    if (include_timestamps) {
+      select_fields.push(
+        `${alias}.created_at as "created_at"`,
+        `${alias}.updated_at as "updated_at"`,
+      );
+    }
+
+    return select_fields;
+  }
+
+  private mapRawRecord<T = any>(
+    record: any,
+    include_timestamps: boolean = false,
+  ): {
+    key: string;
+    value: T;
+    created_at?: Date;
+    updated_at?: Date;
+  } {
+    const result: {
+      key: string;
+      value: T;
+      created_at?: Date;
+      updated_at?: Date;
+    } = {
+      key: record.key,
+      value: this.deserializeValue(record.value),
+    };
+
+    if (include_timestamps) {
+      result.created_at = record.created_at;
+      result.updated_at = record.updated_at;
+    }
+
+    return result;
+  }
+
+  private dedupeEntriesByKey<T>(entries: Array<[string, T]>): Array<[string, T]> {
+    const deduped_entries = new Map<string, T>();
+
+    for (const [key, value] of entries) {
+      if (deduped_entries.has(key)) {
+        deduped_entries.delete(key);
+      }
+      deduped_entries.set(key, value);
+    }
+
+    return Array.from(deduped_entries.entries());
+  }
+
+  private async getRawRecordsByKeys(
+    keys: string[],
+    select_fields: string[],
+  ): Promise<any[]> {
+    const unique_keys = Array.from(new Set(keys));
+    if (unique_keys.length === 0) {
+      return [];
+    }
+
+    const alias = this.query_alias;
+    const effective_batch_size = this.getSafeInBatchSize(unique_keys.length);
+    const records: any[] = [];
+
+    for (let i = 0; i < unique_keys.length; i += effective_batch_size) {
+      const batch = unique_keys.slice(i, i + effective_batch_size);
+      const batch_records = await this.db
+        .createQueryBuilder(alias)
+        .select(select_fields)
+        .where(`${alias}.key IN (:...keys)`, { keys: batch })
+        .getRawMany();
+      records.push(...batch_records);
+    }
+
+    return records;
+  }
+
+  private async upsertEntries(
+    entries: Array<[string, any]>,
+    query_runner?: QueryRunner,
+  ): Promise<void> {
+    if (entries.length === 0) {
+      return;
+    }
+
+    const serialized_entries = this.dedupeEntriesByKey(entries).map(([key, value]) => [
+      key,
+      this.serializeValueForWrite(value),
+    ]) as Array<[string, any]>;
+
+    await this.upsertSerializedEntries(serialized_entries, query_runner);
+  }
+
+  private async upsertSerializedEntries(
+    entries: Array<[string, any]>,
+    query_runner?: QueryRunner,
+  ): Promise<void> {
+    if (entries.length === 0) {
+      return;
+    }
+
+    const normalized_entries = this.dedupeEntriesByKey(entries);
+
+    const values_sql: string[] = [];
+    const parameters: any[] = [];
+    let param_index = 1;
+
+    for (const [key, value] of normalized_entries) {
+      values_sql.push(`($${param_index}, $${param_index + 1}, NOW(), NOW())`);
+      parameters.push(key, value);
+      param_index += 2;
+    }
+
+    const executor = query_runner ?? this.data_source;
+    await executor.query(
+      `
+        INSERT INTO "${this.table_name}" (key, value, created_at, updated_at)
+        VALUES ${values_sql.join(',')}
+        ON CONFLICT (key) DO UPDATE SET
+          value = EXCLUDED.value,
+          updated_at = NOW()
+      `,
+      parameters,
+    );
+  }
+
+  private async deleteKeys(
+    keys: string[],
+    query_runner?: QueryRunner,
+  ): Promise<number> {
+    if (keys.length === 0) {
+      return 0;
+    }
+
+    const unique_keys = Array.from(new Set(keys));
+    const effective_batch_size = this.getSafeInBatchSize(unique_keys.length);
+    let affected = 0;
+
+    for (let i = 0; i < unique_keys.length; i += effective_batch_size) {
+      const batch = unique_keys.slice(i, i + effective_batch_size);
+      const result = query_runner
+        ? await query_runner.manager.delete(this.custom_kv_store, {
+            key: In(batch),
+          })
+        : await this.db.delete({ key: In(batch) });
+      affected += result.affected || 0;
+    }
+
+    return affected;
+  }
+
   private async ensureInitialized(): Promise<void> {
-    if (!this.initialized) {
-      await this.data_source.initialize();
+    if (this.initialized && this.data_source?.isInitialized && this.db) {
+      return;
+    }
+
+    if (this.initializing_promise) {
+      await this.initializing_promise;
+      return;
+    }
+
+    this.initializing_promise = (async () => {
+      if (!this.data_source.isInitialized) {
+        await this.data_source.initialize();
+      }
       this.db = this.data_source.getRepository(this.custom_kv_store);
 
       // 手动创建表和索引
@@ -334,33 +577,41 @@ export class PGKVDatabase {
             }),
             true, // ifNotExists: true
           );
+        }
 
-          // 只为 JSONB 类型创建 GIN 索引
-          if (this.value_type === 'jsonb') {
-            try {
-              await query_runner.query(
-                `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_value_gin" ON "${this.table_name}" USING gin (value);`,
-              );
-            } catch (err) {
-              console.warn(`创建索引失败，可能已存在: ${err}`);
-            }
-          } else {
-            // 为其他类型创建 B-tree 索引
-            try {
-              await query_runner.query(
-                `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_value_btree" ON "${this.table_name}" (value);`,
-              );
-            } catch (err) {
-              console.warn(`创建索引失败，可能已存在: ${err}`);
-            }
+        // 无论表是否已存在，都确保索引存在
+        if (this.value_type === 'jsonb') {
+          try {
+            await query_runner.query(
+              `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_value_gin" ON "${this.table_name}" USING gin (value);`,
+            );
+          } catch (err) {
+            console.warn(`创建索引失败，可能已存在: ${err}`);
           }
+        } else {
+          try {
+            await query_runner.query(
+              `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_value_btree" ON "${this.table_name}" (value);`,
+            );
+          } catch (err) {
+            console.warn(`创建索引失败，可能已存在: ${err}`);
+          }
+        }
+
+        try {
+          await query_runner.query(
+            `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_created_at" ON "${this.table_name}" ("created_at")`,
+          );
+          await query_runner.query(
+            `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_updated_at" ON "${this.table_name}" ("updated_at")`,
+          );
+        } catch (err) {
+          console.warn(`创建时间索引失败，可能已存在: ${err}`);
         }
 
         // 只为 JSONB 类型创建 jsonb_deep_merge 函数
         if (this.value_type === 'jsonb') {
           await query_runner.query(`
-            DROP FUNCTION IF EXISTS jsonb_deep_merge(jsonb, jsonb);
-            
             CREATE OR REPLACE FUNCTION jsonb_deep_merge(a jsonb, b jsonb)
             RETURNS jsonb AS $$
             DECLARE
@@ -387,15 +638,18 @@ export class PGKVDatabase {
       }
 
       this.initialized = true;
+    })();
+
+    try {
+      await this.initializing_promise;
+    } finally {
+      this.initializing_promise = null;
     }
   }
 
   async put(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
-    await this.db.save({
-      key,
-      value: this.serializeValue(value),
-    });
+    await this.upsertEntries([[key, value]]);
   }
 
   async merge(key: string, partial_value: any): Promise<boolean> {
@@ -441,19 +695,26 @@ export class PGKVDatabase {
         },
   ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null> {
     await this.ensureInitialized();
-    const record = await this.db.findOne({ where: { key } });
+    const include_timestamps =
+      typeof options_or_expire === 'object' &&
+      options_or_expire?.include_timestamps === true;
+    const records = await this.getRawRecordsByKeys(
+      [key],
+      this.buildSelectFields(include_timestamps),
+    );
+    const record = records[0];
 
     if (!record) return null;
 
     // 处理参数类型 - 兼容旧的expire参数和新的options对象
     let expire: number | undefined;
-    let include_timestamps = false;
+    let should_include_timestamps = include_timestamps;
 
     if (typeof options_or_expire === 'number') {
       expire = options_or_expire;
     } else if (options_or_expire && typeof options_or_expire === 'object') {
       expire = options_or_expire.expire;
-      include_timestamps = options_or_expire.include_timestamps || false;
+      should_include_timestamps = options_or_expire.include_timestamps || false;
     }
 
     // 如果设置了过期时间，检查是否过期
@@ -470,7 +731,7 @@ export class PGKVDatabase {
     const deserialized_value = this.deserializeValue(record.value);
 
     // 如果需要包含时间戳，返回包含时间戳的对象
-    if (include_timestamps) {
+    if (should_include_timestamps) {
       return {
         value: deserialized_value,
         created_at: record.created_at,
@@ -509,6 +770,7 @@ export class PGKVDatabase {
     }>
   > {
     await this.ensureInitialized();
+    const alias = this.query_alias;
 
     if (!prefix) {
       throw new Error('Prefix cannot be empty');
@@ -525,37 +787,24 @@ export class PGKVDatabase {
       created_at_before,
     } = options || {};
 
-    // 根据是否需要时间戳选择字段
-    const select_fields = [
-      `${this.table_name}.key as "key"`,
-      `${this.table_name}.value as "value"`,
-    ];
-
-    if (include_timestamps) {
-      select_fields.push(
-        `${this.table_name}.created_at as "created_at"`,
-        `${this.table_name}.updated_at as "updated_at"`,
-      );
-    }
-
     // 始终使用高效的范围查询 - 充分利用主键的 B-tree 索引
     // key >= 'prefix' AND key < 'prefix' + '\xFF'
     const query_builder = this.db
-      .createQueryBuilder(this.table_name)
-      .select(select_fields)
-      .where(`${this.table_name}.key >= :start_prefix`, {
+      .createQueryBuilder(alias)
+      .select(this.buildSelectFields(include_timestamps))
+      .where(`${alias}.key >= :start_prefix`, {
         start_prefix: prefix,
       })
-      .andWhere(`${this.table_name}.key < :end_prefix`, {
+      .andWhere(`${alias}.key < :end_prefix`, {
         end_prefix: prefix + '\xFF', // 使用 \xFF 作为范围上限
       })
-      .orderBy(`${this.table_name}.key`, order_by);
+      .orderBy(`${alias}.key`, order_by);
 
     // 添加时间过滤条件
     if (created_at_after !== undefined) {
       if (!isNaN(created_at_after) && created_at_after > 0) {
         query_builder.andWhere(
-          `${this.table_name}.created_at > :created_at_after`,
+          `${alias}.created_at > :created_at_after`,
           {
             created_at_after: new Date(created_at_after),
           },
@@ -566,7 +815,7 @@ export class PGKVDatabase {
     if (created_at_before !== undefined) {
       if (!isNaN(created_at_before) && created_at_before > 0) {
         query_builder.andWhere(
-          `${this.table_name}.created_at < :created_at_before`,
+          `${alias}.created_at < :created_at_before`,
           {
             created_at_before: new Date(created_at_before),
           },
@@ -574,64 +823,26 @@ export class PGKVDatabase {
       }
     }
 
-    // 检查是否有时间过滤条件，如果有则忽略 limit 和 offset
-    const has_time_filter =
-      created_at_after !== undefined || created_at_before !== undefined;
+    if (contains) {
+      const like_operator = case_sensitive ? 'LIKE' : 'ILIKE';
+      query_builder.andWhere(`${alias}.key ${like_operator} :contains_pattern`, {
+        contains_pattern: `%${contains}%`,
+      });
+    }
 
-    // 如果有 contains 过滤或时间过滤，不在数据库层限制 limit 和 offset
-    // 在应用层过滤后再应用分页，确保结果准确性
-    if (!contains && !has_time_filter) {
-      // 只有在没有 contains 过滤和时间过滤时才在数据库层应用分页
-      if (limit !== undefined) {
-        query_builder.limit(limit);
-      }
+    if (limit !== undefined) {
+      query_builder.limit(limit);
+    }
 
-      if (offset !== undefined) {
-        query_builder.offset(offset);
-      }
+    if (offset !== undefined) {
+      query_builder.offset(offset);
     }
 
     try {
       const results = await query_builder.getRawMany();
-
-      // 反序列化值
-      let processed_results = results.map((record) => {
-        const result: any = {
-          key: record.key,
-          value: this.deserializeValue(record.value),
-        };
-
-        if (include_timestamps) {
-          result.created_at = record.created_at;
-          result.updated_at = record.updated_at;
-        }
-
-        return result;
-      });
-
-      // 如果有 contains 条件，在应用层进行高效过滤
-      if (contains) {
-        const search_term = case_sensitive ? contains : contains.toLowerCase();
-        processed_results = processed_results.filter((record) => {
-          const key_to_search = case_sensitive
-            ? record.key
-            : record.key.toLowerCase();
-          return key_to_search.includes(search_term);
-        });
-      }
-
-      // 如果有时间过滤或 contains 过滤，在应用层应用 offset 和 limit
-      if (contains || has_time_filter) {
-        // 应用原始的 offset 和 limit
-        if (offset !== undefined) {
-          processed_results = processed_results.slice(offset);
-        }
-        if (limit !== undefined) {
-          processed_results = processed_results.slice(0, limit);
-        }
-      }
-
-      return processed_results;
+      return results.map((record) =>
+        this.mapRawRecord<T>(record, include_timestamps),
+      );
     } catch (error) {
       console.error('getWithPrefix query error:', error);
       throw error;
@@ -663,6 +874,7 @@ export class PGKVDatabase {
     }>
   > {
     await this.ensureInitialized();
+    const alias = this.query_alias;
 
     if (!substring) {
       throw new Error('Substring cannot be empty');
@@ -681,27 +893,14 @@ export class PGKVDatabase {
       `Performance Warning: getWithContains('${substring}') will scan all records. Consider using getWithPrefix() if possible.`,
     );
 
-    // 根据是否需要时间戳选择字段
-    const select_fields = [
-      `${this.table_name}.key as "key"`,
-      `${this.table_name}.value as "value"`,
-    ];
-
-    if (include_timestamps) {
-      select_fields.push(
-        `${this.table_name}.created_at as "created_at"`,
-        `${this.table_name}.updated_at as "updated_at"`,
-      );
-    }
-
     const like_operator = case_sensitive ? 'LIKE' : 'ILIKE';
     const query_builder = this.db
-      .createQueryBuilder(this.table_name)
-      .select(select_fields)
-      .where(`${this.table_name}.key ${like_operator} :pattern`, {
+      .createQueryBuilder(alias)
+      .select(this.buildSelectFields(include_timestamps))
+      .where(`${alias}.key ${like_operator} :pattern`, {
         pattern: `%${substring}%`,
       })
-      .orderBy(`${this.table_name}.key`, order_by);
+      .orderBy(`${alias}.key`, order_by);
 
     if (limit !== undefined) {
       query_builder.limit(limit);
@@ -713,20 +912,9 @@ export class PGKVDatabase {
 
     try {
       const results = await query_builder.getRawMany();
-
-      return results.map((record) => {
-        const result: any = {
-          key: record.key,
-          value: this.deserializeValue(record.value),
-        };
-
-        if (include_timestamps) {
-          result.created_at = record.created_at;
-          result.updated_at = record.updated_at;
-        }
-
-        return result;
-      });
+      return results.map((record) =>
+        this.mapRawRecord<T>(record, include_timestamps),
+      );
     } catch (error) {
       console.error('getWithContains query error:', error);
       throw error;
@@ -758,6 +946,7 @@ export class PGKVDatabase {
     }>
   > {
     await this.ensureInitialized();
+    const alias = this.query_alias;
 
     if (!suffix) {
       throw new Error('Suffix cannot be empty');
@@ -776,27 +965,14 @@ export class PGKVDatabase {
       `Performance Warning: getWithSuffix('${suffix}') requires full table scan. Consider using reverse index or redesigning key structure.`,
     );
 
-    // 根据是否需要时间戳选择字段
-    const select_fields = [
-      `${this.table_name}.key as "key"`,
-      `${this.table_name}.value as "value"`,
-    ];
-
-    if (include_timestamps) {
-      select_fields.push(
-        `${this.table_name}.created_at as "created_at"`,
-        `${this.table_name}.updated_at as "updated_at"`,
-      );
-    }
-
     const like_operator = case_sensitive ? 'LIKE' : 'ILIKE';
     const query_builder = this.db
-      .createQueryBuilder(this.table_name)
-      .select(select_fields)
-      .where(`${this.table_name}.key ${like_operator} :pattern`, {
+      .createQueryBuilder(alias)
+      .select(this.buildSelectFields(include_timestamps))
+      .where(`${alias}.key ${like_operator} :pattern`, {
         pattern: `%${suffix}`,
       })
-      .orderBy(`${this.table_name}.key`, order_by);
+      .orderBy(`${alias}.key`, order_by);
 
     if (limit !== undefined) {
       query_builder.limit(limit);
@@ -808,20 +984,9 @@ export class PGKVDatabase {
 
     try {
       const results = await query_builder.getRawMany();
-
-      return results.map((record) => {
-        const result: any = {
-          key: record.key,
-          value: this.deserializeValue(record.value),
-        };
-
-        if (include_timestamps) {
-          result.created_at = record.created_at;
-          result.updated_at = record.updated_at;
-        }
-
-        return result;
-      });
+      return results.map((record) =>
+        this.mapRawRecord<T>(record, include_timestamps),
+      );
     } catch (error) {
       console.error('getWithSuffix query error:', error);
       throw error;
@@ -876,53 +1041,67 @@ export class PGKVDatabase {
 
   async isValueExists(value: any): Promise<boolean> {
     await this.ensureInitialized();
+    const alias = this.query_alias;
 
     if (this.value_type === 'jsonb') {
       const existing = await this.db
-        .createQueryBuilder()
-        .where('value = :value::jsonb', { value: JSON.stringify(value) })
-        .getOne();
+        .createQueryBuilder(alias)
+        .select('1', 'exists')
+        .where(`${alias}.value = :value::jsonb`, {
+          value: JSON.stringify(value),
+        })
+        .limit(1)
+        .getRawOne();
       return !!existing;
     } else if (this.value_type === 'bytea') {
       // 对于 bytea 类型，使用二进制比较
       const serialized_value = this.serializeValue(value);
-      const existing = await this.db.findOne({
-        where: { value: serialized_value },
-      });
+      const existing = await this.db
+        .createQueryBuilder(alias)
+        .select('1', 'exists')
+        .where(`${alias}.value = :value`, {
+          value: serialized_value,
+        })
+        .limit(1)
+        .getRawOne();
       return !!existing;
     } else {
       // 对于非 JSONB 类型，直接比较值
-      const existing = await this.db.findOne({
-        where: { value: this.serializeValue(value) },
-      });
+      const existing = await this.db
+        .createQueryBuilder(alias)
+        .select('1', 'exists')
+        .where(`${alias}.value = :value`, {
+          value: this.serializeValue(value),
+        })
+        .limit(1)
+        .getRawOne();
       return !!existing;
     }
   }
 
   async getValues(value: any): Promise<any> {
     await this.ensureInitialized();
+    const alias = this.query_alias;
+    const query_builder = this.db
+      .createQueryBuilder(alias)
+      .select(this.buildSelectFields(true));
 
     if (this.value_type === 'jsonb') {
-      // Use proper JSONB comparison with query builder
-      const existing = await this.db
-        .createQueryBuilder()
-        .where('value = :value::jsonb', { value: JSON.stringify(value) })
-        .getMany();
-      return existing;
+      query_builder.where(`${alias}.value = :value::jsonb`, {
+        value: JSON.stringify(value),
+      });
     } else if (this.value_type === 'bytea') {
-      // 对于 bytea 类型，使用二进制比较
-      const serialized_value = this.serializeValue(value);
-      const existing = await this.db.find({
-        where: { value: serialized_value },
+      query_builder.where(`${alias}.value = :value`, {
+        value: this.serializeValue(value),
       });
-      return existing;
     } else {
-      // 对于非 JSONB 类型，直接比较值
-      const existing = await this.db.find({
-        where: { value: this.serializeValue(value) },
+      query_builder.where(`${alias}.value = :value`, {
+        value: this.serializeValue(value),
       });
-      return existing;
     }
+
+    const records = await query_builder.getRawMany();
+    return records.map((record) => this.mapRawRecord(record, true));
   }
 
   async delete(key: string): Promise<boolean> {
@@ -956,122 +1135,129 @@ export class PGKVDatabase {
     await this.ensureInitialized();
 
     const { include_timestamps = false } = options || {};
+    const unique_keys = Array.from(new Set(keys));
+    const key_order = new Map(
+      unique_keys.map((key, index) => [key, index] as const),
+    );
+    const records = await this.getRawRecordsByKeys(
+      unique_keys,
+      this.buildSelectFields(include_timestamps),
+    );
 
-    // 根据是否需要时间戳选择要查询的字段
-    const select_fields: (keyof KVEntity)[] = ['key', 'value'];
-    if (include_timestamps) {
-      select_fields.push('created_at', 'updated_at');
-    }
+    records.sort(
+      (a, b) => (key_order.get(a.key) ?? 0) - (key_order.get(b.key) ?? 0),
+    );
 
-    const records = await this.db.findBy({
-      key: In(keys),
-    });
-
-    // Deserialize values if necessary
-    return records.map((record) => {
-      const result: any = {
-        key: record.key,
-        value: this.deserializeValue(record.value),
-      };
-
-      if (include_timestamps) {
-        result.created_at = record.created_at;
-        result.updated_at = record.updated_at;
-      }
-
-      return result;
-    });
+    return records.map((record) =>
+      this.mapRawRecord<T>(record, include_timestamps),
+    );
   }
 
   async add(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
-    const existing = await this.db.findOne({ where: { key } });
-    if (existing) {
-      throw new Error(`Key "${key}" already exists`);
+    try {
+      await this.db.insert({
+        key,
+        value: this.serializeValue(value),
+      });
+    } catch (error: any) {
+      if (error?.code === '23505' || error?.driverError?.code === '23505') {
+        throw new Error(`Key "${key}" already exists`);
+      }
+      throw error;
     }
-    await this.db.save({
-      key,
-      value: this.serializeValue(value),
-    });
   }
 
   async addUniquePair(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
+    const alias = this.query_alias;
 
     if (this.value_type === 'jsonb') {
-      // Use a proper JSONB comparison query
       const existing = await this.db
-        .createQueryBuilder()
-        .where('key = :key', { key })
-        .andWhere('value = :value::jsonb', { value: JSON.stringify(value) })
-        .getOne();
+        .createQueryBuilder(alias)
+        .select('1', 'exists')
+        .where(`${alias}.key = :key`, { key })
+        .andWhere(`${alias}.value = :value::jsonb`, {
+          value: JSON.stringify(value),
+        })
+        .limit(1)
+        .getRawOne();
 
       if (existing) {
         throw new Error(`Key-value pair already exists for key "${key}"`);
       }
     } else if (this.value_type === 'bytea') {
-      // 对于 bytea 类型，使用二进制比较
-      const serialized_value = this.serializeValue(value);
-      const existing = await this.db.findOne({
-        where: {
-          key,
-          value: serialized_value,
-        },
-      });
+      const existing = await this.db
+        .createQueryBuilder(alias)
+        .select('1', 'exists')
+        .where(`${alias}.key = :key`, { key })
+        .andWhere(`${alias}.value = :value`, {
+          value: this.serializeValue(value),
+        })
+        .limit(1)
+        .getRawOne();
 
       if (existing) {
         throw new Error(`Key-value pair already exists for key "${key}"`);
       }
     } else {
-      // 对于非 JSONB 类型，直接比较
-      const existing = await this.db.findOne({
-        where: {
-          key,
+      const existing = await this.db
+        .createQueryBuilder(alias)
+        .select('1', 'exists')
+        .where(`${alias}.key = :key`, { key })
+        .andWhere(`${alias}.value = :value`, {
           value: this.serializeValue(value),
-        },
-      });
+        })
+        .limit(1)
+        .getRawOne();
 
       if (existing) {
         throw new Error(`Key-value pair already exists for key "${key}"`);
       }
     }
 
-    await this.db.save({
-      key,
-      value: this.serializeValue(value),
-    });
+    await this.upsertEntries([[key, value]]);
   }
 
   async addUniqueValue(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
+    const alias = this.query_alias;
 
     if (this.value_type === 'jsonb') {
-      // Use proper JSONB comparison with query builder
       const existing = await this.db
-        .createQueryBuilder()
-        .where('value = :value::jsonb', { value: JSON.stringify(value) })
-        .getOne();
+        .createQueryBuilder(alias)
+        .select(`${alias}.key`, 'key')
+        .where(`${alias}.value = :value::jsonb`, { value: JSON.stringify(value) })
+        .limit(1)
+        .getRawOne();
 
       if (existing) {
         const existing_key = existing.key;
         throw new Error(`Value already exists with key "${existing_key}"`);
       }
     } else if (this.value_type === 'bytea') {
-      // 对于 bytea 类型，使用二进制比较
-      const serialized_value = this.serializeValue(value);
-      const existing = await this.db.findOne({
-        where: { value: serialized_value },
-      });
+      const existing = await this.db
+        .createQueryBuilder(alias)
+        .select(`${alias}.key`, 'key')
+        .where(`${alias}.value = :value`, {
+          value: this.serializeValue(value),
+        })
+        .limit(1)
+        .getRawOne();
 
       if (existing) {
         const existing_key = existing.key;
         throw new Error(`Value already exists with key "${existing_key}"`);
       }
     } else {
-      // 对于非 JSONB 类型，直接比较值
-      const existing = await this.db.findOne({
-        where: { value: this.serializeValue(value) },
-      });
+      const existing = await this.db
+        .createQueryBuilder(alias)
+        .select(`${alias}.key`, 'key')
+        .where(`${alias}.value = :value`, {
+          value: this.serializeValue(value),
+        })
+        .limit(1)
+        .getRawOne();
 
       if (existing) {
         const existing_key = existing.key;
@@ -1079,52 +1265,62 @@ export class PGKVDatabase {
       }
     }
 
-    await this.db.save({
-      key,
-      value: this.serializeValue(value),
-    });
+    await this.upsertEntries([[key, value]]);
   }
 
   async close(): Promise<void> {
-    if (this.initialized && this.data_source?.isInitialized) {
+    if (this.data_source?.isInitialized) {
       await this.data_source.destroy();
-      this.initialized = false;
     }
+    this.initialized = false;
+    this.initializing_promise = null;
   }
 
   // 获取所有键值对，支持分页
   async getAll(offset?: number, limit?: number): Promise<Map<string, any>> {
     await this.ensureInitialized();
-    const options: any = {};
+    const alias = this.query_alias;
+    const query_builder = this.db
+      .createQueryBuilder(alias)
+      .select(this.buildSelectFields())
+      .orderBy(`${alias}.key`, 'ASC');
 
     if (typeof offset === 'number') {
-      options.offset = offset;
+      query_builder.skip(offset);
     }
 
     if (typeof limit === 'number') {
-      options.limit = limit;
+      query_builder.take(limit);
     }
 
-    const records = await this.db.find(options);
+    const records = await query_builder.getRawMany();
     return new Map(
-      records.map((record: { key: any; value: any }) => [
-        record.key,
-        record.value,
-      ]),
+      records.map((record) => [record.key, this.deserializeValue(record.value)]),
     );
   }
 
   // 获取所有键
   async keys(): Promise<string[]> {
     await this.ensureInitialized();
-    const records = await this.db.find({ select: ['key'] });
+    const alias = this.query_alias;
+    const records = await this.db
+      .createQueryBuilder(alias)
+      .select([`${alias}.key as "key"`])
+      .orderBy(`${alias}.key`, 'ASC')
+      .getRawMany();
     return records.map((record: { key: any }) => record.key);
   }
 
   // 检查键是否存在
   async has(key: string): Promise<boolean> {
     await this.ensureInitialized();
-    return (await this.db.count({ where: { key } })) > 0;
+    const record = await this.db
+      .createQueryBuilder(this.query_alias)
+      .select('1', 'exists')
+      .where(`${this.query_alias}.key = :key`, { key })
+      .limit(1)
+      .getRawOne();
+    return !!record;
   }
 
   // 批量添加键值对
@@ -1133,39 +1329,21 @@ export class PGKVDatabase {
     batch_size: number = 1000,
   ): Promise<void> {
     await this.ensureInitialized();
+    const normalized_entries = this.dedupeEntriesByKey(entries);
+    if (normalized_entries.length === 0) {
+      return;
+    }
+
+    const effective_batch_size = this.getSafeWriteBatchSize(batch_size);
 
     const query_runner = this.data_source.createQueryRunner();
     await query_runner.connect();
     await query_runner.startTransaction();
 
     try {
-      // 使用 VALUES 语法构建批量插入语句
-      for (let i = 0; i < entries.length; i += batch_size) {
-        const batch = entries.slice(i, i + batch_size);
-        const values = batch
-          .map(([key, value]) => {
-            let serialized_value: string;
-            if (this.value_type === 'jsonb') {
-              serialized_value = `'${JSON.stringify(value)}'`;
-            } else if (this.value_type === 'bytea') {
-              // 对于 bytea 类型，使用 bytea 字面量语法
-              const buffer = this.serializeValue(value);
-              serialized_value = `'\\x${buffer.toString('hex')}'`;
-            } else {
-              serialized_value = `'${String(value)}'`;
-            }
-            return `('${key}', ${serialized_value}, NOW(), NOW())`;
-          })
-          .join(',');
-
-        await query_runner.query(`
-          INSERT INTO "${this.table_name}" (key, value, created_at, updated_at)
-          VALUES ${values}
-          ON CONFLICT (key) 
-          DO UPDATE SET 
-            value = EXCLUDED.value,
-            updated_at = EXCLUDED.updated_at
-        `);
+      for (let i = 0; i < normalized_entries.length; i += effective_batch_size) {
+        const batch = normalized_entries.slice(i, i + effective_batch_size);
+        await this.upsertEntries(batch, query_runner);
       }
 
       await query_runner.commitTransaction();
@@ -1180,8 +1358,23 @@ export class PGKVDatabase {
   // 批量删除键
   async deleteMany(keys: string[]): Promise<number> {
     await this.ensureInitialized();
-    const result = await this.db.delete({ key: In(keys) });
-    return result.affected || 0;
+    if (keys.length === 0) {
+      return 0;
+    }
+    const query_runner = this.data_source.createQueryRunner();
+    await query_runner.connect();
+    await query_runner.startTransaction();
+
+    try {
+      const affected = await this.deleteKeys(keys, query_runner);
+      await query_runner.commitTransaction();
+      return affected;
+    } catch (error) {
+      await query_runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await query_runner.release();
+    }
   }
 
   // 清空数据库
@@ -1210,21 +1403,19 @@ export class PGKVDatabase {
   ): Promise<string[] | string | null> {
     this.checkTypeSupport('findBoolValues', ['boolean', 'jsonb']);
     await this.ensureInitialized();
+    const alias = this.query_alias;
 
     const query_builder = this.db
-      .createQueryBuilder(this.table_name)
-      .select([
-        `${this.table_name}.key as "key"`,
-        `${this.table_name}.value as "value"`,
-      ])
-      .orderBy('created_at', order_by);
+      .createQueryBuilder(alias)
+      .select(`${alias}.key`, 'key')
+      .orderBy(`${alias}.created_at`, order_by);
 
     if (this.value_type === 'jsonb') {
-      query_builder.where('value = :value::jsonb', {
+      query_builder.where(`${alias}.value = :value::jsonb`, {
         value: JSON.stringify(bool_value),
       });
     } else {
-      query_builder.where('value = :value', { value: bool_value });
+      query_builder.where(`${alias}.value = :value`, { value: bool_value });
     }
 
     if (first) {
@@ -1233,7 +1424,7 @@ export class PGKVDatabase {
     }
 
     const results = await query_builder.getRawMany();
-    return results;
+    return results.map((result: { key: string }) => result.key);
   }
 
   /**
@@ -1303,10 +1494,14 @@ export class PGKVDatabase {
     this.checkTypeSupport('searchJson', ['jsonb']);
     await this.ensureInitialized();
 
-    const limit = search_options.limit || 100;
+    const limit = Math.max(1, search_options.limit ?? 100);
     const include_timestamps = search_options.include_timestamps || false;
-    const order_by = search_options.order_by || 'ASC';
-    const order_by_field = search_options.order_by_field || 'key';
+    const order_by = search_options.order_by === 'DESC' ? 'DESC' : 'ASC';
+    const order_by_field =
+      search_options.order_by_field === 'created_at' ||
+      search_options.order_by_field === 'updated_at'
+        ? search_options.order_by_field
+        : 'key';
 
     // 使用原生SQL查询，更直接地访问数据库
     try {
@@ -1323,21 +1518,42 @@ export class PGKVDatabase {
       const where_conditions: string[] = [];
 
       // 处理 contains 条件（精确匹配）
-      if (search_options.contains) {
-        Object.entries(search_options.contains).forEach(([key, value]) => {
-          where_conditions.push(`value->>'${key}' = $${param_index}`);
-          params.push(String(value));
-          param_index++;
-        });
+      if (
+        search_options.contains &&
+        Object.keys(search_options.contains).length > 0
+      ) {
+        where_conditions.push(`value @> $${param_index}::jsonb`);
+        params.push(JSON.stringify(search_options.contains));
+        param_index++;
       }
 
       // 处理 compare 条件（比较操作）
       if (search_options.compare) {
         search_options.compare.forEach((condition) => {
-          where_conditions.push(
-            `value->>'${condition.path}' ${condition.operator} $${param_index}`,
+          const path_segments = this.normalizeJsonPath(condition.path);
+          const extract_json_sql = this.buildJsonExtractSql('value', param_index);
+          const extract_sql = this.buildJsonExtractTextSql(
+            'value',
+            param_index,
           );
-          params.push(String(condition.value));
+          params.push(path_segments);
+          param_index++;
+
+          let compare_sql = `${extract_sql} ${condition.operator} $${param_index}`;
+          if (
+            typeof condition.value === 'number' &&
+            Number.isFinite(condition.value)
+          ) {
+            compare_sql = `jsonb_typeof(${extract_json_sql}) = 'number' AND (${extract_sql})::numeric ${condition.operator} $${param_index}`;
+            params.push(condition.value);
+          } else if (condition.value instanceof Date) {
+            compare_sql = `jsonb_typeof(${extract_json_sql}) = 'string' AND (${extract_sql})::timestamptz ${condition.operator} $${param_index}`;
+            params.push(condition.value.toISOString());
+          } else {
+            params.push(String(condition.value));
+          }
+
+          where_conditions.push(compare_sql);
           param_index++;
         });
       }
@@ -1345,11 +1561,18 @@ export class PGKVDatabase {
       // 处理 text_search 条件（LIKE/ILIKE 搜索）
       if (search_options.text_search) {
         search_options.text_search.forEach((text_condition) => {
+          const path_segments = this.normalizeJsonPath(text_condition.path);
+          const extract_sql = this.buildJsonExtractTextSql(
+            'value',
+            param_index,
+          );
+          params.push(path_segments);
+          param_index++;
           const like_operator = text_condition.case_sensitive
             ? 'LIKE'
             : 'ILIKE';
           where_conditions.push(
-            `value->>'${text_condition.path}' ${like_operator} $${param_index}`,
+            `COALESCE(${extract_sql}, '') ${like_operator} $${param_index}`,
           );
           params.push(`%${text_condition.text}%`);
           param_index++;
@@ -1358,10 +1581,13 @@ export class PGKVDatabase {
 
       // 处理游标分页
       if (search_options.cursor) {
+        const cursor_operator = order_by === 'DESC' ? '<' : '>';
         if (order_by_field === 'key') {
-          where_conditions.push(`key > $${param_index}`);
+          where_conditions.push(`key ${cursor_operator} $${param_index}`);
         } else {
-          where_conditions.push(`${order_by_field} > $${param_index}`);
+          where_conditions.push(
+            `${order_by_field} ${cursor_operator} $${param_index}`,
+          );
         }
         params.push(search_options.cursor);
         param_index++;
@@ -1416,19 +1642,17 @@ export class PGKVDatabase {
     order_by: 'ASC' | 'DESC' = 'ASC',
   ): Promise<string[] | string | null> {
     await this.ensureInitialized();
+    const alias = this.query_alias;
 
     const operator = type === 'before' ? '<' : '>';
 
     const query = this.db
-      .createQueryBuilder(this.table_name)
-      .select([
-        `${this.table_name}.key as "key"`,
-        `${this.table_name}.value as "value"`,
-      ])
-      .where(`updated_at ${operator} :timestamp`, {
+      .createQueryBuilder(alias)
+      .select(`${alias}.key`, 'key')
+      .where(`${alias}.updated_at ${operator} :timestamp`, {
         timestamp: new Date(timestamp),
       })
-      .orderBy('updated_at', order_by);
+      .orderBy(`${alias}.updated_at`, order_by);
 
     if (first) {
       const result = await query.getRawOne();
@@ -1436,7 +1660,7 @@ export class PGKVDatabase {
     }
 
     const results = await query.getRawMany();
-    return results;
+    return results.map((result: { key: string }) => result.key);
   }
 
   async searchByTime(params: {
@@ -1455,55 +1679,34 @@ export class PGKVDatabase {
     }>
   > {
     await this.ensureInitialized();
+    const alias = this.query_alias;
     const time_column = params.time_column || 'updated_at';
     const include_timestamps = params.include_timestamps || false;
+    const normalized_take =
+      params.take === undefined
+        ? 1
+        : Math.max(0, Math.floor(Number(params.take) || 0));
 
-    // 根据是否需要时间戳选择字段
-    const select_fields = [
-      `${this.table_name}.key as "key"`,
-      `${this.table_name}.value as "value"`,
-    ];
-
-    if (include_timestamps) {
-      select_fields.push(
-        `${this.table_name}.created_at as "created_at"`,
-        `${this.table_name}.updated_at as "updated_at"`,
-      );
+    if (normalized_take <= 0) {
+      return [];
     }
 
     const query_builder = this.db
-      .createQueryBuilder()
-      .select(select_fields)
-      .from(this.table_name, this.table_name);
+      .createQueryBuilder(alias)
+      .select(this.buildSelectFields(include_timestamps));
 
     const operator = (params.type || 'after') === 'before' ? '<' : '>';
-    query_builder.where(
-      `${this.table_name}.${time_column} ${operator} :timestamp`,
-      {
-        timestamp: new Date(params.timestamp),
-      },
-    );
+    query_builder.where(`${alias}.${time_column} ${operator} :timestamp`, {
+      timestamp: new Date(params.timestamp),
+    });
 
-    query_builder.orderBy(
-      `${this.table_name}.${time_column}`,
-      params.order_by || 'ASC',
-    );
-    query_builder.limit(params.take || 1);
+    query_builder.orderBy(`${alias}.${time_column}`, params.order_by || 'ASC');
+    query_builder.limit(normalized_take);
     try {
       const results = await query_builder.getRawMany();
-      return results.map((record) => {
-        const result: any = {
-          key: record.key,
-          value: this.deserializeValue(record.value),
-        };
-
-        if (include_timestamps) {
-          result.created_at = record.created_at;
-          result.updated_at = record.updated_at;
-        }
-
-        return result;
-      });
+      return results.map((record) =>
+        this.mapRawRecord(record, include_timestamps),
+      );
     } catch (error) {
       console.error('查询错误:', query_builder.getSql());
       console.error('查询参数:', query_builder.getParameters());
@@ -1539,76 +1742,59 @@ export class PGKVDatabase {
   > {
     this.checkTypeSupport('searchJsonByTime', ['jsonb']);
     await this.ensureInitialized();
+    const alias = this.query_alias;
     const time_column = time_options.time_column || 'updated_at';
     const include_timestamps = time_options.include_timestamps || false;
+    const normalized_take =
+      time_options.take === undefined
+        ? 1
+        : Math.max(0, Math.floor(Number(time_options.take) || 0));
 
-    // 根据是否需要时间戳选择字段
-    const select_fields = [
-      `${this.table_name}.key as "key"`,
-      `${this.table_name}.value as "value"`,
-    ];
-
-    if (include_timestamps) {
-      select_fields.push(
-        `${this.table_name}.created_at as "created_at"`,
-        `${this.table_name}.updated_at as "updated_at"`,
-      );
+    if (normalized_take <= 0) {
+      return [];
     }
 
     const query_builder = this.db
-      .createQueryBuilder()
-      .select(select_fields)
-      .from(this.table_name, this.table_name);
+      .createQueryBuilder(alias)
+      .select(this.buildSelectFields(include_timestamps));
 
     const operator = (time_options.type || 'after') === 'before' ? '<' : '>';
-    query_builder.where(
-      `${this.table_name}.${time_column} ${operator} :timestamp`,
-      {
-        timestamp: new Date(time_options.timestamp),
-      },
-    );
+    query_builder.where(`${alias}.${time_column} ${operator} :timestamp`, {
+      timestamp: new Date(time_options.timestamp),
+    });
 
     if (search_options.contains) {
-      query_builder.andWhere(`${this.table_name}.value @> :contains::jsonb`, {
+      query_builder.andWhere(`${alias}.value @> :contains::jsonb`, {
         contains: JSON.stringify(search_options.contains),
       });
     }
 
     if (search_options.equals) {
-      query_builder.andWhere(`${this.table_name}.value = :equals::jsonb`, {
+      query_builder.andWhere(`${alias}.value = :equals::jsonb`, {
         equals: JSON.stringify(search_options.equals),
       });
     }
 
     if (search_options.path && search_options.value !== undefined) {
-      query_builder.andWhere(`${this.table_name}.value #>> :path = :value`, {
-        path: `{${search_options.path}}`,
-        value: String(search_options.value),
-      });
+      const path_segments = this.normalizeJsonPath(search_options.path);
+      query_builder.andWhere(
+        `jsonb_extract_path_text(${alias}.value, VARIADIC :path::text[]) = :value`,
+        {
+          path: path_segments,
+          value: String(search_options.value),
+        },
+      );
     }
 
     query_builder
-      .orderBy(
-        `${this.table_name}.${time_column}`,
-        time_options.order_by || 'ASC',
-      )
-      .limit(time_options.take || 1);
+      .orderBy(`${alias}.${time_column}`, time_options.order_by || 'ASC')
+      .limit(normalized_take);
 
     try {
       const results = await query_builder.getRawMany();
-      return results.map((record) => {
-        const result: any = {
-          key: record.key,
-          value: this.deserializeValue(record.value),
-        };
-
-        if (include_timestamps) {
-          result.created_at = record.created_at;
-          result.updated_at = record.updated_at;
-        }
-
-        return result;
-      });
+      return results.map((record) =>
+        this.mapRawRecord(record, include_timestamps),
+      );
     } catch (error) {
       console.error('Query error:', query_builder.getSql());
       console.error('Query parameters:', query_builder.getParameters());
@@ -1629,6 +1815,8 @@ export class PGKVDatabase {
     options?: SaveArrayOptions,
   ): Promise<void> {
     let { batch_size = 1000 } = options || {};
+    batch_size = this.normalizePositiveInteger(batch_size, 1000);
+    const requested_batch_size = batch_size;
     const { force_update_batch_size = false, overwrite = false } =
       options || {};
 
@@ -1651,15 +1839,23 @@ export class PGKVDatabase {
       const existing_total_items = existing_meta.total_items;
 
       // Get stored batch size or use default if not found (for backward compatibility)
-      const stored_batch_size = existing_meta.batch_size || 1000;
+      const stored_batch_size = this.normalizePositiveInteger(
+        existing_meta.batch_size || 1000,
+        1000,
+      );
 
       // Determine which batch size to use
       let active_batch_size = stored_batch_size;
 
       // Handle batch size change if requested
-      if (force_update_batch_size && 1000 !== stored_batch_size) {
-        console.log(`Updating batch size from ${stored_batch_size} to 1000`);
-        active_batch_size = 1000;
+      if (
+        force_update_batch_size &&
+        requested_batch_size !== stored_batch_size
+      ) {
+        console.log(
+          `Updating batch size from ${stored_batch_size} to ${requested_batch_size}`,
+        );
+        active_batch_size = requested_batch_size;
 
         // We need to rebalance all batches if the batch size changes
         // This will require a full rebuild - we'll need to get all data,
@@ -1681,13 +1877,13 @@ export class PGKVDatabase {
           // Continue to the "else" branch which will create a new array
           // with the new batch size
           return this.saveArray(key, array, {
-            batch_size: 1000,
+            batch_size: requested_batch_size,
             overwrite: true,
           }); // Recursively call with overwrite true for rebatching
         }
-      } else if (1000 !== stored_batch_size) {
+      } else if (requested_batch_size !== stored_batch_size) {
         console.warn(
-          `Warning: Provided batch_size (${1000}) differs from originally stored batch_size (${stored_batch_size}). Using stored value. Set force_update_batch_size=true to change batch size.`,
+          `Warning: Provided batch_size (${requested_batch_size}) differs from originally stored batch_size (${stored_batch_size}). Using stored value. Set force_update_batch_size=true to change batch size.`,
         );
       }
 
@@ -1701,7 +1897,13 @@ export class PGKVDatabase {
       try {
         // Get the last batch which might not be full
         const last_batch_key = `${key}_${existing_batch_count - 1}`;
-        const last_batch = (await this.get(last_batch_key)) || [];
+        const last_batch_record = await query_runner.manager
+          .createQueryBuilder(this.custom_kv_store, this.query_alias)
+          .select([`${this.query_alias}.value as "value"`])
+          .where(`${this.query_alias}.key = :key`, { key: last_batch_key })
+          .getRawOne();
+        const last_batch =
+          this.deserializeValue(last_batch_record?.value) || [];
 
         // Calculate how many more items can fit in the last batch
         const remaining_space = batch_size - last_batch.length;
@@ -1734,37 +1936,18 @@ export class PGKVDatabase {
 
         // Create new batches for remaining items
         let new_batches_count = 0;
+        const new_batch_entries: Array<[string, any]> = [];
 
-        // Build bulk insert if possible instead of individual inserts
         if (remaining_items.length > 0) {
-          const bulk_values: string[] = [];
-          const bulk_params: any[] = [];
-          let param_index = 1;
-
           for (let i = 0; i < remaining_items.length; i += batch_size) {
             const batch_data = remaining_items.slice(i, i + batch_size);
             const batch_key = `${key}_${existing_batch_count + new_batches_count}`;
-
-            bulk_values.push(
-              `($${param_index}, $${param_index + 1}, NOW(), NOW())`,
-            );
             const serialized_value =
               this.value_type === 'jsonb'
                 ? JSON.stringify(batch_data)
                 : String(batch_data);
-            bulk_params.push(batch_key, serialized_value);
-            param_index += 2;
+            new_batch_entries.push([batch_key, serialized_value]);
             new_batches_count++;
-          }
-
-          if (bulk_values.length > 0) {
-            statements.push(`
-              INSERT INTO "${
-                this.table_name
-              }" (key, value, created_at, updated_at)
-              VALUES ${bulk_values.join(',')}
-            `);
-            parameters.push(bulk_params);
           }
         }
 
@@ -1787,17 +1970,24 @@ export class PGKVDatabase {
               ? JSON.stringify(updated_meta)
               : String(updated_meta); // Stringify primitive types for other types
 
-        statements.push(`
-          INSERT INTO "${this.table_name}" (key, value, created_at, updated_at)
-          VALUES ($1, $2, NOW(), NOW())
-          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-        `);
-        parameters.push([meta_key, serialized_meta]);
-
-        // Execute all statements in a single transaction
+        // Execute update statements first
         for (let i = 0; i < statements.length; i++) {
           await query_runner.query(statements[i], parameters[i]);
         }
+
+        if (new_batch_entries.length > 0) {
+          const insert_batch_size = this.getSafeWriteBatchSize(
+            new_batch_entries.length,
+          );
+          for (let i = 0; i < new_batch_entries.length; i += insert_batch_size) {
+            await this.upsertSerializedEntries(
+              new_batch_entries.slice(i, i + insert_batch_size),
+              query_runner,
+            );
+          }
+        }
+
+        await this.upsertSerializedEntries([[meta_key, serialized_meta]], query_runner);
 
         await query_runner.commitTransaction();
       } catch (err) {
@@ -1822,42 +2012,34 @@ export class PGKVDatabase {
               keys_to_delete.push(`${key}_${i}`);
             }
           }
-          if (keys_to_delete.length > 0) {
-            await this.deleteMany(keys_to_delete);
-          }
+          await this.deleteKeys(keys_to_delete, query_runner);
         }
 
         // Create new batches for the array
-        const bulk_values: string[] = [];
-        const bulk_params: any[] = [];
-        let param_index = 1;
+        const new_batch_entries: Array<[string, any]> = [];
         let batch_count = 0;
 
         for (let i = 0; i < array.length; i += batch_size) {
           const batch_data = array.slice(i, i + batch_size);
           const batch_key = `${key}_${batch_count}`;
-
-          bulk_values.push(
-            `($${param_index}, $${param_index + 1}, NOW(), NOW())`,
-          );
           const serialized_value =
             this.value_type === 'jsonb'
               ? JSON.stringify(batch_data)
               : String(batch_data);
-          bulk_params.push(batch_key, serialized_value);
-          param_index += 2;
+          new_batch_entries.push([batch_key, serialized_value]);
           batch_count++;
         }
 
-        if (bulk_values.length > 0) {
-          await query_runner.query(
-            `
-            INSERT INTO "${this.table_name}" (key, value, created_at, updated_at)
-            VALUES ${bulk_values.join(',')}
-            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-          `,
-            bulk_params,
+        if (new_batch_entries.length > 0) {
+          const insert_batch_size = this.getSafeWriteBatchSize(
+            new_batch_entries.length,
           );
+          for (let i = 0; i < new_batch_entries.length; i += insert_batch_size) {
+            await this.upsertSerializedEntries(
+              new_batch_entries.slice(i, i + insert_batch_size),
+              query_runner,
+            );
+          }
         }
 
         // Save metadata
@@ -1876,14 +2058,7 @@ export class PGKVDatabase {
               ? JSON.stringify(meta_data)
               : String(meta_data); // Stringify primitive types for other types
 
-        await query_runner.query(
-          `
-          INSERT INTO "${this.table_name}" (key, value, created_at, updated_at)
-          VALUES ($1, $2, NOW(), NOW())
-          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-        `,
-          [meta_key, serialized_meta],
-        );
+        await this.upsertSerializedEntries([[meta_key, serialized_meta]], query_runner);
 
         await query_runner.commitTransaction();
       } catch (err) {
@@ -1908,21 +2083,23 @@ export class PGKVDatabase {
     const meta_key = `${key}_meta`;
     const meta = await this.get(meta_key);
 
-    if (!meta || !meta.batch_count) {
+    const batch_count = Math.max(0, Math.floor(Number(meta?.batch_count) || 0));
+
+    if (!meta || batch_count === 0) {
       return [];
     }
 
     // Optimize by fetching multiple batches in a single query
     const batch_keys = Array.from(
-      { length: meta.batch_count },
+      { length: batch_count },
       (_, i) => `${key}_${i}`,
     );
 
     // Use IN clause to fetch all batches at once
-    const records = await this.db.find({
-      where: { key: In(batch_keys) },
-      order: { key: 'ASC' },
-    });
+    const records = await this.getRawRecordsByKeys(batch_keys, [
+      `${this.query_alias}.key as "key"`,
+      `${this.query_alias}.value as "value"`,
+    ]);
 
     // Map results to a map for faster lookup
     const batch_map = new Map(
@@ -1931,7 +2108,7 @@ export class PGKVDatabase {
 
     // Combine all batches in order
     const all_data: T[] = [];
-    for (let i = 0; i < meta.batch_count; i++) {
+    for (let i = 0; i < batch_count; i++) {
       const batch_key = `${key}_${i}`;
       const batch = batch_map.get(batch_key) || [];
       all_data.push(...batch);
@@ -1953,62 +2130,73 @@ export class PGKVDatabase {
     offset: number = 0,
   ): Promise<T[]> {
     await this.ensureInitialized();
+    const normalized_count = Math.max(0, Math.floor(Number(count) || 0));
+    const normalized_offset = Math.max(0, Math.floor(Number(offset) || 0));
 
     // Get metadata
     const meta_key = `${key}_meta`;
     const meta = await this.get(meta_key);
+    const batch_count = Math.max(0, Math.floor(Number(meta?.batch_count) || 0));
+    const total_items = Math.max(0, Math.floor(Number(meta?.total_items) || 0));
 
-    if (!meta || !meta.batch_count || count <= 0) {
+    if (!meta || batch_count === 0 || normalized_count <= 0) {
       return [];
     }
 
     // If count + offset is greater than total items, adjust offset
-    if (offset >= meta.total_items) {
+    if (normalized_offset >= total_items) {
       return [];
     }
 
     // Get batch size from metadata or use default for backward compatibility
-    const batch_size = meta.batch_size || 1000;
+    const batch_size = this.normalizePositiveInteger(meta.batch_size || 1000, 1000);
 
     // Calculate total items to fetch (count + offset)
-    const total_needed = count + offset;
+    const total_needed = normalized_count + normalized_offset;
 
     // If total needed is greater than total items, fetch all and handle offset in memory
-    if (total_needed >= meta.total_items) {
+    if (total_needed >= total_items) {
       const all_items = await this.getAllArray<T>(key);
       return all_items.slice(
         Math.max(0, all_items.length - total_needed),
-        all_items.length - offset,
+        all_items.length - normalized_offset,
       );
     }
 
     // Calculate which batches we need
     let items_needed = total_needed;
-    let start_batch = meta.batch_count - 1;
+    let start_batch = batch_count - 1;
 
     // Calculate how many batches we need to fetch from the end
     const needed_batches: string[] = [];
     while (items_needed > 0 && start_batch >= 0) {
       needed_batches.push(`${key}_${start_batch}`);
       items_needed -=
-        start_batch === meta.batch_count - 1
-          ? meta.total_items % batch_size || batch_size
+        start_batch === batch_count - 1
+          ? total_items % batch_size || batch_size
           : batch_size;
       start_batch--;
     }
 
     // Fetch all needed batches in a single query
-    const records = await this.db.find({
-      where: { key: In(needed_batches) },
-      order: { key: 'DESC' },
-    });
+    const records = await this.getRawRecordsByKeys(needed_batches, [
+      `${this.query_alias}.key as "key"`,
+      `${this.query_alias}.value as "value"`,
+    ]);
+
+    const batch_map = new Map(records.map((record) => [record.key, record.value]));
 
     // Process results
     const all_recent_items: T[] = [];
     let remaining_count = total_needed;
 
-    for (const record of records) {
-      const batch = record.value || [];
+    for (let i = batch_count - 1; i >= 0; i--) {
+      const batch_key = `${key}_${i}`;
+      if (!batch_map.has(batch_key)) {
+        continue;
+      }
+
+      const batch = batch_map.get(batch_key) || [];
 
       if (batch.length <= remaining_count) {
         all_recent_items.unshift(...batch);
@@ -2020,13 +2208,15 @@ export class PGKVDatabase {
         remaining_count = 0;
       }
 
-      if (remaining_count <= 0) break;
+      if (remaining_count <= 0) {
+        break;
+      }
     }
 
     // Apply offset and return the requested count
     return all_recent_items.slice(
       0,
-      Math.max(0, all_recent_items.length - offset),
+      Math.max(0, all_recent_items.length - normalized_offset),
     );
   }
 
@@ -2043,9 +2233,17 @@ export class PGKVDatabase {
     end_index: number,
   ): Promise<T[]> {
     await this.ensureInitialized();
+    const normalized_start_index = Math.max(
+      0,
+      Math.floor(Number(start_index) || 0),
+    );
+    let normalized_end_index = Math.max(
+      0,
+      Math.floor(Number(end_index) || 0),
+    );
 
     // Validate inputs
-    if (start_index < 0 || end_index <= start_index) {
+    if (normalized_end_index <= normalized_start_index) {
       return [];
     }
 
@@ -2053,23 +2251,29 @@ export class PGKVDatabase {
     const meta_key = `${key}_meta`;
     const meta = await this.get(meta_key);
 
-    if (!meta || !meta.batch_count) {
+    const batch_count = Math.max(0, Math.floor(Number(meta?.batch_count) || 0));
+    const total_items = Math.max(0, Math.floor(Number(meta?.total_items) || 0));
+
+    if (!meta || batch_count === 0) {
       return [];
     }
 
     // Adjust end index if it exceeds total items
-    end_index = Math.min(end_index, meta.total_items);
+    normalized_end_index = Math.min(normalized_end_index, total_items);
 
-    if (start_index >= meta.total_items) {
+    if (normalized_start_index >= total_items) {
       return [];
     }
 
     // Get batch size from metadata or use default for backward compatibility
-    const batch_size = meta.batch_size || 1000; // Use stored batch size instead of hardcoded value
+    const batch_size = this.normalizePositiveInteger(
+      meta.batch_size || 1000,
+      1000,
+    );
 
     // Calculate which batches we need
-    const start_batch = Math.floor(start_index / batch_size);
-    const end_batch = Math.floor((end_index - 1) / batch_size);
+    const start_batch = Math.floor(normalized_start_index / batch_size);
+    const end_batch = Math.floor((normalized_end_index - 1) / batch_size);
 
     // Create a list of needed batch keys
     const batch_keys = Array.from(
@@ -2078,10 +2282,10 @@ export class PGKVDatabase {
     );
 
     // Fetch all needed batches in a single query
-    const records = await this.db.find({
-      where: { key: In(batch_keys) },
-      order: { key: 'ASC' },
-    });
+    const records = await this.getRawRecordsByKeys(batch_keys, [
+      `${this.query_alias}.key as "key"`,
+      `${this.query_alias}.value as "value"`,
+    ]);
 
     // Map results to a map for faster lookup
     const batch_map = new Map(
@@ -2096,10 +2300,13 @@ export class PGKVDatabase {
 
       // Calculate start and end positions within this batch
       const batch_start_index = i * batch_size;
-      const local_start_index = Math.max(0, start_index - batch_start_index);
+      const local_start_index = Math.max(
+        0,
+        normalized_start_index - batch_start_index,
+      );
       const local_end_index = Math.min(
         batch.length,
-        end_index - batch_start_index,
+        normalized_end_index - batch_start_index,
       );
 
       // Add the relevant portion of this batch to our result
@@ -2131,43 +2338,47 @@ export class PGKVDatabase {
     }>
   > {
     await this.ensureInitialized();
+    const alias = this.query_alias;
 
     const { include_timestamps = false } = options || {};
+    const normalized_count = Math.floor(count);
 
-    // 根据是否需要时间戳选择字段
-    const select_fields = [
-      `${this.table_name}.key as "key"`,
-      `${this.table_name}.value as "value"`,
-    ];
+    if (!Number.isFinite(normalized_count) || normalized_count <= 0) {
+      return [];
+    }
 
-    if (include_timestamps) {
-      select_fields.push(
-        `${this.table_name}.created_at as "created_at"`,
-        `${this.table_name}.updated_at as "updated_at"`,
-      );
+    if (normalized_count === 1) {
+      const total_records = await this.db.count();
+      if (total_records <= 0) {
+        return [];
+      }
+
+      const random_offset =
+        total_records === 1 ? 0 : Math.floor(Math.random() * total_records);
+      const result = await this.db
+        .createQueryBuilder(alias)
+        .select(this.buildSelectFields(include_timestamps))
+        .orderBy(`${alias}.key`, 'ASC')
+        .offset(random_offset)
+        .limit(1)
+        .getRawMany();
+
+      if (result.length > 0) {
+        return result.map((record) =>
+          this.mapRawRecord(record, include_timestamps),
+        );
+      }
     }
 
     // 使用 ORDER BY RANDOM() 获取随机记录
     const results = await this.db
-      .createQueryBuilder(this.table_name)
-      .select(select_fields)
+      .createQueryBuilder(alias)
+      .select(this.buildSelectFields(include_timestamps))
       .orderBy('RANDOM()')
-      .limit(count)
+      .limit(normalized_count)
       .getRawMany();
 
-    return results.map((record) => {
-      const result: any = {
-        key: record.key,
-        value: this.deserializeValue(record.value),
-      };
-
-      if (include_timestamps) {
-        result.created_at = record.created_at;
-        result.updated_at = record.updated_at;
-      }
-
-      return result;
-    });
+    return results.map((record) => this.mapRawRecord(record, include_timestamps));
   }
 
   /**

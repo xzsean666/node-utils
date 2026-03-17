@@ -1,4 +1,4 @@
-import { DataSource, Repository, Table, In, MoreThan } from 'typeorm';
+import { DataSource, Repository, Table, In } from 'typeorm';
 import {
   Entity,
   PrimaryColumn,
@@ -84,6 +84,8 @@ function bigintHandler(key: string, val: any) {
 }
 
 export class SqliteKVDatabase {
+  private static readonly SQLITE_SAFE_WRITE_BATCH_SIZE = 400;
+  private static readonly SQLITE_SAFE_IN_BATCH_SIZE = 800;
   private db: Repository<KVEntity>;
   private data_source: DataSource;
   private initialized = false;
@@ -92,6 +94,7 @@ export class SqliteKVDatabase {
   private custom_kv_store: any;
   private value_type: SqliteValueType;
   private type_handler: TypeHandler;
+  private readonly query_alias = 'kv';
 
   constructor(
     datasource_or_url?: string,
@@ -136,7 +139,7 @@ export class SqliteKVDatabase {
       try {
         return await operation();
       } catch (error: any) {
-        if (error.message.includes('SQLITE_BUSY') && i < retries - 1) {
+        if (error?.message?.includes('SQLITE_BUSY') && i < retries - 1) {
           console.warn(
             `SQLITE_BUSY encountered for ${this.table_name}, retrying in ${delay_ms}ms... (Attempt ${
               i + 1
@@ -168,6 +171,8 @@ export class SqliteKVDatabase {
         await this.data_source.initialize();
         // Enable WAL mode for better concurrency
         await this.data_source.query('PRAGMA journal_mode=WAL;');
+        // Let SQLite wait for a short period before surfacing SQLITE_BUSY.
+        await this.data_source.query('PRAGMA busy_timeout=5000;');
       }
 
       this.db = this.data_source.getRepository(this.custom_kv_store);
@@ -207,6 +212,13 @@ export class SqliteKVDatabase {
               }),
             );
           }
+
+          await query_runner.query(
+            `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_created_at" ON "${this.table_name}" ("created_at")`,
+          );
+          await query_runner.query(
+            `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_updated_at" ON "${this.table_name}" ("updated_at")`,
+          );
         } finally {
           await query_runner.release();
         }
@@ -222,15 +234,146 @@ export class SqliteKVDatabase {
     }
   }
 
+  private async upsertEntries(entries: Array<[string, any]>): Promise<void> {
+    if (entries.length === 0) {
+      return;
+    }
+
+    const normalized_entries = this.dedupeEntriesByKey(entries);
+    const placeholders = normalized_entries
+      .map(() => '(?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)')
+      .join(', ');
+    const parameters: any[] = [];
+
+    for (const [key, value] of normalized_entries) {
+      parameters.push(key, this.type_handler.serialize(value));
+    }
+
+    await this.data_source.query(
+      `
+        INSERT INTO "${this.table_name}" (key, value, created_at, updated_at)
+        VALUES ${placeholders}
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at = CURRENT_TIMESTAMP
+      `,
+      parameters,
+    );
+  }
+
+  private getSafeWriteBatchSize(batch_size: number): number {
+    const normalized_batch_size = this.normalizePositiveInteger(
+      batch_size,
+      SqliteKVDatabase.SQLITE_SAFE_WRITE_BATCH_SIZE,
+    );
+    return Math.max(
+      1,
+      Math.min(
+        normalized_batch_size,
+        SqliteKVDatabase.SQLITE_SAFE_WRITE_BATCH_SIZE,
+      ),
+    );
+  }
+
+  private getSafeInBatchSize(batch_size: number): number {
+    const normalized_batch_size = this.normalizePositiveInteger(
+      batch_size,
+      SqliteKVDatabase.SQLITE_SAFE_IN_BATCH_SIZE,
+    );
+    return Math.max(
+      1,
+      Math.min(
+        normalized_batch_size,
+        SqliteKVDatabase.SQLITE_SAFE_IN_BATCH_SIZE,
+      ),
+    );
+  }
+
+  private normalizePositiveInteger(value: number, fallback: number): number {
+    if (!Number.isFinite(value)) {
+      return fallback;
+    }
+
+    return Math.max(1, Math.floor(value));
+  }
+
+  private dedupeEntriesByKey<T>(entries: Array<[string, T]>): Array<[string, T]> {
+    const deduped_entries = new Map<string, T>();
+
+    for (const [key, value] of entries) {
+      if (deduped_entries.has(key)) {
+        deduped_entries.delete(key);
+      }
+      deduped_entries.set(key, value);
+    }
+
+    return Array.from(deduped_entries.entries());
+  }
+
+  private buildSelectFields(include_timestamps: boolean = false): string[] {
+    const alias = this.query_alias;
+    const select_fields = [
+      `${alias}.key as "key"`,
+      `${alias}.value as "value"`,
+    ];
+
+    if (include_timestamps) {
+      select_fields.push(
+        `${alias}.created_at as "created_at"`,
+        `${alias}.updated_at as "updated_at"`,
+      );
+    }
+
+    return select_fields;
+  }
+
+  private formatRecordValue<T>(
+    record: { created_at?: Date; updated_at?: Date },
+    value: T,
+    include_timestamps: boolean,
+  ): T | { value: T; created_at: Date; updated_at: Date } {
+    if (!include_timestamps) {
+      return value;
+    }
+
+    return {
+      value,
+      created_at: record.created_at as Date,
+      updated_at: record.updated_at as Date,
+    };
+  }
+
+  private async getRawRecordsByKeys(
+    keys: string[],
+    include_timestamps: boolean,
+  ): Promise<any[]> {
+    const unique_keys = Array.from(new Set(keys));
+    if (unique_keys.length === 0) {
+      return [];
+    }
+
+    const alias = this.query_alias;
+    const effective_batch_size = this.getSafeInBatchSize(unique_keys.length);
+    const records: any[] = [];
+
+    for (let i = 0; i < unique_keys.length; i += effective_batch_size) {
+      const batch = unique_keys.slice(i, i + effective_batch_size);
+      const batch_records = await this._withRetry(() =>
+        this.db
+          .createQueryBuilder(alias)
+          .select(this.buildSelectFields(include_timestamps))
+          .where(`${alias}.key IN (:...keys)`, { keys: batch })
+          .getRawMany(),
+      );
+      records.push(...batch_records);
+    }
+
+    return records;
+  }
+
   async put(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
-
-    await this._withRetry(() =>
-      this.db.save({
-        key,
-        value: this.type_handler.serialize(value),
-      }),
-    );
+    await this._withRetry(() => this.upsertEntries([[key, value]]));
   }
 
   // 方法重载以保持向后兼容性
@@ -252,19 +395,23 @@ export class SqliteKVDatabase {
         },
   ): Promise<T | { value: T; created_at: Date; updated_at: Date } | null> {
     await this.ensureInitialized();
-    const record = await this.db.findOne({ where: { key } });
+    const include_timestamps =
+      typeof options_or_expire === 'object' &&
+      options_or_expire?.include_timestamps === true;
+    const records = await this.getRawRecordsByKeys([key], include_timestamps);
+    const record = records[0];
 
     if (!record) return null;
 
     // 处理参数类型 - 兼容旧的expire参数和新的options对象
     let expire: number | undefined;
-    let include_timestamps = false;
+    let should_include_timestamps = include_timestamps;
 
     if (typeof options_or_expire === 'number') {
       expire = options_or_expire;
     } else if (options_or_expire && typeof options_or_expire === 'object') {
       expire = options_or_expire.expire;
-      include_timestamps = options_or_expire.include_timestamps || false;
+      should_include_timestamps = options_or_expire.include_timestamps || false;
     }
 
     // 如果设置了过期时间，检查是否过期
@@ -282,7 +429,7 @@ export class SqliteKVDatabase {
     const deserialized_value = this.type_handler.deserialize(record.value);
 
     // 如果需要包含时间戳，返回包含时间戳的对象
-    if (include_timestamps) {
+    if (should_include_timestamps) {
       return {
         value: deserialized_value,
         created_at: record.created_at,
@@ -329,7 +476,7 @@ export class SqliteKVDatabase {
     }
 
     // 存储合并后的值
-    await this._withRetry(() => this.put(key, merged_value));
+    await this._withRetry(() => this.upsertEntries([[key, merged_value]]));
   }
 
   async delete(key: string): Promise<boolean> {
@@ -340,23 +487,27 @@ export class SqliteKVDatabase {
 
   async add(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
-    const existing = await this.db.findOne({ where: { key } });
-    if (existing) {
-      throw new Error(`Key "${key}" already exists`);
+    try {
+      await this._withRetry(() =>
+        this.db.insert({
+          key,
+          value: this.type_handler.serialize(value),
+        }),
+      );
+    } catch (error: any) {
+      if (error?.message?.includes('SQLITE_CONSTRAINT')) {
+        throw new Error(`Key "${key}" already exists`);
+      }
+      throw error;
     }
-    await this._withRetry(() =>
-      this.db.save({
-        key,
-        value: this.type_handler.serialize(value),
-      }),
-    );
   }
 
   async close(): Promise<void> {
-    if (this.initialized && this.data_source?.isInitialized) {
+    if (this.data_source?.isInitialized) {
       await this.data_source.destroy();
-      this.initialized = false;
     }
+    this.initialized = false;
+    this.initializing_promise = null;
   }
 
   // 获取所有键值对
@@ -372,85 +523,37 @@ export class SqliteKVDatabase {
     Record<string, T | { value: T; created_at: Date; updated_at: Date }>
   > {
     await this.ensureInitialized();
+    const alias = this.query_alias;
     const include_timestamps = options?.include_timestamps === true;
     const offset = options?.offset;
     const limit = options?.limit;
 
-    // 构建查询条件
-    const where_conditions: any = {};
+    // 统一使用 queryBuilder 来支持分页
+    const query_builder = this.db.createQueryBuilder(alias);
 
+    // 添加时间筛选条件
     if (options?.created_after) {
-      where_conditions.created_at = where_conditions.created_at || {};
-      where_conditions.created_at = {
-        ...where_conditions.created_at,
-        $gte: options.created_after,
-      };
+      query_builder.andWhere(`${alias}.created_at >= :created_after`, {
+        created_after: options.created_after,
+      });
     }
 
     if (options?.created_before) {
-      where_conditions.created_at = where_conditions.created_at || {};
-      where_conditions.created_at = {
-        ...where_conditions.created_at,
-        $lte: options.created_before,
-      };
+      query_builder.andWhere(`${alias}.created_at <= :created_before`, {
+        created_before: options.created_before,
+      });
     }
 
     if (options?.updated_after) {
-      where_conditions.updated_at = where_conditions.updated_at || {};
-      where_conditions.updated_at = {
-        ...where_conditions.updated_at,
-        $gte: options.updated_after,
-      };
+      query_builder.andWhere(`${alias}.updated_at >= :updated_after`, {
+        updated_after: options.updated_after,
+      });
     }
 
     if (options?.updated_before) {
-      where_conditions.updated_at = where_conditions.updated_at || {};
-      where_conditions.updated_at = {
-        ...where_conditions.updated_at,
-        $lte: options.updated_before,
-      };
-    }
-
-    // 统一使用 queryBuilder 来支持分页
-    const query_builder = this.db.createQueryBuilder(this.table_name);
-
-    // 添加时间筛选条件
-    if (where_conditions.created_at) {
-      if (where_conditions.created_at.$gte) {
-        query_builder.andWhere(
-          `${this.table_name}.created_at >= :created_after`,
-          {
-            created_after: where_conditions.created_at.$gte,
-          },
-        );
-      }
-      if (where_conditions.created_at.$lte) {
-        query_builder.andWhere(
-          `${this.table_name}.created_at <= :created_before`,
-          {
-            created_before: where_conditions.created_at.$lte,
-          },
-        );
-      }
-    }
-
-    if (where_conditions.updated_at) {
-      if (where_conditions.updated_at.$gte) {
-        query_builder.andWhere(
-          `${this.table_name}.updated_at >= :updated_after`,
-          {
-            updated_after: where_conditions.updated_at.$gte,
-          },
-        );
-      }
-      if (where_conditions.updated_at.$lte) {
-        query_builder.andWhere(
-          `${this.table_name}.updated_at <= :updated_before`,
-          {
-            updated_before: where_conditions.updated_at.$lte,
-          },
-        );
-      }
+      query_builder.andWhere(`${alias}.updated_at <= :updated_before`, {
+        updated_before: options.updated_before,
+      });
     }
 
     // 添加分页支持
@@ -463,9 +566,11 @@ export class SqliteKVDatabase {
     }
 
     // 添加排序以确保分页结果的一致性
-    query_builder.orderBy(`${this.table_name}.key`, 'ASC');
+    query_builder.orderBy(`${alias}.key`, 'ASC');
 
-    const records = await query_builder.getMany();
+    const records = await this._withRetry(() =>
+      query_builder.select(this.buildSelectFields(include_timestamps)).getRawMany(),
+    );
 
     return records.reduce(
       (
@@ -473,13 +578,11 @@ export class SqliteKVDatabase {
         record: { key: any; value: any; created_at: Date; updated_at: Date },
       ) => {
         const deserialized = this.type_handler.deserialize(record.value) as T;
-        acc[record.key] = include_timestamps
-          ? {
-              value: deserialized,
-              created_at: record.created_at,
-              updated_at: record.updated_at,
-            }
-          : deserialized;
+        acc[record.key] = this.formatRecordValue(
+          record,
+          deserialized,
+          include_timestamps,
+        );
         return acc;
       },
       {} as Record<
@@ -501,41 +604,11 @@ export class SqliteKVDatabase {
     }
 
     const include_timestamps = options?.include_timestamps === true;
-
-    // 优化：对于大量键的查询，分批执行避免SQL过长和锁竞争
-    let records: any[] = [];
-    if (keys.length > 50) {
-      // 分批查询，每批50个
-      const batch_size = 50;
-      const all_records: any[] = [];
-
-      for (let i = 0; i < keys.length; i += batch_size) {
-        const batch = keys.slice(i, i + batch_size);
-        try {
-          const batch_records = await this._withRetry(() =>
-            this.db.find({
-              where: { key: In(batch) },
-              cache: true, // 启用查询缓存
-            }),
-          );
-          all_records.push(...batch_records);
-        } catch (error: any) {
-          console.warn(
-            `Batch query failed for keys ${i}-${i + batch_size}: ${error.message}`,
-          );
-          // 继续执行其他批次
-        }
-      }
-      records = all_records;
-    } else {
-      // 小批量直接查询
-      records = await this._withRetry(() =>
-        this.db.find({
-          where: { key: In(keys) },
-          cache: true, // 启用查询缓存
-        }),
-      );
-    }
+    const unique_keys = Array.from(new Set(keys));
+    const records = await this.getRawRecordsByKeys(
+      unique_keys,
+      include_timestamps,
+    );
 
     // 使用Map提高查找性能，避免O(n²)复杂度
     const record_map = new Map<string, any>();
@@ -544,13 +617,7 @@ export class SqliteKVDatabase {
         const deserialized = this.type_handler.deserialize(record.value) as T;
         record_map.set(
           record.key,
-          include_timestamps
-            ? {
-                value: deserialized,
-                created_at: record.created_at,
-                updated_at: record.updated_at,
-              }
-            : deserialized,
+          this.formatRecordValue(record, deserialized, include_timestamps),
         );
       } catch (deserialize_error: any) {
         console.warn(
@@ -582,31 +649,31 @@ export class SqliteKVDatabase {
   > {
     await this.ensureInitialized();
     const include_timestamps = options?.include_timestamps === true;
-    const base_options: any = {
-      order: { created_at: 'DESC' },
-      take: limit,
-    };
+    const alias = this.query_alias;
+    const query_builder = this.db
+      .createQueryBuilder(alias)
+      .select(this.buildSelectFields(include_timestamps))
+      .orderBy(`${alias}.created_at`, 'DESC')
+      .take(limit);
 
     if (seconds > 0) {
-      base_options.where = {
-        created_at: MoreThan(new Date(Date.now() - seconds * 1000)),
-      };
+      query_builder.where(`${alias}.created_at > :created_after`, {
+        created_after: new Date(Date.now() - seconds * 1000),
+      });
     }
 
-    const records = await this.db.find(base_options);
+    const records = await this._withRetry(() => query_builder.getRawMany());
     return records.reduce(
       (
         acc,
         record: { key: any; value: any; created_at: Date; updated_at: Date },
       ) => {
         const deserialized = this.type_handler.deserialize(record.value) as T;
-        acc[record.key] = include_timestamps
-          ? {
-              value: deserialized,
-              created_at: record.created_at,
-              updated_at: record.updated_at,
-            }
-          : deserialized;
+        acc[record.key] = this.formatRecordValue(
+          record,
+          deserialized,
+          include_timestamps,
+        );
         return acc;
       },
       {} as Record<
@@ -618,14 +685,27 @@ export class SqliteKVDatabase {
   // 获取所有键
   async keys(): Promise<string[]> {
     await this.ensureInitialized();
-    const records = await this.db.find({ select: ['key'] });
+    const alias = this.query_alias;
+    const records = await this._withRetry(() =>
+      this.db
+        .createQueryBuilder(alias)
+        .select([`${alias}.key as "key"`])
+        .orderBy(`${alias}.key`, 'ASC')
+        .getRawMany(),
+    );
     return records.map((record: { key: any }) => record.key);
   }
 
   // 检查键是否存在
   async has(key: string): Promise<boolean> {
     await this.ensureInitialized();
-    return (await this.db.count({ where: { key } })) > 0;
+    const record = await this.db
+      .createQueryBuilder(this.query_alias)
+      .select('1', 'exists')
+      .where(`${this.query_alias}.key = :key`, { key })
+      .limit(1)
+      .getRawOne();
+    return !!record;
   }
 
   // 批量添加键值对
@@ -634,25 +714,40 @@ export class SqliteKVDatabase {
     batch_size: number = 1000,
   ): Promise<void> {
     await this.ensureInitialized();
+    const normalized_entries = this.dedupeEntriesByKey(entries);
+    if (normalized_entries.length === 0) {
+      return;
+    }
+
+    const effective_batch_size = this.getSafeWriteBatchSize(batch_size);
 
     // 分批处理大量数据
-    for (let i = 0; i < entries.length; i += batch_size) {
-      const batch = entries.slice(i, i + batch_size);
-      const entities = batch.map(([key, value]) => ({
-        key,
-        value: this.type_handler.serialize(value),
-      }));
-      await this._withRetry(() => this.db.save(entities));
+    for (let i = 0; i < normalized_entries.length; i += effective_batch_size) {
+      const batch = normalized_entries.slice(i, i + effective_batch_size);
+      await this._withRetry(() => this.upsertEntries(batch));
     }
   }
 
   // 批量删除键
   async deleteMany(keys: string[]): Promise<number> {
     await this.ensureInitialized();
-    const result = await this._withRetry(() =>
-      this.db.delete({ key: In(keys) }),
-    );
-    return result.affected || 0;
+    const unique_keys = Array.from(new Set(keys));
+    if (unique_keys.length === 0) {
+      return 0;
+    }
+
+    const effective_batch_size = this.getSafeInBatchSize(unique_keys.length);
+    let affected = 0;
+
+    for (let i = 0; i < unique_keys.length; i += effective_batch_size) {
+      const batch = unique_keys.slice(i, i + effective_batch_size);
+      const result = await this._withRetry(() =>
+        this.db.delete({ key: In(batch) }),
+      );
+      affected += result.affected || 0;
+    }
+
+    return affected;
   }
 
   // 清空数据库
@@ -675,12 +770,13 @@ export class SqliteKVDatabase {
    */
   async findByValue(value: any, exact: boolean = true): Promise<string[]> {
     await this.ensureInitialized();
+    const alias = this.query_alias;
 
-    let query_builder = this.db.createQueryBuilder(this.table_name);
+    let query_builder = this.db.createQueryBuilder(alias);
 
     if (exact) {
       // 根据数据类型进行精确匹配
-      query_builder = query_builder.where(`value = :value`, {
+      query_builder = query_builder.where(`${alias}.value = :value`, {
         value: this.type_handler.serialize(value),
       });
     } else {
@@ -690,7 +786,7 @@ export class SqliteKVDatabase {
         this.value_type === SqliteValueType.JSON
       ) {
         const search_value = this.type_handler.serialize(value);
-        query_builder = query_builder.where(`value LIKE :value`, {
+        query_builder = query_builder.where(`${alias}.value LIKE :value`, {
           value: `%${search_value}%`,
         });
       } else {
@@ -700,7 +796,9 @@ export class SqliteKVDatabase {
       }
     }
 
-    const results = await query_builder.getMany();
+    const results = await this._withRetry(() =>
+      query_builder.select([`${alias}.key as "key"`]).getRawMany(),
+    );
     return results.map((record: { key: any }) => record.key);
   }
 
@@ -713,12 +811,18 @@ export class SqliteKVDatabase {
     condition: (value: any) => boolean,
   ): Promise<Map<string, any>> {
     await this.ensureInitialized();
-    const all_records = await this.db.find();
-    const matched_records = all_records.filter((record: { value: any }) =>
-      condition(this.type_handler.deserialize(record.value)),
+    const alias = this.query_alias;
+    const all_records = await this._withRetry(() =>
+      this.db
+        .createQueryBuilder(alias)
+        .select([`${alias}.key as "key"`, `${alias}.value as "value"`])
+        .getRawMany(),
     );
-    return matched_records.reduce((acc, record: { key: any; value: any }) => {
-      acc.set(record.key, this.type_handler.deserialize(record.value));
+    return all_records.reduce((acc, record: { key: any; value: any }) => {
+      const deserialized = this.type_handler.deserialize(record.value);
+      if (condition(deserialized)) {
+        acc.set(record.key, deserialized);
+      }
       return acc;
     }, new Map<string, any>());
   }
@@ -769,6 +873,8 @@ export class SqliteKVDatabase {
       throw new Error('Prefix cannot be empty');
     }
 
+    const alias = this.query_alias;
+
     const {
       limit,
       offset,
@@ -778,14 +884,14 @@ export class SqliteKVDatabase {
 
     // 根据是否需要时间戳选择字段
     const select_fields = [
-      `${this.table_name}.key as "key"`,
-      `${this.table_name}.value as "value"`,
+      `${alias}.key as "key"`,
+      `${alias}.value as "value"`,
     ];
 
     if (include_timestamps) {
       select_fields.push(
-        `${this.table_name}.created_at as "created_at"`,
-        `${this.table_name}.updated_at as "updated_at"`,
+        `${alias}.created_at as "created_at"`,
+        `${alias}.updated_at as "updated_at"`,
       );
     }
 
@@ -793,15 +899,15 @@ export class SqliteKVDatabase {
     // key >= 'prefix' AND key < 'prefix' + char(255)
     // 这样可以充分利用主键的索引
     const query_builder = this.db
-      .createQueryBuilder(this.table_name)
+      .createQueryBuilder(alias)
       .select(select_fields)
-      .where(`${this.table_name}.key >= :start_prefix`, {
+      .where(`${alias}.key >= :start_prefix`, {
         start_prefix: prefix,
       })
-      .andWhere(`${this.table_name}.key < :end_prefix`, {
+      .andWhere(`${alias}.key < :end_prefix`, {
         end_prefix: prefix + String.fromCharCode(255), // 使用 char(255) 作为范围上限
       })
-      .orderBy(`${this.table_name}.key`, order_by);
+      .orderBy(`${alias}.key`, order_by);
 
     if (limit !== undefined) {
       query_builder.limit(limit);

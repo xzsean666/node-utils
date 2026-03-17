@@ -1,13 +1,26 @@
 import {
   PGKVDatabase as ModernPGKVDatabase,
+  type EnsureJsonFieldIndexOptions,
+  type EnsureJsonFieldIndexResult,
+  type EnsureJsonNumberFieldIndexOptions,
+  type PGKVDatabaseOptions,
   type ValueType,
 } from './KVPostgresql';
 
 export class KVDatabase {
   private readonly db: ModernPGKVDatabase;
 
-  constructor(datasourceOrUrl: string, tableName: string = 'kv_store') {
-    this.db = new ModernPGKVDatabase(datasourceOrUrl, tableName, 'jsonb');
+  constructor(
+    datasourceOrUrl: string,
+    tableName: string = 'kv_store',
+    options?: PGKVDatabaseOptions,
+  ) {
+    this.db = new ModernPGKVDatabase(
+      datasourceOrUrl,
+      tableName,
+      'jsonb',
+      options,
+    );
   }
 
   async put(key: string, value: any): Promise<void> {
@@ -58,10 +71,7 @@ export class KVDatabase {
     await this.db.close();
   }
 
-  async getAll(
-    offset?: number,
-    limit?: number,
-  ): Promise<Map<string, any>> {
+  async getAll(offset?: number, limit?: number): Promise<Map<string, any>> {
     const records = await this.db.getAll({
       offset,
       limit,
@@ -197,6 +207,20 @@ export class KVDatabase {
       time_column: timeOptions.timeColumn,
       include_timestamps: timeOptions.include_timestamps,
     });
+  }
+
+  async ensureJsonFieldIndex(
+    path: string,
+    options?: EnsureJsonFieldIndexOptions,
+  ): Promise<EnsureJsonFieldIndexResult> {
+    return this.db.ensureJsonFieldIndex(path, options);
+  }
+
+  async ensureJsonNumberFieldIndex(
+    path: string,
+    options?: EnsureJsonNumberFieldIndexOptions,
+  ): Promise<EnsureJsonFieldIndexResult> {
+    return this.db.ensureJsonNumberFieldIndex(path, options);
   }
 
   async scanKeys(options?: {

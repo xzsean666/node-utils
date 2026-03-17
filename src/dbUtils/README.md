@@ -18,6 +18,7 @@
 
 ```typescript
 import { PGKVDatabase, ValueType } from './KVPostgresql';
+import { PGCompositeKVDatabase } from './PGCompositeKVDatabase';
 
 // JSONB 类型（默认）- 支持所有功能
 const jsonbDB = new PGKVDatabase('postgresql://...', 'json_store', 'jsonb');
@@ -37,6 +38,69 @@ const boolDB = new PGKVDatabase('postgresql://...', 'bool_store', 'boolean');
 
 // BYTEA 类型 - 二进制数据操作
 const blobDB = new PGKVDatabase('postgresql://...', 'blob_store', 'bytea');
+
+// 复合主键高性能表 - 精确命中优先
+const orderStateDB = new PGCompositeKVDatabase(
+  'postgresql://...',
+  'order_state',
+  [
+    { name: 'chain_id', type: 'integer' },
+    { name: 'account_id', type: 'bigint' },
+    { name: 'order_id', type: 'bigint' },
+  ],
+);
+```
+
+## 写优化配置
+
+如果你主要走主键精确读写，不做复杂 JSON 搜索，可以关闭默认索引，减少写入开销：
+
+```typescript
+const db = new PGKVDatabase('postgresql://...', 'cache_store', 'jsonb', {
+  create_created_at_index: false,
+  create_updated_at_index: false,
+  create_value_index: false,
+});
+```
+
+## 复合主键高性能模式
+
+`PGCompositeKVDatabase` 适合这些场景：
+
+- 表拆得比较细
+- 查询主要是复合主键精确命中
+- 不需要 `searchJson`
+- 希望默认不建多余索引，优先写入和主键读取性能
+
+```typescript
+const db = new PGCompositeKVDatabase(
+  url,
+  'order_state',
+  [
+    { name: 'chain_id', type: 'integer' },
+    { name: 'account_id', type: 'bigint' },
+    { name: 'order_id', type: 'bigint' },
+  ],
+  {
+    track_timestamps: false,
+    create_value_index: false,
+  },
+);
+
+await db.put(
+  {
+    chain_id: 1,
+    account_id: '1001',
+    order_id: '987654',
+  },
+  { status: 'open' },
+);
+
+const order = await db.get({
+  chain_id: 1,
+  account_id: '1001',
+  order_id: '987654',
+});
 ```
 
 ## 功能支持矩阵

@@ -1,10 +1,13 @@
+import { createHash } from 'node:crypto';
 import 'reflect-metadata';
-import { DataSource, EntitySchema, Repository, Table } from 'typeorm';
-import type { QueryRunner } from 'typeorm';
+import { DataSource, EntitySchema, Table } from 'typeorm';
+import type { DataSourceOptions, QueryRunner, Repository } from 'typeorm';
 
 const POSTGRES_SAFE_WRITE_BATCH_SIZE = 5000;
 const POSTGRES_SAFE_IN_BATCH_SIZE = 10000;
 const KV_SCAN_PAGE_SIZE = 1000;
+const POSTGRES_NUMERIC_REGEX =
+  '^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[eE][+-]?\\d+)?$';
 
 export type ValueType =
   | 'jsonb'
@@ -16,6 +19,25 @@ export type ValueType =
   | 'bytea';
 
 export type PostgreSQLValueType = ValueType;
+
+export interface PGKVDatabaseOptions {
+  create_created_at_index?: boolean;
+  create_updated_at_index?: boolean;
+  create_value_index?: boolean;
+}
+
+export interface EnsureJsonFieldIndexOptions {
+  index_name?: string;
+  where_not_null?: boolean;
+}
+
+export type EnsureJsonNumberFieldIndexOptions = EnsureJsonFieldIndexOptions;
+
+export interface EnsureJsonFieldIndexResult {
+  index_name: string;
+  created: boolean;
+  message: string;
+}
 
 interface KVEntity {
   key: string;
@@ -63,7 +85,9 @@ function normalizePositiveInteger(
   return Math.min(Math.floor(value), max);
 }
 
-function dedupeEntriesByKey(entries: Array<[string, any]>): Array<[string, any]> {
+function dedupeEntriesByKey(
+  entries: Array<[string, any]>,
+): Array<[string, any]> {
   const deduped = new Map<string, any>();
   for (const [key, value] of entries) {
     deduped.set(key, value);
@@ -81,9 +105,15 @@ function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, '\\$&');
 }
 
+function escapeSqlLiteral(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
 export class PGKVDatabase {
   db!: Repository<KVEntity>;
   private data_source: DataSource;
+  private readonly data_source_options: DataSourceOptions;
+  private readonly options: Required<PGKVDatabaseOptions>;
   private initialized = false;
   private initializing_promise: Promise<void> | null = null;
   private table_name: string;
@@ -94,10 +124,16 @@ export class PGKVDatabase {
     datasource_or_url?: string,
     table_name: string = 'kv_store',
     value_type: ValueType = 'jsonb',
+    options?: PGKVDatabaseOptions,
   ) {
     assertSafeIdentifier(table_name, 'table_name');
     this.table_name = table_name;
     this.value_type = value_type;
+    this.options = {
+      create_created_at_index: options?.create_created_at_index === true,
+      create_updated_at_index: options?.create_updated_at_index === true,
+      create_value_index: options?.create_value_index === true,
+    };
 
     if (!datasource_or_url) {
       throw new Error('datasource_or_url is required');
@@ -128,7 +164,7 @@ export class PGKVDatabase {
       },
     });
 
-    this.data_source = new DataSource({
+    this.data_source_options = {
       type: 'postgres',
       url: datasource_or_url,
       entities: [this.custom_kv_store],
@@ -145,7 +181,7 @@ export class PGKVDatabase {
         maxUses: 7500,
       },
       logging: ['error'],
-    });
+    };
   }
 
   private getPostgreSQLColumnType(value_type: ValueType): string {
@@ -216,7 +252,10 @@ export class PGKVDatabase {
   private getValueIdentity(value: any): string {
     const serialized_value = this.serializeValueForWrite(value);
 
-    if (Buffer.isBuffer(serialized_value) || serialized_value instanceof Uint8Array) {
+    if (
+      Buffer.isBuffer(serialized_value) ||
+      serialized_value instanceof Uint8Array
+    ) {
       return `${this.value_type}:buffer:${Buffer.from(serialized_value).toString('base64')}`;
     }
 
@@ -334,25 +373,91 @@ export class PGKVDatabase {
       .filter(Boolean);
   }
 
+  private buildJsonPathSql(path: string | string[]): string {
+    const normalized_path = Array.isArray(path)
+      ? path
+      : this.normalizeJsonPath(path);
+    return `ARRAY[${normalized_path
+      .map((part) => `'${escapeSqlLiteral(part)}'`)
+      .join(', ')}]`;
+  }
+
   private buildJsonExtractTextSql(
     column_sql: string,
-    path: string,
-    params: any[],
+    path: string | string[],
+    _params: any[],
   ): string {
-    params.push(this.normalizeJsonPath(path));
-    return `${column_sql} #>> $${params.length}::text[]`;
+    return `${column_sql} #>> ${this.buildJsonPathSql(path)}`;
   }
 
   private buildJsonExtractSql(
     column_sql: string,
-    path: string,
-    params: any[],
+    path: string | string[],
+    _params: any[],
   ): string {
-    params.push(this.normalizeJsonPath(path));
-    return `${column_sql} #> $${params.length}::text[]`;
+    return `${column_sql} #> ${this.buildJsonPathSql(path)}`;
   }
 
-  private buildValueEqualsSql(column_sql: string, value: any, params: any[]): string {
+  private buildJsonFieldIndexName(path: string | string[]): string {
+    const normalized_path = Array.isArray(path)
+      ? path
+      : this.normalizeJsonPath(path);
+    const readable_path = normalized_path
+      .map((part) => part.replace(/[^A-Za-z0-9_]+/g, '_'))
+      .join('_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    const hash = createHash('sha1')
+      .update(`${this.table_name}:${normalized_path.join('.')}`)
+      .digest('hex')
+      .slice(0, 10);
+    const base_name = `IDX_${this.table_name}_value_${readable_path || 'field'}`;
+    const truncated_base = base_name
+      .slice(0, Math.max(1, 63 - hash.length - 1))
+      .replace(/_+$/g, '');
+    return `${truncated_base}_${hash}`;
+  }
+
+  private buildJsonNumberFieldIndexName(path: string | string[]): string {
+    const normalized_path = Array.isArray(path)
+      ? path
+      : this.normalizeJsonPath(path);
+    const readable_path = normalized_path
+      .map((part) => part.replace(/[^A-Za-z0-9_]+/g, '_'))
+      .join('_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    const hash = createHash('sha1')
+      .update(`${this.table_name}:number:${normalized_path.join('.')}`)
+      .digest('hex')
+      .slice(0, 10);
+    const base_name = `IDX_${this.table_name}_value_num_${readable_path || 'field'}`;
+    const truncated_base = base_name
+      .slice(0, Math.max(1, 63 - hash.length - 1))
+      .replace(/_+$/g, '');
+    return `${truncated_base}_${hash}`;
+  }
+
+  private async hasIndex(index_name: string): Promise<boolean> {
+    const rows = await this.data_source.query(
+      `
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = ANY(current_schemas(false))
+          AND tablename = $1
+          AND indexname = $2
+        LIMIT 1
+      `,
+      [this.table_name, index_name],
+    );
+    return rows.length > 0;
+  }
+
+  private buildValueEqualsSql(
+    column_sql: string,
+    value: any,
+    params: any[],
+  ): string {
     if (this.value_type === 'jsonb') {
       params.push(this.serializeValueForWrite(value));
       return `${column_sql} = $${params.length}::jsonb`;
@@ -369,7 +474,22 @@ export class PGKVDatabase {
     if (value instanceof Date) {
       return value.toISOString();
     }
-    return String(value);
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean' ||
+      typeof value === 'bigint'
+    ) {
+      return String(value);
+    }
+    if (typeof value === 'symbol') {
+      return value.toString();
+    }
+    if (typeof value === 'function') {
+      return value.name || '[function]';
+    }
+
+    return JSON.stringify(value, bigintJsonReplacer);
   }
 
   private parseSearchCursor(cursor: string): ParsedSearchCursor {
@@ -393,7 +513,8 @@ export class PGKVDatabase {
 
   private resolveGetOptions(
     options_or_expire?: number | GetOptions,
-  ): Required<Pick<GetOptions, 'include_timestamps'>> & Pick<GetOptions, 'expire'> {
+  ): Required<Pick<GetOptions, 'include_timestamps'>> &
+    Pick<GetOptions, 'expire'> {
     if (typeof options_or_expire === 'number') {
       return {
         expire: options_or_expire,
@@ -427,7 +548,8 @@ export class PGKVDatabase {
       return null;
     }
 
-    const { expire, include_timestamps } = this.resolveGetOptions(options_or_expire);
+    const { expire, include_timestamps } =
+      this.resolveGetOptions(options_or_expire);
     const created_at = this.normalizeDate(record.created_at);
 
     if (this.isExpired(created_at, expire)) {
@@ -471,11 +593,16 @@ export class PGKVDatabase {
     operator: '>' | '<' | '>=' | '<=' | '=' | '!=',
     parameter_index: number,
   ): string {
+    const numeric_value_sql = this.buildSafeNumericValueSql(extract_sql);
+    return `(${numeric_value_sql}) ${operator} $${parameter_index}`;
+  }
+
+  private buildSafeNumericValueSql(extract_sql: string): string {
     return `
       CASE
-        WHEN ${extract_sql} ~ '^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[eE][+-]?\\d+)?$'
-        THEN (${extract_sql})::numeric ${operator} $${parameter_index}
-        ELSE FALSE
+        WHEN ${extract_sql} ~ '${POSTGRES_NUMERIC_REGEX}'
+        THEN (${extract_sql})::numeric
+        ELSE NULL
       END
     `;
   }
@@ -564,7 +691,7 @@ export class PGKVDatabase {
       query += ` OFFSET $${params.length}`;
     }
 
-    const records = (await this.data_source.query(query, params)) as PgRawRecord[];
+    const records = await this.data_source.query(query, params);
     return this.mapRawRecordsToObject<T>(records, include_timestamps);
   }
 
@@ -639,9 +766,7 @@ export class PGKVDatabase {
           this.value_type === 'jsonb'
             ? `$${value_index}::jsonb`
             : `$${value_index}`;
-        values_sql.push(
-          `($${key_index}, ${value_placeholder}, NOW(), NOW())`,
-        );
+        values_sql.push(`($${key_index}, ${value_placeholder}, NOW(), NOW())`);
       }
 
       await executor.query(
@@ -694,7 +819,9 @@ export class PGKVDatabase {
         `,
         [chunk],
       );
-      deleted_count += Number((rows[0] as { count?: number | string })?.count || 0);
+      deleted_count += Number(
+        (rows[0] as { count?: number | string })?.count || 0,
+      );
     }
 
     return deleted_count;
@@ -711,6 +838,10 @@ export class PGKVDatabase {
     }
 
     this.initializing_promise = (async () => {
+      if (!this.data_source) {
+        this.data_source = new DataSource(this.data_source_options);
+      }
+
       if (!this.data_source.isInitialized) {
         await this.data_source.initialize();
       }
@@ -752,17 +883,23 @@ export class PGKVDatabase {
           );
         }
 
-        await query_runner.query(
-          `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_created_at" ON "${this.table_name}" ("created_at")`,
-        );
-        await query_runner.query(
-          `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_updated_at" ON "${this.table_name}" ("updated_at")`,
-        );
+        if (this.options.create_created_at_index) {
+          await query_runner.query(
+            `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_created_at" ON "${this.table_name}" ("created_at")`,
+          );
+        }
+        if (this.options.create_updated_at_index) {
+          await query_runner.query(
+            `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_updated_at" ON "${this.table_name}" ("updated_at")`,
+          );
+        }
 
         if (this.value_type === 'jsonb') {
-          await query_runner.query(
-            `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_value_gin" ON "${this.table_name}" USING gin ("value")`,
-          );
+          if (this.options.create_value_index) {
+            await query_runner.query(
+              `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_value_gin" ON "${this.table_name}" USING gin ("value")`,
+            );
+          }
           await query_runner.query(`
             CREATE OR REPLACE FUNCTION jsonb_deep_merge(a jsonb, b jsonb)
             RETURNS jsonb AS $$
@@ -785,9 +922,11 @@ export class PGKVDatabase {
             $$ LANGUAGE plpgsql;
           `);
         } else {
-          await query_runner.query(
-            `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_value_btree" ON "${this.table_name}" ("value")`,
-          );
+          if (this.options.create_value_index) {
+            await query_runner.query(
+              `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_value_btree" ON "${this.table_name}" ("value")`,
+            );
+          }
         }
       } finally {
         await query_runner.release();
@@ -806,6 +945,98 @@ export class PGKVDatabase {
   async put(key: string, value: any): Promise<void> {
     await this.ensureInitialized();
     await this.upsertEntries([[key, value]]);
+  }
+
+  async ensureJsonFieldIndex(
+    path: string,
+    options?: EnsureJsonFieldIndexOptions,
+  ): Promise<EnsureJsonFieldIndexResult> {
+    this.checkTypeSupport('ensureJsonFieldIndex', ['jsonb']);
+    await this.ensureInitialized();
+
+    const normalized_path = this.normalizeJsonPath(path);
+    const index_name =
+      options?.index_name || this.buildJsonFieldIndexName(normalized_path);
+    assertSafeIdentifier(index_name, 'index_name');
+
+    if (await this.hasIndex(index_name)) {
+      return {
+        index_name,
+        created: false,
+        message: `Index "${index_name}" already exists on table "${this.table_name}"`,
+      };
+    }
+
+    const extract_sql = this.buildJsonExtractTextSql(
+      '"value"',
+      normalized_path,
+      [],
+    );
+    const where_clause =
+      options?.where_not_null === false
+        ? ''
+        : ` WHERE (${extract_sql}) IS NOT NULL`;
+
+    await this.data_source.query(
+      `
+        CREATE INDEX IF NOT EXISTS "${index_name}"
+        ON "${this.table_name}" ((${extract_sql}))
+        ${where_clause}
+      `,
+    );
+
+    return {
+      index_name,
+      created: true,
+      message: `Index "${index_name}" created on table "${this.table_name}"`,
+    };
+  }
+
+  async ensureJsonNumberFieldIndex(
+    path: string,
+    options?: EnsureJsonNumberFieldIndexOptions,
+  ): Promise<EnsureJsonFieldIndexResult> {
+    this.checkTypeSupport('ensureJsonNumberFieldIndex', ['jsonb']);
+    await this.ensureInitialized();
+
+    const normalized_path = this.normalizeJsonPath(path);
+    const index_name =
+      options?.index_name ||
+      this.buildJsonNumberFieldIndexName(normalized_path);
+    assertSafeIdentifier(index_name, 'index_name');
+
+    if (await this.hasIndex(index_name)) {
+      return {
+        index_name,
+        created: false,
+        message: `Index "${index_name}" already exists on table "${this.table_name}"`,
+      };
+    }
+
+    const extract_sql = this.buildJsonExtractTextSql(
+      '"value"',
+      normalized_path,
+      [],
+    );
+    const numeric_value_sql = this.buildSafeNumericValueSql(extract_sql);
+    const where_clause =
+      options?.where_not_null === false
+        ? ''
+        : ` WHERE (${numeric_value_sql}) IS NOT NULL`;
+
+    await this.data_source.query(
+      `
+        CREATE INDEX IF NOT EXISTS "${index_name}"
+        ON "${this.table_name}" ((${numeric_value_sql}))
+        ${where_clause}
+      `,
+    );
+
+    return {
+      index_name,
+      created: true,
+      message: `Index "${index_name}" created on table "${this.table_name}"`,
+    };
   }
 
   async merge(key: string, partial_value: any): Promise<boolean> {
@@ -942,7 +1173,7 @@ export class PGKVDatabase {
       query += ` OFFSET $${params.length}`;
     }
 
-    const records = (await this.data_source.query(query, params)) as PgRawRecord[];
+    const records = await this.data_source.query(query, params);
     return this.mapRawRecordsToObject<T>(records, include_timestamps);
   }
 
@@ -1022,8 +1253,15 @@ export class PGKVDatabase {
     await this.ensureInitialized();
     const include_timestamps = options?.include_timestamps === true;
     const unique_keys = Array.from(new Set(keys));
-    const records = await this.getRawRecordsByKeys(unique_keys, include_timestamps);
-    return this.mapRawRecordsToObject<T>(records, include_timestamps, unique_keys);
+    const records = await this.getRawRecordsByKeys(
+      unique_keys,
+      include_timestamps,
+    );
+    return this.mapRawRecordsToObject<T>(
+      records,
+      include_timestamps,
+      unique_keys,
+    );
   }
 
   async add(key: string, value: any): Promise<void> {
@@ -1089,7 +1327,11 @@ export class PGKVDatabase {
       );
 
       const params: any[] = [];
-      const value_where_sql = this.buildValueEqualsSql('"value"', value, params);
+      const value_where_sql = this.buildValueEqualsSql(
+        '"value"',
+        value,
+        params,
+      );
       const existing = await query_runner.query(
         `SELECT "key" FROM "${this.table_name}" WHERE ${value_where_sql} LIMIT 1`,
         params,
@@ -1127,7 +1369,7 @@ export class PGKVDatabase {
       await this.initializing_promise;
     }
 
-    if (this.data_source.isInitialized) {
+    if (this.data_source?.isInitialized) {
       await this.data_source.destroy();
     }
     this.initialized = false;
@@ -1188,7 +1430,7 @@ export class PGKVDatabase {
       query += ` OFFSET $${params.length}`;
     }
 
-    const records = (await this.data_source.query(query, params)) as PgRawRecord[];
+    const records = await this.data_source.query(query, params);
     return this.mapRawRecordsToObject<T>(records, include_timestamps);
   }
 
@@ -1240,15 +1482,15 @@ export class PGKVDatabase {
     params.push(limit + 1);
     query += ` ORDER BY "key" ${order_by} LIMIT $${params.length}`;
 
-    const rows = (await this.data_source.query(query, params)) as Array<{
-      key: string;
-    }>;
+    const rows = await this.data_source.query(query, params);
     const has_more = rows.length > limit;
     const page_rows = has_more ? rows.slice(0, limit) : rows;
 
     return {
       data: page_rows.map((row) => row.key),
-      next_cursor: has_more ? page_rows[page_rows.length - 1]?.key || null : null,
+      next_cursor: has_more
+        ? page_rows[page_rows.length - 1]?.key || null
+        : null,
     };
   }
 
@@ -1284,7 +1526,7 @@ export class PGKVDatabase {
     params.push(limit + 1);
     query += ` ORDER BY "key" ${order_by} LIMIT $${params.length}`;
 
-    const rows = (await this.data_source.query(query, params)) as PgRawRecord[];
+    const rows = await this.data_source.query(query, params);
     const has_more = rows.length > limit;
     const page_rows = has_more ? rows.slice(0, limit) : rows;
 
@@ -1321,7 +1563,11 @@ export class PGKVDatabase {
     await query_runner.startTransaction();
 
     try {
-      await this.upsertEntries(dedupeEntriesByKey(entries), query_runner, safe_batch_size);
+      await this.upsertEntries(
+        dedupeEntriesByKey(entries),
+        query_runner,
+        safe_batch_size,
+      );
       await query_runner.commitTransaction();
     } catch (error) {
       await query_runner.rollbackTransaction();
@@ -1444,7 +1690,11 @@ export class PGKVDatabase {
 
     if (search_options.compare) {
       for (const condition of search_options.compare) {
-        const extract_sql = this.buildJsonExtractTextSql('"value"', condition.path, params);
+        const extract_sql = this.buildJsonExtractTextSql(
+          '"value"',
+          condition.path,
+          params,
+        );
         if (typeof condition.value === 'number') {
           params.push(condition.value);
           where_conditions.push(
@@ -1470,13 +1720,19 @@ export class PGKVDatabase {
         }
 
         params.push(String(condition.value));
-        where_conditions.push(`${extract_sql} ${condition.operator} $${params.length}`);
+        where_conditions.push(
+          `${extract_sql} ${condition.operator} $${params.length}`,
+        );
       }
     }
 
     if (search_options.text_search) {
       for (const condition of search_options.text_search) {
-        const extract_sql = this.buildJsonExtractTextSql('"value"', condition.path, params);
+        const extract_sql = this.buildJsonExtractTextSql(
+          '"value"',
+          condition.path,
+          params,
+        );
         params.push(`%${escapeLikePattern(condition.text)}%`);
         where_conditions.push(
           `${extract_sql} ${condition.case_sensitive ? 'LIKE' : 'ILIKE'} $${params.length} ESCAPE '\\'`,
@@ -1522,10 +1778,12 @@ export class PGKVDatabase {
       LIMIT ${limit + 1}
     `;
 
-    const records = (await this.data_source.query(query, params)) as PgRawRecord[];
+    const records = await this.data_source.query(query, params);
     const has_more = records.length > limit;
     const page_records = has_more ? records.slice(0, limit) : records;
-    const data = page_records.map((record) => this.mapRawRecord(record, include_timestamps));
+    const data = page_records.map((record) =>
+      this.mapRawRecord(record, include_timestamps),
+    );
     const last_record = page_records[page_records.length - 1];
 
     return {
@@ -1593,7 +1851,7 @@ export class PGKVDatabase {
     const operator = (params.type || 'after') === 'before' ? '<' : '>';
     const take = normalizePositiveInteger(params.take, 1, 1000);
 
-    const records = (await this.data_source.query(
+    const records = await this.data_source.query(
       `
         SELECT ${this.buildSelectFields(include_timestamps)}
         FROM "${this.table_name}"
@@ -1602,9 +1860,11 @@ export class PGKVDatabase {
         LIMIT $2
       `,
       [new Date(params.timestamp), take],
-    )) as PgRawRecord[];
+    );
 
-    return records.map((record) => this.mapRawRecord(record, include_timestamps));
+    return records.map((record) =>
+      this.mapRawRecord(record, include_timestamps),
+    );
   }
 
   async searchJsonByTime(
@@ -1651,13 +1911,17 @@ export class PGKVDatabase {
     }
 
     if (search_options.path && search_options.value !== undefined) {
-      const extract_sql = this.buildJsonExtractTextSql('"value"', search_options.path, params);
+      const extract_sql = this.buildJsonExtractTextSql(
+        '"value"',
+        search_options.path,
+        params,
+      );
       params.push(String(search_options.value));
       where_conditions.push(`${extract_sql} = $${params.length}`);
     }
 
     params.push(take);
-    const records = (await this.data_source.query(
+    const records = await this.data_source.query(
       `
         SELECT ${this.buildSelectFields(include_timestamps)}
         FROM "${this.table_name}"
@@ -1666,9 +1930,11 @@ export class PGKVDatabase {
         LIMIT $${params.length}
       `,
       params,
-    )) as PgRawRecord[];
+    );
 
-    return records.map((record) => this.mapRawRecord(record, include_timestamps));
+    return records.map((record) =>
+      this.mapRawRecord(record, include_timestamps),
+    );
   }
 
   getValueType(): ValueType {
@@ -1685,6 +1951,8 @@ export class PGKVDatabase {
       searchJson: ['jsonb'],
       searchJsonByTime: ['jsonb'],
       findBoolValues: ['boolean', 'jsonb'],
+      ensureJsonFieldIndex: ['jsonb'],
+      ensureJsonNumberFieldIndex: ['jsonb'],
     };
 
     const supported_types = operation_type_map[operation];

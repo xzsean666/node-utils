@@ -1,0 +1,2 @@
+ln -s /home/sean/git/node-utils/src ./utils
+npx ts-node utils/scripts/copyDependencies.ts --input utils/sdks/trade-dashboard/index.ts --output helpers --base utils

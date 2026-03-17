@@ -1,23 +1,71 @@
-# TypeScript 项目模板
+# Node Utils (TypeScript 项目工具库)
 
-这是一个基础的 TypeScript 项目模板，包含了 Jest 测试框架的配置。
+现代化的 TypeScript 工具集合库，本项目提供了一系列 Web3、数据库（Database/Memory KV）以及 AI 调用封装的实用工具包，使用 ESM 模块系统并以 Vitest 作为测试框架支撑。
+
+## 简介 (Project Description)
+
+本项目汇聚了多个常用领域（Web3、DB、AI 等）的脚本及辅助类，旨在提供开箱即用、安全稳定的 Node.js 工程化组件：
+- **Web3 集成**: 包含完善的 `ethers.js` 智能合约的部署、调用工具（`EthersTxHelper`）以及 DeFi / Polymarket 的相关客户端集成代码。
+- **数据库组件**: 提供 `KVSqlite` 键值持久化方案与 `MemoryCache` 内存缓存系统。
+- **AI 助手**: 含对 Gemini 模型的简易调用（`GeminiHelper`）。
+
+## 特性 (Features)
+
+- 🚀 **ES Modules** - 使用原生 ESM 模块系统
+- 📦 **TypeScript** - 最新版强类型特性与编译体验
+- ⚡ **Vitest** - 极速且直观的单元测试
+- 🔥 **tsx** - 支持开发环境中直接运行 `.ts` 脚本
+- 🌐 **Blockchain Ready** - 集成了针对 `Ethers v6` 等区块链组件调用最佳实践的类封装
+
+## 🤖 AI 变动记录 (AI Update Log)
+
+当 AI 助手进行操作、新增 / 删减功能后，将会于此处或 [ChangeLog.md](./ChangeLog.md) 中更新摘要。
+
+- **2026-02-25** (第二次): S3 模块精简与上传 URL 增强
+  1. 删除 `S3Sync`（文件夹同步）与 `S3FolderUploader`（文件夹批量上传）模块，聚焦核心能力。
+  2. `S3Helper` 移除外部 KV 数据库依赖（`IKVDatabase`），防重复上传改用内存 `Map` 实现，零配置开箱即用。
+  3. `uploadFile` / `uploadBuffer` 统一返回 `UploadResult`（含 `wasUploaded` 标记），防重复逻辑内置无需单独调用 `Advanced` 版本。
+  4. `S3UrlGenerator` 新增上传 URL 生成：`generateOneTimeUploadUrl`（UUID 唯一 key，防覆盖）、`generateReusableUploadUrl`（固定 key，有效期内可重复使用）、`generateBatchOneTimeUploadUrls`。
+
+- **2026-02-25** (第一次): 
+  1. 重构拆分了原近 3000 行的 `src/dbUtils/s3Helper.ts`，基于领域功能解耦为 `S3Helper`, `S3Sync`, `S3FolderUploader`, `S3UrlGenerator` 及对应的类型中心，并统一迁移至 `src/dbUtils/s3/`，实现了模块高内聚低耦合。
+  2. 修复了 S3 `uploadFile/Buffer` 中 MD5 重复计算造成的性能损耗漏洞，以及 `DeleteObjects` 批量删除接口超过 1000 个对象容量引发崩溃等 P0 级严重异常。
+  3. 通过原文件直接全量同名导出机制完美保留了向后兼容性（Backward Compatibility）。
+
+- **2026-02-24**: 
+  1. 优化 `src/web3/ethersTxHelper.ts` (去除了导致前端阻塞长达数十秒的 `.wait()` 强制调用，增设可选 `waitConfirm` 参量)。
+  2. 修复了基于 `ethers.BrowserProvider` (如 MetaMask) 发送或部署合约时因为空私钥崩溃的问题，使得助手类在全栈可用性大幅提升。
+  3. 重构了冗余的 `decodeDataByABI` 方法为 `decodeInputDataByABI` 等专用于解析请求和返回报文的函数。
+  4. 优化了 `src/web3/(ethersTxBatchHelper.ts | ethersLogSyncHelper.ts | ethersLogHelper.ts | erc20Helper.ts)` 系列代码，对齐了构造函数的 Provider 类型签名，修复了部分类型导出问题以及处理特定场景下 `undefined` 值可能导致的崩溃与警告。
 
 ## 可用的命令
 
-- `yarn build`: 构建项目
-- `yarn start`: 运行项目
-- `yarn dev`: 开发模式（监听文件变化）
-- `yarn test`: 运行测试
-- `yarn test:watch`: 监听模式运行测试
+| 命令 | 说明 |
+|------|------|
+| `pnpm build` | 构建项目 |
+| `pnpm start` | 运行编译后的项目 |
+| `pnpm dev` | 开发模式（使用 tsx 直接运行） |
+| `pnpm dev:build` | 开发模式（监听并编译） |
+| `pnpm test` | 运行测试 |
+| `pnpm test:watch` | 监听模式运行测试 |
+| `pnpm test:coverage` | 运行测试并生成覆盖率报告 |
+| `pnpm typecheck` | 类型检查 |
 
 ## 项目结构
 
 ```
 .
-├── src/            # 源代码目录
-├── tests/          # 测试文件目录
-├── dist/           # 编译输出目录
-├── jest.config.js  # Jest 配置文件
-├── tsconfig.json   # TypeScript 配置文件
-└── package.json    # 项目配置文件
+├── src/              # 源代码目录
+│   └── index.ts      # 主入口文件
+├── tests/            # 测试文件目录
+│   └── index.test.ts # 测试文件
+├── dist/             # 编译输出目录
+├── vitest.config.ts  # Vitest 配置文件
+├── tsconfig.json     # TypeScript 配置文件
+└── package.json      # 项目配置文件
 ```
+
+## 环境要求
+
+- Node.js >= 20.0.0
+- pnpm >= 10.0.0

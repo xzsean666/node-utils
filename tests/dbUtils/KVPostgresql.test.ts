@@ -482,4 +482,79 @@ describe('PGKVDatabase cursor helpers', () => {
       queries.some((query) => query.includes('IDX_kv_store_value_gin')),
     ).toBe(true);
   });
+
+  it('creates configured json indexes during initialization', async () => {
+    const db = new PGKVDatabase(
+      'postgres://user:pass@localhost:5432/testdb',
+      'kv_store',
+      'jsonb',
+      {
+        json_field_indexes: [
+          {
+            path: 'profile.id',
+            index_name: 'IDX_kv_store_profile_id',
+          },
+        ],
+        json_number_field_indexes: [
+          {
+            path: 'profile.score',
+            index_name: 'IDX_kv_store_profile_score_num',
+          },
+        ],
+      },
+    );
+    const queries: string[] = [];
+    const query_runner = {
+      hasTable: () => true,
+      query: (query: string) => {
+        queries.push(query);
+        return [];
+      },
+      release: () => {},
+    };
+
+    (db as any).data_source = {
+      isInitialized: true,
+      getRepository: () => ({}),
+      createQueryRunner: () => query_runner,
+    };
+
+    await (db as any).ensureInitialized();
+
+    const field_index_query = queries.find((query) =>
+      query.includes('CREATE INDEX IF NOT EXISTS "IDX_kv_store_profile_id"'),
+    );
+    const number_index_query = queries.find((query) =>
+      query.includes(
+        'CREATE INDEX IF NOT EXISTS "IDX_kv_store_profile_score_num"',
+      ),
+    );
+
+    expect(field_index_query).toContain(
+      `ON "kv_store" (("value" #>> ARRAY['profile', 'id']))`,
+    );
+    expect(field_index_query).toContain(
+      `WHERE ("value" #>> ARRAY['profile', 'id']) IS NOT NULL`,
+    );
+    expect(number_index_query).toContain(
+      `THEN ("value" #>> ARRAY['profile', 'score'])::numeric`,
+    );
+    expect(number_index_query).toContain(`IS NOT NULL`);
+  });
+
+  it('builds the same identity for equivalent json objects with different key order', () => {
+    const db = new PGKVDatabase('postgres://user:pass@localhost:5432/testdb');
+
+    expect(
+      (db as any).getValueIdentity({
+        profile: { id: 1, name: 'alice' },
+        stats: { score: 2, rank: 3 },
+      }),
+    ).toBe(
+      (db as any).getValueIdentity({
+        stats: { rank: 3, score: 2 },
+        profile: { name: 'alice', id: 1 },
+      }),
+    );
+  });
 });

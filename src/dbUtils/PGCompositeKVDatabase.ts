@@ -2,7 +2,12 @@ import 'reflect-metadata';
 import { DataSource, EntitySchema, Table } from 'typeorm';
 import type { DataSourceOptions, Repository } from 'typeorm';
 
-import type { PGKVDatabaseOptions, ValueType } from './KVPostgresql';
+import type {
+  JsonFieldIndexDefinition,
+  JsonNumberFieldIndexDefinition,
+  PGKVDatabaseOptions,
+  ValueType,
+} from './KVPostgresql';
 
 const POSTGRES_SAFE_WRITE_BATCH_SIZE = 5000;
 const POSTGRES_SAFE_IN_BATCH_SIZE = 10000;
@@ -25,6 +30,16 @@ export interface CompositeKeyColumnDefinition {
 export interface PGCompositeKVDatabaseOptions extends PGKVDatabaseOptions {
   value_type?: ValueType;
   track_timestamps?: boolean;
+}
+
+interface ResolvedPGCompositeKVDatabaseOptions {
+  create_created_at_index: boolean;
+  create_updated_at_index: boolean;
+  create_value_index: boolean;
+  json_field_indexes: JsonFieldIndexDefinition[];
+  json_number_field_indexes: JsonNumberFieldIndexDefinition[];
+  value_type: ValueType;
+  track_timestamps: boolean;
 }
 
 export type CompositeKeyPart = string | number | bigint | boolean | Date;
@@ -55,7 +70,7 @@ export class PGCompositeKVDatabase {
   db!: Repository<Record<string, any>>;
   private data_source: DataSource;
   private readonly data_source_options: DataSourceOptions;
-  private readonly options: Required<PGCompositeKVDatabaseOptions>;
+  private readonly options: ResolvedPGCompositeKVDatabaseOptions;
   private initialized = false;
   private initializing_promise: Promise<void> | null = null;
   private readonly table_name: string;
@@ -118,6 +133,8 @@ export class PGCompositeKVDatabase {
       create_updated_at_index:
         this.track_timestamps && options?.create_updated_at_index === true,
       create_value_index: options?.create_value_index === true,
+      json_field_indexes: options?.json_field_indexes || [],
+      json_number_field_indexes: options?.json_number_field_indexes || [],
       value_type: this.value_type,
     };
 

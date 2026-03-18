@@ -282,4 +282,53 @@ describe('SqliteKVDatabase regressions', () => {
       () => new SqliteKVDatabase(':memory:', 'kv_store;DROP TABLE x'),
     ).toThrow('table_name must match');
   });
+
+  it('stores sqlite timestamps with fractional seconds', async () => {
+    await db.put('time:key', { value: 1 });
+
+    const rows = await (db as any).data_source.query(
+      `SELECT "created_at", "updated_at" FROM "kv_store" WHERE "key" = ?`,
+      ['time:key'],
+    );
+
+    expect(rows[0].created_at).toMatch(/\.\d{3}$/);
+    expect(rows[0].updated_at).toMatch(/\.\d{3}$/);
+  });
+
+  it('allows disabling sqlite timestamp indexes during initialization', async () => {
+    const sqlite = new SqliteKVDatabase(
+      ':memory:',
+      'kv_store',
+      SqliteValueType.JSON,
+      {
+        create_created_at_index: false,
+        create_updated_at_index: false,
+      },
+    );
+    const queries: string[] = [];
+    const query_runner = {
+      hasTable: () => true,
+      query: (query: string) => {
+        queries.push(query);
+        return [];
+      },
+      release: () => {},
+    };
+
+    (sqlite as any).data_source = {
+      isInitialized: true,
+      getRepository: () => ({}),
+      createQueryRunner: () => query_runner,
+      options: { synchronize: false },
+    };
+
+    await (sqlite as any).ensureInitialized();
+
+    expect(
+      queries.some((query) => query.includes('IDX_kv_store_created_at')),
+    ).toBe(false);
+    expect(
+      queries.some((query) => query.includes('IDX_kv_store_updated_at')),
+    ).toBe(false);
+  });
 });

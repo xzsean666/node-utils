@@ -63,6 +63,35 @@ const db = new PGKVDatabase('postgresql://...', 'cache_store', 'jsonb', {
 });
 ```
 
+如果你已经知道后面会按某些 JSON 路径查询，也可以在初始化时直接把表达式索引声明进 `options`，不需要额外再手动调用 `ensureJsonFieldIndex`：
+
+```typescript
+const db = new PGKVDatabase('postgresql://...', 'cache_store', 'jsonb', {
+  json_field_indexes: [
+    { path: 'profile.id' },
+    { path: 'profile.email', index_name: 'IDX_cache_store_profile_email' },
+  ],
+  json_number_field_indexes: [
+    { path: 'profile.score' },
+    { path: 'stats.pnl', where_not_null: false },
+  ],
+});
+```
+
+SQLite 也可以通过构造参数关闭时间列索引，避免纯主键 KV 场景下的额外写入成本：
+
+```typescript
+const sqliteDb = new SqliteKVDatabase(
+  './cache.db',
+  'cache_store',
+  SqliteValueType.JSON,
+  {
+    create_created_at_index: false,
+    create_updated_at_index: false,
+  },
+);
+```
+
 ## 复合主键高性能模式
 
 `PGCompositeKVDatabase` 适合这些场景：

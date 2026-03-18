@@ -24,6 +24,8 @@ export interface PGKVDatabaseOptions {
   create_created_at_index?: boolean;
   create_updated_at_index?: boolean;
   create_value_index?: boolean;
+  json_field_indexes?: JsonFieldIndexDefinition[];
+  json_number_field_indexes?: JsonNumberFieldIndexDefinition[];
 }
 
 export interface EnsureJsonFieldIndexOptions {
@@ -33,10 +35,28 @@ export interface EnsureJsonFieldIndexOptions {
 
 export type EnsureJsonNumberFieldIndexOptions = EnsureJsonFieldIndexOptions;
 
+export interface JsonFieldIndexDefinition
+  extends EnsureJsonFieldIndexOptions {
+  path: string;
+}
+
+export interface JsonNumberFieldIndexDefinition
+  extends EnsureJsonNumberFieldIndexOptions {
+  path: string;
+}
+
 export interface EnsureJsonFieldIndexResult {
   index_name: string;
   created: boolean;
   message: string;
+}
+
+interface ResolvedPGKVDatabaseOptions {
+  create_created_at_index: boolean;
+  create_updated_at_index: boolean;
+  create_value_index: boolean;
+  json_field_indexes: JsonFieldIndexDefinition[];
+  json_number_field_indexes: JsonNumberFieldIndexDefinition[];
 }
 
 interface KVEntity {
@@ -72,6 +92,46 @@ interface GetOptions {
 
 function bigintJsonReplacer(_key: string, value: any) {
   return typeof value === 'bigint' ? value.toString() : value;
+}
+
+function normalizeJsonValueForIdentity(value: any): any {
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  if (value == null || typeof value !== 'object') {
+    return value;
+  }
+
+  if (value instanceof Date) {
+    return value.toJSON();
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return value.toJSON();
+  }
+
+  if (value instanceof Uint8Array) {
+    return Array.from(value);
+  }
+
+  if (typeof value.toJSON === 'function') {
+    return normalizeJsonValueForIdentity(value.toJSON());
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeJsonValueForIdentity(item));
+  }
+
+  const normalized: Record<string, any> = {};
+  for (const key of Object.keys(value).sort()) {
+    normalized[key] = normalizeJsonValueForIdentity(value[key]);
+  }
+  return normalized;
+}
+
+function stableJsonIdentityString(value: any): string {
+  return JSON.stringify(normalizeJsonValueForIdentity(value));
 }
 
 function normalizePositiveInteger(
@@ -113,7 +173,7 @@ export class PGKVDatabase {
   db!: Repository<KVEntity>;
   private data_source: DataSource;
   private readonly data_source_options: DataSourceOptions;
-  private readonly options: Required<PGKVDatabaseOptions>;
+  private readonly options: ResolvedPGKVDatabaseOptions;
   private initialized = false;
   private initializing_promise: Promise<void> | null = null;
   private table_name: string;
@@ -133,7 +193,10 @@ export class PGKVDatabase {
       create_created_at_index: options?.create_created_at_index === true,
       create_updated_at_index: options?.create_updated_at_index === true,
       create_value_index: options?.create_value_index === true,
+      json_field_indexes: options?.json_field_indexes || [],
+      json_number_field_indexes: options?.json_number_field_indexes || [],
     };
+    this.validateConfiguredJsonIndexOptions();
 
     if (!datasource_or_url) {
       throw new Error('datasource_or_url is required');
@@ -250,6 +313,10 @@ export class PGKVDatabase {
   }
 
   private getValueIdentity(value: any): string {
+    if (this.value_type === 'jsonb') {
+      return `${this.value_type}:${stableJsonIdentityString(value)}`;
+    }
+
     const serialized_value = this.serializeValueForWrite(value);
 
     if (
@@ -436,6 +503,108 @@ export class PGKVDatabase {
       .slice(0, Math.max(1, 63 - hash.length - 1))
       .replace(/_+$/g, '');
     return `${truncated_base}_${hash}`;
+  }
+
+  private validateConfiguredJsonIndexOptions(): void {
+    if (
+      this.value_type !== 'jsonb' &&
+      (this.options.json_field_indexes.length > 0 ||
+        this.options.json_number_field_indexes.length > 0)
+    ) {
+      throw new Error(
+        'json_field_indexes and json_number_field_indexes require value_type "jsonb"',
+      );
+    }
+  }
+
+  private buildJsonFieldIndexStatement(
+    path: string | string[],
+    options?: EnsureJsonFieldIndexOptions,
+  ): {
+    index_name: string;
+    create_sql: string;
+  } {
+    const normalized_path = Array.isArray(path)
+      ? path
+      : this.normalizeJsonPath(path);
+    const index_name =
+      options?.index_name || this.buildJsonFieldIndexName(normalized_path);
+    assertSafeIdentifier(index_name, 'index_name');
+
+    const extract_sql = this.buildJsonExtractTextSql(
+      '"value"',
+      normalized_path,
+      [],
+    );
+    const where_clause =
+      options?.where_not_null === false
+        ? ''
+        : ` WHERE (${extract_sql}) IS NOT NULL`;
+
+    return {
+      index_name,
+      create_sql: `
+        CREATE INDEX IF NOT EXISTS "${index_name}"
+        ON "${this.table_name}" ((${extract_sql}))
+        ${where_clause}
+      `,
+    };
+  }
+
+  private buildJsonNumberFieldIndexStatement(
+    path: string | string[],
+    options?: EnsureJsonNumberFieldIndexOptions,
+  ): {
+    index_name: string;
+    create_sql: string;
+  } {
+    const normalized_path = Array.isArray(path)
+      ? path
+      : this.normalizeJsonPath(path);
+    const index_name =
+      options?.index_name ||
+      this.buildJsonNumberFieldIndexName(normalized_path);
+    assertSafeIdentifier(index_name, 'index_name');
+
+    const extract_sql = this.buildJsonExtractTextSql(
+      '"value"',
+      normalized_path,
+      [],
+    );
+    const numeric_value_sql = this.buildSafeNumericValueSql(extract_sql);
+    const where_clause =
+      options?.where_not_null === false
+        ? ''
+        : ` WHERE (${numeric_value_sql}) IS NOT NULL`;
+
+    return {
+      index_name,
+      create_sql: `
+        CREATE INDEX IF NOT EXISTS "${index_name}"
+        ON "${this.table_name}" ((${numeric_value_sql}))
+        ${where_clause}
+      `,
+    };
+  }
+
+  private async createConfiguredJsonIndexes(
+    query_runner: QueryRunner,
+  ): Promise<void> {
+    for (const index_definition of this.options.json_field_indexes) {
+      const { create_sql } = this.buildJsonFieldIndexStatement(
+        index_definition.path,
+        index_definition,
+      );
+      await query_runner.query(create_sql);
+    }
+
+    for (const index_definition of this.options.json_number_field_indexes) {
+      const { create_sql } = this.buildJsonNumberFieldIndexStatement(
+        index_definition.path,
+        index_definition,
+      );
+      await query_runner.query(create_sql);
+    }
   }
 
   private async hasIndex(index_name: string): Promise<boolean> {
@@ -900,6 +1069,7 @@ export class PGKVDatabase {
               `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_value_gin" ON "${this.table_name}" USING gin ("value")`,
             );
           }
+          await this.createConfiguredJsonIndexes(query_runner);
           await query_runner.query(`
             CREATE OR REPLACE FUNCTION jsonb_deep_merge(a jsonb, b jsonb)
             RETURNS jsonb AS $$
@@ -955,9 +1125,10 @@ export class PGKVDatabase {
     await this.ensureInitialized();
 
     const normalized_path = this.normalizeJsonPath(path);
-    const index_name =
-      options?.index_name || this.buildJsonFieldIndexName(normalized_path);
-    assertSafeIdentifier(index_name, 'index_name');
+    const { index_name, create_sql } = this.buildJsonFieldIndexStatement(
+      normalized_path,
+      options,
+    );
 
     if (await this.hasIndex(index_name)) {
       return {
@@ -967,23 +1138,7 @@ export class PGKVDatabase {
       };
     }
 
-    const extract_sql = this.buildJsonExtractTextSql(
-      '"value"',
-      normalized_path,
-      [],
-    );
-    const where_clause =
-      options?.where_not_null === false
-        ? ''
-        : ` WHERE (${extract_sql}) IS NOT NULL`;
-
-    await this.data_source.query(
-      `
-        CREATE INDEX IF NOT EXISTS "${index_name}"
-        ON "${this.table_name}" ((${extract_sql}))
-        ${where_clause}
-      `,
-    );
+    await this.data_source.query(create_sql);
 
     return {
       index_name,
@@ -1000,10 +1155,10 @@ export class PGKVDatabase {
     await this.ensureInitialized();
 
     const normalized_path = this.normalizeJsonPath(path);
-    const index_name =
-      options?.index_name ||
-      this.buildJsonNumberFieldIndexName(normalized_path);
-    assertSafeIdentifier(index_name, 'index_name');
+    const { index_name, create_sql } = this.buildJsonNumberFieldIndexStatement(
+      normalized_path,
+      options,
+    );
 
     if (await this.hasIndex(index_name)) {
       return {
@@ -1013,24 +1168,7 @@ export class PGKVDatabase {
       };
     }
 
-    const extract_sql = this.buildJsonExtractTextSql(
-      '"value"',
-      normalized_path,
-      [],
-    );
-    const numeric_value_sql = this.buildSafeNumericValueSql(extract_sql);
-    const where_clause =
-      options?.where_not_null === false
-        ? ''
-        : ` WHERE (${numeric_value_sql}) IS NOT NULL`;
-
-    await this.data_source.query(
-      `
-        CREATE INDEX IF NOT EXISTS "${index_name}"
-        ON "${this.table_name}" ((${numeric_value_sql}))
-        ${where_clause}
-      `,
-    );
+    await this.data_source.query(create_sql);
 
     return {
       index_name,

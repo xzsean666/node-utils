@@ -7,6 +7,7 @@ const SQLITE_SAFE_IN_BATCH_SIZE = 800;
 const SQLITE_BUSY_RETRY_TIMES = 3;
 const SQLITE_BUSY_RETRY_DELAY_MS = 100;
 const KV_SCAN_PAGE_SIZE = 1000;
+const SQLITE_CURRENT_TIMESTAMP_SQL = `STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')`;
 
 // 支持的数据类型枚举
 export enum SqliteValueType {
@@ -49,6 +50,16 @@ interface KeyScanOptions {
 interface GetOptions {
   expire?: number;
   include_timestamps?: boolean;
+}
+
+export interface SqliteKVDatabaseOptions {
+  create_created_at_index?: boolean;
+  create_updated_at_index?: boolean;
+}
+
+interface ResolvedSqliteKVDatabaseOptions {
+  create_created_at_index: boolean;
+  create_updated_at_index: boolean;
 }
 
 const TYPE_HANDLERS: Record<SqliteValueType, TypeHandler> = {
@@ -187,6 +198,7 @@ export class SqliteKVDatabase {
   private initialized = false;
   private initializing_promise: Promise<void> | null = null;
   private write_lock: Promise<void> = Promise.resolve();
+  private readonly options: ResolvedSqliteKVDatabaseOptions;
   private table_name: string;
   private custom_kv_store: EntitySchema<KVEntity>;
   private value_type: SqliteValueType;
@@ -196,11 +208,16 @@ export class SqliteKVDatabase {
     datasource_or_url?: string,
     table_name: string = 'kv_store',
     value_type: SqliteValueType = SqliteValueType.JSON,
+    options?: SqliteKVDatabaseOptions,
   ) {
     assertSafeIdentifier(table_name, 'table_name');
     this.table_name = table_name;
     this.value_type = value_type;
     this.type_handler = TYPE_HANDLERS[value_type];
+    this.options = {
+      create_created_at_index: options?.create_created_at_index !== false,
+      create_updated_at_index: options?.create_updated_at_index !== false,
+    };
 
     this.custom_kv_store = new EntitySchema<KVEntity>({
       name: table_name,
@@ -428,7 +445,9 @@ export class SqliteKVDatabase {
       const params: any[] = [];
 
       for (const [key, value] of batch) {
-        values_sql.push('(?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)');
+        values_sql.push(
+          `(?, ?, ${SQLITE_CURRENT_TIMESTAMP_SQL}, ${SQLITE_CURRENT_TIMESTAMP_SQL})`,
+        );
         params.push(key, this.type_handler.serialize(value));
       }
 
@@ -438,7 +457,7 @@ export class SqliteKVDatabase {
           VALUES ${values_sql.join(', ')}
           ON CONFLICT("key") DO UPDATE SET
             "value" = excluded."value",
-            "updated_at" = CURRENT_TIMESTAMP
+            "updated_at" = ${SQLITE_CURRENT_TIMESTAMP_SQL}
         `,
         params,
         query_runner,
@@ -614,24 +633,28 @@ export class SqliteKVDatabase {
                   {
                     name: 'created_at',
                     type: 'datetime',
-                    default: 'CURRENT_TIMESTAMP',
+                    default: SQLITE_CURRENT_TIMESTAMP_SQL,
                   },
                   {
                     name: 'updated_at',
                     type: 'datetime',
-                    default: 'CURRENT_TIMESTAMP',
+                    default: SQLITE_CURRENT_TIMESTAMP_SQL,
                   },
                 ],
               }),
             );
           }
 
-          await query_runner.query(
-            `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_created_at" ON "${this.table_name}" ("created_at")`,
-          );
-          await query_runner.query(
-            `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_updated_at" ON "${this.table_name}" ("updated_at")`,
-          );
+          if (this.options.create_created_at_index) {
+            await query_runner.query(
+              `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_created_at" ON "${this.table_name}" ("created_at")`,
+            );
+          }
+          if (this.options.create_updated_at_index) {
+            await query_runner.query(
+              `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_updated_at" ON "${this.table_name}" ("updated_at")`,
+            );
+          }
         } finally {
           await query_runner.release();
         }
@@ -746,7 +769,7 @@ export class SqliteKVDatabase {
         this.data_source.query(
           `
             INSERT INTO "${this.table_name}" ("key", "value", "created_at", "updated_at")
-            VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ${SQLITE_CURRENT_TIMESTAMP_SQL}, ${SQLITE_CURRENT_TIMESTAMP_SQL})
             ON CONFLICT("key") DO NOTHING
             RETURNING "key"
           `,

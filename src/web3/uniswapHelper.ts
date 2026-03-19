@@ -1,6 +1,15 @@
-import { ERC20Helper } from './erc20Helper';
+import { ERC20Helper } from "./erc20Helper";
+import type { EthersTxBatchHelperConfig } from "./ethersTxBatchHelper";
 
-import { ethers } from 'ethers';
+import { ethers } from "ethers";
+
+export interface UniswapHelperConfig extends EthersTxBatchHelperConfig {
+  uniswapV2RouterAddress?: string;
+  uniswapV3RouterAddress?: string;
+  uniswapV3QuoterAddress?: string;
+  uniswapV3FactoryAddress?: string;
+  useQuoterV2?: boolean;
+}
 
 export class UniswapHelper extends ERC20Helper {
   private uniswap_v2_router_address?: string;
@@ -9,7 +18,10 @@ export class UniswapHelper extends ERC20Helper {
   private uniswap_v3_factory_address?: string;
   private use_quoter_v2: boolean = true; // 默认使用 QuoterV2
 
-  constructor(NODE_PROVIDER: string | ethers.BrowserProvider, config?: any) {
+  constructor(
+    NODE_PROVIDER: string | ethers.BrowserProvider | ethers.JsonRpcProvider,
+    config: UniswapHelperConfig = {},
+  ) {
     super(NODE_PROVIDER, config);
     this.uniswap_v2_router_address = config?.uniswapV2RouterAddress;
     this.uniswap_v3_router_address = config?.uniswapV3RouterAddress;
@@ -60,7 +72,7 @@ export class UniswapHelper extends ERC20Helper {
     path: string[];
   }): Promise<bigint> {
     if (!this.uniswap_v2_router_address) {
-      throw new Error('Uniswap V2 Router address not set');
+      throw new Error("Uniswap V2 Router address not set");
     }
 
     const { amountIn, path } = params;
@@ -68,11 +80,16 @@ export class UniswapHelper extends ERC20Helper {
     const amounts = await this.callReadContract<bigint[]>({
       target: this.uniswap_v2_router_address,
       abi: UNISWAP_V2_ROUTER_ABI,
-      function_name: 'getAmountsOut',
+      function_name: "getAmountsOut",
       execute_args: [amountIn, path],
     });
 
-    return amounts[1];
+    const amount_out = amounts[1];
+    if (amount_out === undefined) {
+      throw new Error("getAmountsOut 返回数据异常");
+    }
+
+    return amount_out;
   }
 
   /**
@@ -87,7 +104,7 @@ export class UniswapHelper extends ERC20Helper {
     path: string[];
   }): Promise<bigint> {
     if (!this.uniswap_v2_router_address) {
-      throw new Error('Uniswap V2 Router address not set');
+      throw new Error("Uniswap V2 Router address not set");
     }
 
     const { amountOut, path } = params;
@@ -95,11 +112,16 @@ export class UniswapHelper extends ERC20Helper {
     const amounts = await this.callReadContract<bigint[]>({
       target: this.uniswap_v2_router_address,
       abi: UNISWAP_V2_ROUTER_ABI,
-      function_name: 'getAmountsIn',
+      function_name: "getAmountsIn",
       execute_args: [amountOut, path],
     });
 
-    return amounts[0];
+    const amount_in = amounts[0];
+    if (amount_in === undefined) {
+      throw new Error("getAmountsIn 返回数据异常");
+    }
+
+    return amount_in;
   }
 
   /**
@@ -118,9 +140,9 @@ export class UniswapHelper extends ERC20Helper {
     path: string[];
     to: string;
     deadline?: number;
-  }): Promise<any> {
+  }): Promise<ethers.TransactionResponse> {
     if (!this.uniswap_v2_router_address) {
-      throw new Error('Uniswap V2 Router address not set');
+      throw new Error("Uniswap V2 Router address not set");
     }
 
     const {
@@ -134,8 +156,9 @@ export class UniswapHelper extends ERC20Helper {
     return await this.callContract({
       target: this.uniswap_v2_router_address,
       abi: UNISWAP_V2_ROUTER_ABI,
-      function_name: 'swapExactTokensForTokens',
+      function_name: "swapExactTokensForTokens",
       execute_args: [amountIn, amountOutMin, path, to, deadline],
+      waitConfirm: false,
     });
   }
 
@@ -155,9 +178,9 @@ export class UniswapHelper extends ERC20Helper {
     path: string[];
     to: string;
     deadline?: number;
-  }): Promise<any> {
+  }): Promise<ethers.TransactionResponse> {
     if (!this.uniswap_v2_router_address) {
-      throw new Error('Uniswap V2 Router address not set');
+      throw new Error("Uniswap V2 Router address not set");
     }
 
     const {
@@ -171,9 +194,10 @@ export class UniswapHelper extends ERC20Helper {
     return await this.callContract({
       target: this.uniswap_v2_router_address,
       abi: UNISWAP_V2_ROUTER_ABI,
-      function_name: 'swapExactETHForTokens',
+      function_name: "swapExactETHForTokens",
       execute_args: [amountOutMin, path, to, deadline],
-      value: amountETH,
+      valueEther: amountETH,
+      waitConfirm: false,
     });
   }
 
@@ -193,9 +217,9 @@ export class UniswapHelper extends ERC20Helper {
     path: string[];
     to: string;
     deadline?: number;
-  }): Promise<any> {
+  }): Promise<ethers.TransactionResponse> {
     if (!this.uniswap_v2_router_address) {
-      throw new Error('Uniswap V2 Router address not set');
+      throw new Error("Uniswap V2 Router address not set");
     }
 
     const {
@@ -209,8 +233,9 @@ export class UniswapHelper extends ERC20Helper {
     return await this.callContract({
       target: this.uniswap_v2_router_address,
       abi: UNISWAP_V2_ROUTER_ABI,
-      function_name: 'swapExactTokensForETH',
+      function_name: "swapExactTokensForETH",
       execute_args: [amountIn, amountOutMin, path, to, deadline],
+      waitConfirm: false,
     });
   }
 
@@ -234,7 +259,7 @@ export class UniswapHelper extends ERC20Helper {
     sqrtPriceLimitX96?: bigint;
   }): Promise<bigint> {
     if (!this.uniswap_v3_quoter_address) {
-      throw new Error('Uniswap V3 Quoter address not set');
+      throw new Error("Uniswap V3 Quoter address not set");
     }
 
     const { tokenIn, tokenOut, fee, amountIn, sqrtPriceLimitX96 = 0n } = params;
@@ -244,7 +269,7 @@ export class UniswapHelper extends ERC20Helper {
       const result = await this.callStaticContract<any[]>({
         target: this.uniswap_v3_quoter_address,
         abi: UNISWAP_V3_QUOTER_V2_ABI,
-        function_name: 'quoteExactInputSingle',
+        function_name: "quoteExactInputSingle",
         args: [
           {
             tokenIn,
@@ -262,7 +287,7 @@ export class UniswapHelper extends ERC20Helper {
       const amount_out = await this.callStaticContract<bigint>({
         target: this.uniswap_v3_quoter_address,
         abi: UNISWAP_V3_QUOTER_ABI,
-        function_name: 'quoteExactInputSingle',
+        function_name: "quoteExactInputSingle",
         args: [tokenIn, tokenOut, fee, amountIn, sqrtPriceLimitX96],
       });
 
@@ -288,7 +313,7 @@ export class UniswapHelper extends ERC20Helper {
     sqrtPriceLimitX96?: bigint;
   }): Promise<bigint> {
     if (!this.uniswap_v3_quoter_address) {
-      throw new Error('Uniswap V3 Quoter address not set');
+      throw new Error("Uniswap V3 Quoter address not set");
     }
 
     const {
@@ -304,7 +329,7 @@ export class UniswapHelper extends ERC20Helper {
       const result = await this.callStaticContract<any[]>({
         target: this.uniswap_v3_quoter_address,
         abi: UNISWAP_V3_QUOTER_V2_ABI,
-        function_name: 'quoteExactOutputSingle',
+        function_name: "quoteExactOutputSingle",
         args: [
           {
             tokenIn,
@@ -322,7 +347,7 @@ export class UniswapHelper extends ERC20Helper {
       const amount_in = await this.callStaticContract<bigint>({
         target: this.uniswap_v3_quoter_address,
         abi: UNISWAP_V3_QUOTER_ABI,
-        function_name: 'quoteExactOutputSingle',
+        function_name: "quoteExactOutputSingle",
         args: [tokenIn, tokenOut, fee, amountOut, sqrtPriceLimitX96],
       });
 
@@ -352,9 +377,9 @@ export class UniswapHelper extends ERC20Helper {
     amountIn: bigint | string;
     amountOutMinimum: bigint | string;
     sqrtPriceLimitX96?: bigint;
-  }): Promise<any> {
+  }): Promise<ethers.TransactionResponse> {
     if (!this.uniswap_v3_router_address) {
-      throw new Error('Uniswap V3 Router address not set');
+      throw new Error("Uniswap V3 Router address not set");
     }
 
     const {
@@ -382,8 +407,9 @@ export class UniswapHelper extends ERC20Helper {
     return await this.callContract({
       target: this.uniswap_v3_router_address,
       abi: UNISWAP_V3_ROUTER_ABI,
-      function_name: 'exactInputSingle',
+      function_name: "exactInputSingle",
       execute_args: [exact_input_single_params],
+      waitConfirm: false,
     });
   }
 
@@ -409,9 +435,9 @@ export class UniswapHelper extends ERC20Helper {
     amountOut: bigint | string;
     amountInMaximum: bigint | string;
     sqrtPriceLimitX96?: bigint;
-  }): Promise<any> {
+  }): Promise<ethers.TransactionResponse> {
     if (!this.uniswap_v3_router_address) {
-      throw new Error('Uniswap V3 Router address not set');
+      throw new Error("Uniswap V3 Router address not set");
     }
 
     const {
@@ -439,8 +465,9 @@ export class UniswapHelper extends ERC20Helper {
     return await this.callContract({
       target: this.uniswap_v3_router_address,
       abi: UNISWAP_V3_ROUTER_ABI,
-      function_name: 'exactOutputSingle',
+      function_name: "exactOutputSingle",
       execute_args: [exact_output_single_params],
+      waitConfirm: false,
     });
   }
 
@@ -460,9 +487,9 @@ export class UniswapHelper extends ERC20Helper {
     deadline?: number;
     amountIn: bigint | string;
     amountOutMinimum: bigint | string;
-  }): Promise<any> {
+  }): Promise<ethers.TransactionResponse> {
     if (!this.uniswap_v3_router_address) {
-      throw new Error('Uniswap V3 Router address not set');
+      throw new Error("Uniswap V3 Router address not set");
     }
 
     const {
@@ -484,8 +511,9 @@ export class UniswapHelper extends ERC20Helper {
     return await this.callContract({
       target: this.uniswap_v3_router_address,
       abi: UNISWAP_V3_ROUTER_ABI,
-      function_name: 'exactInput',
+      function_name: "exactInput",
       execute_args: [exact_input_params],
+      waitConfirm: false,
     });
   }
 
@@ -497,15 +525,25 @@ export class UniswapHelper extends ERC20Helper {
    */
   encodePathV3(tokens: string[], fees: number[]): string {
     if (tokens.length !== fees.length + 1) {
-      throw new Error('Invalid path: tokens.length must be fees.length + 1');
+      throw new Error("Invalid path: tokens.length must be fees.length + 1");
     }
 
-    let path = '0x';
+    let path = "0x";
     for (let i = 0; i < fees.length; i++) {
-      path += tokens[i].slice(2); // 去掉 '0x'
-      path += fees[i].toString(16).padStart(6, '0'); // fee 3 bytes
+      const token = tokens[i];
+      const fee = fees[i];
+      if (!token || fee === undefined) {
+        throw new Error("Invalid path encoding input");
+      }
+
+      path += token.slice(2); // 去掉 '0x'
+      path += fee.toString(16).padStart(6, "0"); // fee 3 bytes
     }
-    path += tokens[tokens.length - 1].slice(2);
+    const last_token = tokens[tokens.length - 1];
+    if (!last_token) {
+      throw new Error("Invalid path: missing last token");
+    }
+    path += last_token.slice(2);
 
     return path;
   }
@@ -549,13 +587,13 @@ export class UniswapHelper extends ERC20Helper {
     fee: number,
   ): Promise<string> {
     if (!this.uniswap_v3_factory_address) {
-      throw new Error('Uniswap V3 Factory address not set');
+      throw new Error("Uniswap V3 Factory address not set");
     }
 
     const pool_address = await this.callReadContract<string>({
       target: this.uniswap_v3_factory_address,
       abi: UNISWAP_V3_FACTORY_ABI,
-      function_name: 'getPool',
+      function_name: "getPool",
       execute_args: [tokenA, tokenB, fee],
     });
 
@@ -588,7 +626,7 @@ export class UniswapHelper extends ERC20Helper {
       const liquidity = await this.callReadContract<bigint>({
         target: poolAddress,
         abi: UNISWAP_V3_POOL_ABI,
-        function_name: 'liquidity',
+        function_name: "liquidity",
         execute_args: [],
       });
       return liquidity;
@@ -617,7 +655,7 @@ export class UniswapHelper extends ERC20Helper {
     }>
   > {
     if (!this.uniswap_v3_factory_address) {
-      throw new Error('Uniswap V3 Factory address not set');
+      throw new Error("Uniswap V3 Factory address not set");
     }
 
     // 如果没有 batch_call_address，使用传统方式
@@ -646,12 +684,12 @@ export class UniswapHelper extends ERC20Helper {
       target: this.uniswap_v3_factory_address!,
       data: this.encodeDataByABI({
         abi: UNISWAP_V3_FACTORY_ABI,
-        function_name: 'getPool',
+        function_name: "getPool",
         execute_args: [tokenA, tokenB, fee],
         target: this.uniswap_v3_factory_address!,
       }).data,
       abi: UNISWAP_V3_FACTORY_ABI,
-      function_name: 'getPool',
+      function_name: "getPool",
       execute_args: [tokenA, tokenB, fee],
     }));
 
@@ -659,29 +697,46 @@ export class UniswapHelper extends ERC20Helper {
 
     // 过滤出存在的池子并批量获取流动性
     const existing_pools = pool_address_results
-      .map((result, index) => ({
-        fee: fees[index],
-        poolAddress: result.success
-          ? (result.decodedData[0] as string)
-          : ethers.ZeroAddress,
-        exists:
-          result.success &&
-          result.decodedData[0] !== ethers.ZeroAddress &&
-          result.decodedData[0] !==
-            '0x0000000000000000000000000000000000000000',
-      }))
-      .filter((pool) => pool.exists);
+      .map((result, index) => {
+        const fee = fees[index];
+        if (fee === undefined) {
+          return null;
+        }
+
+        const poolAddress =
+          this.getDecodedValueAt<string>(result) ?? ethers.ZeroAddress;
+
+        return {
+          fee,
+          poolAddress,
+          exists:
+            this.isDecodedBatchResult(result) &&
+            poolAddress !== ethers.ZeroAddress &&
+            poolAddress !== "0x0000000000000000000000000000000000000000",
+        };
+      })
+      .filter(
+        (pool): pool is { fee: number; poolAddress: string; exists: true } =>
+          pool !== null && pool.exists,
+      );
 
     // 如果没有存在的池子，直接返回
     if (existing_pools.length === 0) {
-      return fees.map((fee, index) => ({
-        fee,
-        poolAddress: pool_address_results[index].success
-          ? (pool_address_results[index].decodedData[0] as string)
-          : ethers.ZeroAddress,
-        exists: false,
-        liquidity: 0n,
-      }));
+      return fees.map((fee, index) => {
+        const pool_result = pool_address_results[index];
+        const pool_address =
+          pool_result && this.isDecodedBatchResult(pool_result)
+            ? (this.getDecodedValueAt<string>(pool_result) ??
+              ethers.ZeroAddress)
+            : ethers.ZeroAddress;
+
+        return {
+          fee,
+          poolAddress: pool_address,
+          exists: false,
+          liquidity: 0n,
+        };
+      });
     }
 
     // 批量获取流动性
@@ -689,12 +744,12 @@ export class UniswapHelper extends ERC20Helper {
       target: pool.poolAddress,
       data: this.encodeDataByABI({
         abi: UNISWAP_V3_POOL_ABI,
-        function_name: 'liquidity',
+        function_name: "liquidity",
         execute_args: [],
         target: pool.poolAddress,
       }).data,
       abi: UNISWAP_V3_POOL_ABI,
-      function_name: 'liquidity',
+      function_name: "liquidity",
       execute_args: [],
     }));
 
@@ -703,20 +758,24 @@ export class UniswapHelper extends ERC20Helper {
     // 构建流动性映射
     const liquidity_map = new Map<string, bigint>();
     existing_pools.forEach((pool, index) => {
-      const liquidity = liquidity_results[index].success
-        ? (liquidity_results[index].decodedData[0] as bigint)
-        : 0n;
+      const liquidity_result = liquidity_results[index];
+      const liquidity =
+        liquidity_result && this.isDecodedBatchResult(liquidity_result)
+          ? (this.getDecodedValueAt<bigint>(liquidity_result) ?? 0n)
+          : 0n;
       liquidity_map.set(pool.poolAddress.toLowerCase(), liquidity);
     });
 
     // 合并结果
     return fees.map((fee, index) => {
-      const pool_address = pool_address_results[index].success
-        ? (pool_address_results[index].decodedData[0] as string)
-        : ethers.ZeroAddress;
+      const pool_result = pool_address_results[index];
+      const pool_address =
+        pool_result && this.isDecodedBatchResult(pool_result)
+          ? (this.getDecodedValueAt<string>(pool_result) ?? ethers.ZeroAddress)
+          : ethers.ZeroAddress;
       const exists =
         pool_address !== ethers.ZeroAddress &&
-        pool_address !== '0x0000000000000000000000000000000000000000';
+        pool_address !== "0x0000000000000000000000000000000000000000";
 
       return {
         fee,
@@ -854,47 +913,47 @@ export class UniswapHelper extends ERC20Helper {
 // ==================== ABI Definitions ====================
 
 export const UNISWAP_V2_ROUTER_ABI = [
-  'function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts)',
-  'function getAmountsIn(uint amountOut, address[] memory path) public view returns (uint[] memory amounts)',
-  'function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
-  'function swapTokensForExactTokens(uint amountOut, uint amountInMax, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
-  'function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)',
-  'function swapTokensForExactETH(uint amountOut, uint amountInMax, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
-  'function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
-  'function swapETHForExactTokens(uint amountOut, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)',
+  "function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts)",
+  "function getAmountsIn(uint amountOut, address[] memory path) public view returns (uint[] memory amounts)",
+  "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)",
+  "function swapTokensForExactTokens(uint amountOut, uint amountInMax, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)",
+  "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)",
+  "function swapTokensForExactETH(uint amountOut, uint amountInMax, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)",
+  "function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)",
+  "function swapETHForExactTokens(uint amountOut, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)",
 ];
 
 export const UNISWAP_V3_ROUTER_ABI = [
-  'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)',
-  'function exactOutputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountOut, uint256 amountInMaximum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountIn)',
-  'function exactInput((bytes path, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum)) external payable returns (uint256 amountOut)',
-  'function exactOutput((bytes path, address recipient, uint256 deadline, uint256 amountOut, uint256 amountInMaximum)) external payable returns (uint256 amountIn)',
+  "function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)",
+  "function exactOutputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountOut, uint256 amountInMaximum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountIn)",
+  "function exactInput((bytes path, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum)) external payable returns (uint256 amountOut)",
+  "function exactOutput((bytes path, address recipient, uint256 deadline, uint256 amountOut, uint256 amountInMaximum)) external payable returns (uint256 amountIn)",
 ];
 
 // Uniswap V3 Quoter V1 ABI
 export const UNISWAP_V3_QUOTER_ABI = [
-  'function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) external view returns (uint256 amountOut)',
-  'function quoteExactOutputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountOut, uint160 sqrtPriceLimitX96) external view returns (uint256 amountIn)',
-  'function quoteExactInput(bytes memory path, uint256 amountIn) external view returns (uint256 amountOut)',
-  'function quoteExactOutput(bytes memory path, uint256 amountOut) external view returns (uint256 amountIn)',
+  "function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) external view returns (uint256 amountOut)",
+  "function quoteExactOutputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountOut, uint160 sqrtPriceLimitX96) external view returns (uint256 amountIn)",
+  "function quoteExactInput(bytes memory path, uint256 amountIn) external view returns (uint256 amountOut)",
+  "function quoteExactOutput(bytes memory path, uint256 amountOut) external view returns (uint256 amountIn)",
 ];
 
 // Uniswap V3 Quoter V2 ABI (returns multiple values)
 export const UNISWAP_V3_QUOTER_V2_ABI = [
-  'function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96)) external returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
-  'function quoteExactOutputSingle((address tokenIn, address tokenOut, uint256 amount, uint24 fee, uint160 sqrtPriceLimitX96)) external returns (uint256 amountIn, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
-  'function quoteExactInput(bytes memory path, uint256 amountIn) external returns (uint256 amountOut, uint160[] memory sqrtPriceX96AfterList, uint32[] memory initializedTicksCrossedList, uint256 gasEstimate)',
-  'function quoteExactOutput(bytes memory path, uint256 amountOut) external returns (uint256 amountIn, uint160[] memory sqrtPriceX96AfterList, uint32[] memory initializedTicksCrossedList, uint256 gasEstimate)',
+  "function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96)) external returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)",
+  "function quoteExactOutputSingle((address tokenIn, address tokenOut, uint256 amount, uint24 fee, uint160 sqrtPriceLimitX96)) external returns (uint256 amountIn, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)",
+  "function quoteExactInput(bytes memory path, uint256 amountIn) external returns (uint256 amountOut, uint160[] memory sqrtPriceX96AfterList, uint32[] memory initializedTicksCrossedList, uint256 gasEstimate)",
+  "function quoteExactOutput(bytes memory path, uint256 amountOut) external returns (uint256 amountIn, uint160[] memory sqrtPriceX96AfterList, uint32[] memory initializedTicksCrossedList, uint256 gasEstimate)",
 ];
 
 export const UNISWAP_V3_FACTORY_ABI = [
-  'function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)',
+  "function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)",
 ];
 
 export const UNISWAP_V3_POOL_ABI = [
-  'function liquidity() external view returns (uint128)',
-  'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)',
-  'function token0() external view returns (address)',
-  'function token1() external view returns (address)',
-  'function fee() external view returns (uint24)',
+  "function liquidity() external view returns (uint128)",
+  "function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)",
+  "function token0() external view returns (address)",
+  "function token1() external view returns (address)",
+  "function fee() external view returns (uint24)",
 ];

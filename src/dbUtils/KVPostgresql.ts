@@ -1,22 +1,22 @@
-import { createHash } from 'node:crypto';
-import 'reflect-metadata';
-import { DataSource, EntitySchema, Table } from 'typeorm';
-import type { DataSourceOptions, QueryRunner, Repository } from 'typeorm';
+import { createHash } from "node:crypto";
+import "reflect-metadata";
+import { DataSource, EntitySchema, Table } from "typeorm";
+import type { DataSourceOptions, QueryRunner, Repository } from "typeorm";
 
 const POSTGRES_SAFE_WRITE_BATCH_SIZE = 5000;
 const POSTGRES_SAFE_IN_BATCH_SIZE = 10000;
 const KV_SCAN_PAGE_SIZE = 1000;
 const POSTGRES_NUMERIC_REGEX =
-  '^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[eE][+-]?\\d+)?$';
+  "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[eE][+-]?\\d+)?$";
 
 export type ValueType =
-  | 'jsonb'
-  | 'varchar'
-  | 'text'
-  | 'integer'
-  | 'boolean'
-  | 'float'
-  | 'bytea';
+  | "jsonb"
+  | "varchar"
+  | "text"
+  | "integer"
+  | "boolean"
+  | "float"
+  | "bytea";
 
 export type PostgreSQLValueType = ValueType;
 
@@ -35,13 +35,11 @@ export interface EnsureJsonFieldIndexOptions {
 
 export type EnsureJsonNumberFieldIndexOptions = EnsureJsonFieldIndexOptions;
 
-export interface JsonFieldIndexDefinition
-  extends EnsureJsonFieldIndexOptions {
+export interface JsonFieldIndexDefinition extends EnsureJsonFieldIndexOptions {
   path: string;
 }
 
-export interface JsonNumberFieldIndexDefinition
-  extends EnsureJsonNumberFieldIndexOptions {
+export interface JsonNumberFieldIndexDefinition extends EnsureJsonNumberFieldIndexOptions {
   path: string;
 }
 
@@ -81,7 +79,7 @@ interface ParsedSearchCursor {
 interface KeyScanOptions {
   cursor?: string;
   limit?: number;
-  order_by?: 'ASC' | 'DESC';
+  order_by?: "ASC" | "DESC";
   prefix?: string;
 }
 
@@ -91,15 +89,15 @@ interface GetOptions {
 }
 
 function bigintJsonReplacer(_key: string, value: any) {
-  return typeof value === 'bigint' ? value.toString() : value;
+  return typeof value === "bigint" ? value.toString() : value;
 }
 
 function normalizeJsonValueForIdentity(value: any): any {
-  if (typeof value === 'bigint') {
+  if (typeof value === "bigint") {
     return value.toString();
   }
 
-  if (value == null || typeof value !== 'object') {
+  if (value == null || typeof value !== "object") {
     return value;
   }
 
@@ -115,7 +113,7 @@ function normalizeJsonValueForIdentity(value: any): any {
     return Array.from(value);
   }
 
-  if (typeof value.toJSON === 'function') {
+  if (typeof value.toJSON === "function") {
     return normalizeJsonValueForIdentity(value.toJSON());
   }
 
@@ -132,6 +130,31 @@ function normalizeJsonValueForIdentity(value: any): any {
 
 function stableJsonIdentityString(value: any): string {
   return JSON.stringify(normalizeJsonValueForIdentity(value));
+}
+
+function buildPrefixRangeExclusiveEnd(prefix: string): string | null {
+  if (!/^[\x00-\x7F]+$/.test(prefix)) {
+    return null;
+  }
+
+  const characters = Array.from(prefix);
+  for (let i = characters.length - 1; i >= 0; i--) {
+    const character = characters[i];
+    if (!character) {
+      continue;
+    }
+
+    const code_point = character.codePointAt(0);
+    if (code_point == null || code_point >= 0x7f) {
+      continue;
+    }
+
+    return (
+      characters.slice(0, i).join("") + String.fromCodePoint(code_point + 1)
+    );
+  }
+
+  return null;
 }
 
 function normalizePositiveInteger(
@@ -162,7 +185,7 @@ function assertSafeIdentifier(name: string, label: string): void {
 }
 
 function escapeLikePattern(value: string): string {
-  return value.replace(/[\\%_]/g, '\\$&');
+  return value.replace(/[\\%_]/g, "\\$&");
 }
 
 function escapeSqlLiteral(value: string): string {
@@ -176,17 +199,19 @@ export class PGKVDatabase {
   private readonly options: ResolvedPGKVDatabaseOptions;
   private initialized = false;
   private initializing_promise: Promise<void> | null = null;
+  private jsonb_merge_function_ready = false;
+  private jsonb_merge_function_promise: Promise<void> | null = null;
   private table_name: string;
   private value_type: ValueType;
   private custom_kv_store: EntitySchema<KVEntity>;
 
   constructor(
     datasource_or_url?: string,
-    table_name: string = 'kv_store',
-    value_type: ValueType = 'jsonb',
+    table_name: string = "kv_store",
+    value_type: ValueType = "jsonb",
     options?: PGKVDatabaseOptions,
   ) {
-    assertSafeIdentifier(table_name, 'table_name');
+    assertSafeIdentifier(table_name, "table_name");
     this.table_name = table_name;
     this.value_type = value_type;
     this.options = {
@@ -199,14 +224,14 @@ export class PGKVDatabase {
     this.validateConfiguredJsonIndexOptions();
 
     if (!datasource_or_url) {
-      throw new Error('datasource_or_url is required');
+      throw new Error("datasource_or_url is required");
     }
 
     this.custom_kv_store = new EntitySchema<KVEntity>({
       name: table_name,
       columns: {
         key: {
-          type: 'varchar',
+          type: "varchar",
           length: 255,
           primary: true,
         },
@@ -215,20 +240,20 @@ export class PGKVDatabase {
           nullable: true,
         },
         created_at: {
-          type: 'timestamptz',
+          type: "timestamptz",
           createDate: true,
-          name: 'created_at',
+          name: "created_at",
         },
         updated_at: {
-          type: 'timestamptz',
+          type: "timestamptz",
           updateDate: true,
-          name: 'updated_at',
+          name: "updated_at",
         },
       },
     });
 
     this.data_source_options = {
-      type: 'postgres',
+      type: "postgres",
       url: datasource_or_url,
       entities: [this.custom_kv_store],
       synchronize: false,
@@ -243,28 +268,28 @@ export class PGKVDatabase {
         keepAliveInitialDelay: 10000,
         maxUses: 7500,
       },
-      logging: ['error'],
+      logging: ["error"],
     };
   }
 
   private getPostgreSQLColumnType(value_type: ValueType): string {
     switch (value_type) {
-      case 'jsonb':
-        return 'jsonb';
-      case 'varchar':
-        return 'varchar(255)';
-      case 'text':
-        return 'text';
-      case 'integer':
-        return 'integer';
-      case 'boolean':
-        return 'boolean';
-      case 'float':
-        return 'float';
-      case 'bytea':
-        return 'bytea';
+      case "jsonb":
+        return "jsonb";
+      case "varchar":
+        return "varchar(255)";
+      case "text":
+        return "text";
+      case "integer":
+        return "integer";
+      case "boolean":
+        return "boolean";
+      case "float":
+        return "float";
+      case "bytea":
+        return "bytea";
       default:
-        return 'jsonb';
+        return "jsonb";
     }
   }
 
@@ -274,46 +299,46 @@ export class PGKVDatabase {
   ): void {
     if (!supported_types.includes(this.value_type)) {
       throw new Error(
-        `Operation '${operation}' is not supported for value type '${this.value_type}'. Supported types: ${supported_types.join(', ')}`,
+        `Operation '${operation}' is not supported for value type '${this.value_type}'. Supported types: ${supported_types.join(", ")}`,
       );
     }
   }
 
   private serializeValue(value: any): any {
-    if (this.value_type === 'jsonb') {
+    if (this.value_type === "jsonb") {
       return value;
     }
-    if (this.value_type === 'bytea') {
+    if (this.value_type === "bytea") {
       if (Buffer.isBuffer(value)) {
         return value;
       }
-      if (typeof value === 'string') {
-        return Buffer.from(value, 'utf8');
+      if (typeof value === "string") {
+        return Buffer.from(value, "utf8");
       }
       if (value instanceof Uint8Array) {
         return Buffer.from(value);
       }
-      return Buffer.from(JSON.stringify(value, bigintJsonReplacer), 'utf8');
+      return Buffer.from(JSON.stringify(value, bigintJsonReplacer), "utf8");
     }
     return value;
   }
 
   private serializeValueForWrite(value: any): any {
-    if (this.value_type === 'jsonb') {
+    if (this.value_type === "jsonb") {
       return JSON.stringify(value, bigintJsonReplacer);
     }
     return this.serializeValue(value);
   }
 
   private deserializeValue(value: any): any {
-    if (this.value_type === 'bytea' && Buffer.isBuffer(value)) {
+    if (this.value_type === "bytea" && Buffer.isBuffer(value)) {
       return value;
     }
     return value;
   }
 
   private getValueIdentity(value: any): string {
-    if (this.value_type === 'jsonb') {
+    if (this.value_type === "jsonb") {
       return `${this.value_type}:${stableJsonIdentityString(value)}`;
     }
 
@@ -323,7 +348,7 @@ export class PGKVDatabase {
       Buffer.isBuffer(serialized_value) ||
       serialized_value instanceof Uint8Array
     ) {
-      return `${this.value_type}:buffer:${Buffer.from(serialized_value).toString('base64')}`;
+      return `${this.value_type}:buffer:${Buffer.from(serialized_value).toString("base64")}`;
     }
 
     if (serialized_value instanceof Date) {
@@ -338,7 +363,7 @@ export class PGKVDatabase {
     if (include_timestamps) {
       fields.push('"created_at"', '"updated_at"');
     }
-    return fields.join(', ');
+    return fields.join(", ");
   }
 
   private normalizeDate(value: string | Date | undefined): Date {
@@ -422,20 +447,20 @@ export class PGKVDatabase {
   private normalizeJsonPath(path: string): string[] {
     const trimmed = path.trim();
     if (!trimmed) {
-      throw new Error('JSON path cannot be empty');
+      throw new Error("JSON path cannot be empty");
     }
 
-    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
       return trimmed
         .slice(1, -1)
-        .split(',')
+        .split(",")
         .map((part) => part.trim())
         .filter(Boolean);
     }
 
     return trimmed
-      .replace(/\[(\d+)\]/g, '.$1')
-      .split('.')
+      .replace(/\[(\d+)\]/g, ".$1")
+      .split(".")
       .map((part) => part.trim())
       .filter(Boolean);
   }
@@ -446,7 +471,7 @@ export class PGKVDatabase {
       : this.normalizeJsonPath(path);
     return `ARRAY[${normalized_path
       .map((part) => `'${escapeSqlLiteral(part)}'`)
-      .join(', ')}]`;
+      .join(", ")}]`;
   }
 
   private buildJsonExtractTextSql(
@@ -470,18 +495,18 @@ export class PGKVDatabase {
       ? path
       : this.normalizeJsonPath(path);
     const readable_path = normalized_path
-      .map((part) => part.replace(/[^A-Za-z0-9_]+/g, '_'))
-      .join('_')
-      .replace(/_+/g, '_')
-      .replace(/^_+|_+$/g, '');
-    const hash = createHash('sha1')
-      .update(`${this.table_name}:${normalized_path.join('.')}`)
-      .digest('hex')
+      .map((part) => part.replace(/[^A-Za-z0-9_]+/g, "_"))
+      .join("_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    const hash = createHash("sha1")
+      .update(`${this.table_name}:${normalized_path.join(".")}`)
+      .digest("hex")
       .slice(0, 10);
-    const base_name = `IDX_${this.table_name}_value_${readable_path || 'field'}`;
+    const base_name = `IDX_${this.table_name}_value_${readable_path || "field"}`;
     const truncated_base = base_name
       .slice(0, Math.max(1, 63 - hash.length - 1))
-      .replace(/_+$/g, '');
+      .replace(/_+$/g, "");
     return `${truncated_base}_${hash}`;
   }
 
@@ -490,24 +515,24 @@ export class PGKVDatabase {
       ? path
       : this.normalizeJsonPath(path);
     const readable_path = normalized_path
-      .map((part) => part.replace(/[^A-Za-z0-9_]+/g, '_'))
-      .join('_')
-      .replace(/_+/g, '_')
-      .replace(/^_+|_+$/g, '');
-    const hash = createHash('sha1')
-      .update(`${this.table_name}:number:${normalized_path.join('.')}`)
-      .digest('hex')
+      .map((part) => part.replace(/[^A-Za-z0-9_]+/g, "_"))
+      .join("_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    const hash = createHash("sha1")
+      .update(`${this.table_name}:number:${normalized_path.join(".")}`)
+      .digest("hex")
       .slice(0, 10);
-    const base_name = `IDX_${this.table_name}_value_num_${readable_path || 'field'}`;
+    const base_name = `IDX_${this.table_name}_value_num_${readable_path || "field"}`;
     const truncated_base = base_name
       .slice(0, Math.max(1, 63 - hash.length - 1))
-      .replace(/_+$/g, '');
+      .replace(/_+$/g, "");
     return `${truncated_base}_${hash}`;
   }
 
   private validateConfiguredJsonIndexOptions(): void {
     if (
-      this.value_type !== 'jsonb' &&
+      this.value_type !== "jsonb" &&
       (this.options.json_field_indexes.length > 0 ||
         this.options.json_number_field_indexes.length > 0)
     ) {
@@ -529,7 +554,7 @@ export class PGKVDatabase {
       : this.normalizeJsonPath(path);
     const index_name =
       options?.index_name || this.buildJsonFieldIndexName(normalized_path);
-    assertSafeIdentifier(index_name, 'index_name');
+    assertSafeIdentifier(index_name, "index_name");
 
     const extract_sql = this.buildJsonExtractTextSql(
       '"value"',
@@ -538,7 +563,7 @@ export class PGKVDatabase {
     );
     const where_clause =
       options?.where_not_null === false
-        ? ''
+        ? ""
         : ` WHERE (${extract_sql}) IS NOT NULL`;
 
     return {
@@ -564,7 +589,7 @@ export class PGKVDatabase {
     const index_name =
       options?.index_name ||
       this.buildJsonNumberFieldIndexName(normalized_path);
-    assertSafeIdentifier(index_name, 'index_name');
+    assertSafeIdentifier(index_name, "index_name");
 
     const extract_sql = this.buildJsonExtractTextSql(
       '"value"',
@@ -574,7 +599,7 @@ export class PGKVDatabase {
     const numeric_value_sql = this.buildSafeNumericValueSql(extract_sql);
     const where_clause =
       options?.where_not_null === false
-        ? ''
+        ? ""
         : ` WHERE (${numeric_value_sql}) IS NOT NULL`;
 
     return {
@@ -627,7 +652,7 @@ export class PGKVDatabase {
     value: any,
     params: any[],
   ): string {
-    if (this.value_type === 'jsonb') {
+    if (this.value_type === "jsonb") {
       params.push(this.serializeValueForWrite(value));
       return `${column_sql} = $${params.length}::jsonb`;
     }
@@ -644,18 +669,18 @@ export class PGKVDatabase {
       return value.toISOString();
     }
     if (
-      typeof value === 'string' ||
-      typeof value === 'number' ||
-      typeof value === 'boolean' ||
-      typeof value === 'bigint'
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean" ||
+      typeof value === "bigint"
     ) {
       return String(value);
     }
-    if (typeof value === 'symbol') {
+    if (typeof value === "symbol") {
       return value.toString();
     }
-    if (typeof value === 'function') {
-      return value.name || '[function]';
+    if (typeof value === "function") {
+      return value.name || "[function]";
     }
 
     return JSON.stringify(value, bigintJsonReplacer);
@@ -664,10 +689,10 @@ export class PGKVDatabase {
   private parseSearchCursor(cursor: string): ParsedSearchCursor {
     try {
       const parsed = JSON.parse(cursor) as Partial<ParsedSearchCursor>;
-      if (parsed && typeof parsed.value === 'string') {
+      if (parsed && typeof parsed.value === "string") {
         return {
           value: parsed.value,
-          key: typeof parsed.key === 'string' ? parsed.key : null,
+          key: typeof parsed.key === "string" ? parsed.key : null,
         };
       }
     } catch {
@@ -682,9 +707,9 @@ export class PGKVDatabase {
 
   private resolveGetOptions(
     options_or_expire?: number | GetOptions,
-  ): Required<Pick<GetOptions, 'include_timestamps'>> &
-    Pick<GetOptions, 'expire'> {
-    if (typeof options_or_expire === 'number') {
+  ): Required<Pick<GetOptions, "include_timestamps">> &
+    Pick<GetOptions, "expire"> {
+    if (typeof options_or_expire === "number") {
       return {
         expire: options_or_expire,
         include_timestamps: false,
@@ -759,7 +784,7 @@ export class PGKVDatabase {
 
   private buildSafeNumericCompareSql(
     extract_sql: string,
-    operator: '>' | '<' | '>=' | '<=' | '=' | '!=',
+    operator: ">" | "<" | ">=" | "<=" | "=" | "!=",
     parameter_index: number,
   ): string {
     const numeric_value_sql = this.buildSafeNumericValueSql(extract_sql);
@@ -778,7 +803,7 @@ export class PGKVDatabase {
 
   private buildSafeTimestampCompareSql(
     extract_sql: string,
-    operator: '>' | '<' | '>=' | '<=' | '=' | '!=',
+    operator: ">" | "<" | ">=" | "<=" | "=" | "!=",
     parameter_index: number,
   ): string {
     return `
@@ -832,7 +857,7 @@ export class PGKVDatabase {
     options?: {
       limit?: number;
       offset?: number;
-      order_by?: 'ASC' | 'DESC';
+      order_by?: "ASC" | "DESC";
       case_sensitive?: boolean;
       include_timestamps?: boolean;
     },
@@ -840,8 +865,8 @@ export class PGKVDatabase {
     Record<string, T | { value: T; created_at: Date; updated_at: Date }>
   > {
     const include_timestamps = options?.include_timestamps === true;
-    const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
-    const like_operator = options?.case_sensitive === false ? 'ILIKE' : 'LIKE';
+    const order_by = options?.order_by === "DESC" ? "DESC" : "ASC";
+    const like_operator = options?.case_sensitive === false ? "ILIKE" : "LIKE";
     const params: any[] = [`%${escapeLikePattern(suffix)}`];
     let query = `
       SELECT ${this.buildSelectFields(include_timestamps)}
@@ -850,12 +875,12 @@ export class PGKVDatabase {
       ORDER BY "key" ${order_by}
     `;
 
-    if (typeof options?.limit === 'number' && options.limit > 0) {
+    if (typeof options?.limit === "number" && options.limit > 0) {
       params.push(Math.floor(options.limit));
       query += ` LIMIT $${params.length}`;
     }
 
-    if (typeof options?.offset === 'number' && options.offset > 0) {
+    if (typeof options?.offset === "number" && options.offset > 0) {
       params.push(Math.floor(options.offset));
       query += ` OFFSET $${params.length}`;
     }
@@ -908,9 +933,12 @@ export class PGKVDatabase {
     entries: Array<[string, any]>,
     query_runner?: QueryRunner,
     batch_size: number = POSTGRES_SAFE_WRITE_BATCH_SIZE,
+    dedupe_entries: boolean = true,
   ): Promise<void> {
-    const deduped_entries = dedupeEntriesByKey(entries);
-    if (deduped_entries.length === 0) {
+    const entries_to_write = dedupe_entries
+      ? dedupeEntriesByKey(entries)
+      : entries;
+    if (entries_to_write.length === 0) {
       return;
     }
 
@@ -921,8 +949,8 @@ export class PGKVDatabase {
     );
     const executor = this.getQueryExecutor(query_runner);
 
-    for (let i = 0; i < deduped_entries.length; i += safe_batch_size) {
-      const chunk = deduped_entries.slice(i, i + safe_batch_size);
+    for (let i = 0; i < entries_to_write.length; i += safe_batch_size) {
+      const chunk = entries_to_write.slice(i, i + safe_batch_size);
       const values_sql: string[] = [];
       const params: any[] = [];
 
@@ -932,7 +960,7 @@ export class PGKVDatabase {
         const value_index = params.length + 1;
         params.push(serialized_value);
         const value_placeholder =
-          this.value_type === 'jsonb'
+          this.value_type === "jsonb"
             ? `$${value_index}::jsonb`
             : `$${value_index}`;
         values_sql.push(`($${key_index}, ${value_placeholder}, NOW(), NOW())`);
@@ -941,7 +969,7 @@ export class PGKVDatabase {
       await executor.query(
         `
           INSERT INTO "${this.table_name}" ("key", "value", "created_at", "updated_at")
-          VALUES ${values_sql.join(', ')}
+          VALUES ${values_sql.join(", ")}
           ON CONFLICT ("key") DO UPDATE SET
             "value" = EXCLUDED."value",
             "updated_at" = NOW()
@@ -955,11 +983,13 @@ export class PGKVDatabase {
     entries: Array<[string, any]>,
     query_runner?: QueryRunner,
     batch_size: number = POSTGRES_SAFE_WRITE_BATCH_SIZE,
+    dedupe_entries: boolean = true,
   ): Promise<void> {
     await this.upsertSerializedEntries(
       entries.map(([key, value]) => [key, this.serializeValueForWrite(value)]),
       query_runner,
       batch_size,
+      dedupe_entries,
     );
   }
 
@@ -996,6 +1026,56 @@ export class PGKVDatabase {
     return deleted_count;
   }
 
+  private async ensureJsonbDeepMergeFunction(): Promise<void> {
+    if (this.value_type !== "jsonb" || this.jsonb_merge_function_ready) {
+      return;
+    }
+
+    if (this.jsonb_merge_function_promise) {
+      await this.jsonb_merge_function_promise;
+      return;
+    }
+
+    this.jsonb_merge_function_promise = (async () => {
+      const rows = await this.data_source.query(
+        `SELECT to_regprocedure($1) AS regprocedure`,
+        ["jsonb_deep_merge(jsonb,jsonb)"],
+      );
+
+      if (!(rows[0] as { regprocedure?: string | null })?.regprocedure) {
+        await this.data_source.query(`
+          CREATE OR REPLACE FUNCTION jsonb_deep_merge(a jsonb, b jsonb)
+          RETURNS jsonb AS $$
+          DECLARE
+            result jsonb;
+            key text;
+            value jsonb;
+          BEGIN
+            result := a;
+            FOR key, value IN SELECT * FROM jsonb_each(b)
+            LOOP
+              IF jsonb_typeof(result->key) = 'object' AND jsonb_typeof(value) = 'object' THEN
+                result := jsonb_set(result, ARRAY[key], jsonb_deep_merge(result->key, value));
+              ELSE
+                result := jsonb_set(result, ARRAY[key], value);
+              END IF;
+            END LOOP;
+            RETURN result;
+          END;
+          $$ LANGUAGE plpgsql;
+        `);
+      }
+
+      this.jsonb_merge_function_ready = true;
+    })();
+
+    try {
+      await this.jsonb_merge_function_promise;
+    } finally {
+      this.jsonb_merge_function_promise = null;
+    }
+  }
+
   private async ensureInitialized(): Promise<void> {
     if (this.initialized && this.data_source.isInitialized) {
       return;
@@ -1026,25 +1106,25 @@ export class PGKVDatabase {
               name: this.table_name,
               columns: [
                 {
-                  name: 'key',
-                  type: 'varchar',
-                  length: '255',
+                  name: "key",
+                  type: "varchar",
+                  length: "255",
                   isPrimary: true,
                 },
                 {
-                  name: 'value',
+                  name: "value",
                   type: this.getPostgreSQLColumnType(this.value_type),
                   isNullable: true,
                 },
                 {
-                  name: 'created_at',
-                  type: 'timestamptz',
-                  default: 'CURRENT_TIMESTAMP',
+                  name: "created_at",
+                  type: "timestamptz",
+                  default: "CURRENT_TIMESTAMP",
                 },
                 {
-                  name: 'updated_at',
-                  type: 'timestamptz',
-                  default: 'CURRENT_TIMESTAMP',
+                  name: "updated_at",
+                  type: "timestamptz",
+                  default: "CURRENT_TIMESTAMP",
                 },
               ],
             }),
@@ -1063,34 +1143,13 @@ export class PGKVDatabase {
           );
         }
 
-        if (this.value_type === 'jsonb') {
+        if (this.value_type === "jsonb") {
           if (this.options.create_value_index) {
             await query_runner.query(
               `CREATE INDEX IF NOT EXISTS "IDX_${this.table_name}_value_gin" ON "${this.table_name}" USING gin ("value")`,
             );
           }
           await this.createConfiguredJsonIndexes(query_runner);
-          await query_runner.query(`
-            CREATE OR REPLACE FUNCTION jsonb_deep_merge(a jsonb, b jsonb)
-            RETURNS jsonb AS $$
-            DECLARE
-              result jsonb;
-              key text;
-              value jsonb;
-            BEGIN
-              result := a;
-              FOR key, value IN SELECT * FROM jsonb_each(b)
-              LOOP
-                IF jsonb_typeof(result->key) = 'object' AND jsonb_typeof(value) = 'object' THEN
-                  result := jsonb_set(result, ARRAY[key], jsonb_deep_merge(result->key, value));
-                ELSE
-                  result := jsonb_set(result, ARRAY[key], value);
-                END IF;
-              END LOOP;
-              RETURN result;
-            END;
-            $$ LANGUAGE plpgsql;
-          `);
         } else {
           if (this.options.create_value_index) {
             await query_runner.query(
@@ -1121,7 +1180,7 @@ export class PGKVDatabase {
     path: string,
     options?: EnsureJsonFieldIndexOptions,
   ): Promise<EnsureJsonFieldIndexResult> {
-    this.checkTypeSupport('ensureJsonFieldIndex', ['jsonb']);
+    this.checkTypeSupport("ensureJsonFieldIndex", ["jsonb"]);
     await this.ensureInitialized();
 
     const normalized_path = this.normalizeJsonPath(path);
@@ -1151,7 +1210,7 @@ export class PGKVDatabase {
     path: string,
     options?: EnsureJsonNumberFieldIndexOptions,
   ): Promise<EnsureJsonFieldIndexResult> {
-    this.checkTypeSupport('ensureJsonNumberFieldIndex', ['jsonb']);
+    this.checkTypeSupport("ensureJsonNumberFieldIndex", ["jsonb"]);
     await this.ensureInitialized();
 
     const normalized_path = this.normalizeJsonPath(path);
@@ -1178,8 +1237,9 @@ export class PGKVDatabase {
   }
 
   async merge(key: string, partial_value: any): Promise<boolean> {
-    this.checkTypeSupport('merge', ['jsonb']);
+    this.checkTypeSupport("merge", ["jsonb"]);
     await this.ensureInitialized();
+    await this.ensureJsonbDeepMergeFunction();
 
     const merged_value_sql = `
       CASE
@@ -1248,7 +1308,7 @@ export class PGKVDatabase {
     options?: {
       limit?: number;
       offset?: number;
-      order_by?: 'ASC' | 'DESC';
+      order_by?: "ASC" | "DESC";
       include_timestamps?: boolean;
       contains?: string;
       case_sensitive?: boolean;
@@ -1261,25 +1321,39 @@ export class PGKVDatabase {
     await this.ensureInitialized();
 
     if (!prefix) {
-      throw new Error('Prefix cannot be empty');
+      throw new Error("Prefix cannot be empty");
     }
 
     const include_timestamps = options?.include_timestamps === true;
-    const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
+    const order_by = options?.order_by === "DESC" ? "DESC" : "ASC";
     const case_sensitive = options?.case_sensitive !== false;
-    const like_operator = case_sensitive ? 'LIKE' : 'ILIKE';
-    const params: any[] = [`${escapeLikePattern(prefix)}%`];
-    const where_conditions = [`"key" ${like_operator} $1 ESCAPE '\\'`];
+    const params: any[] = [];
+    const where_conditions: string[] = [];
+    const prefix_end = case_sensitive
+      ? buildPrefixRangeExclusiveEnd(prefix)
+      : null;
+
+    if (prefix_end) {
+      params.push(prefix);
+      where_conditions.push(`"key" >= $${params.length}`);
+      params.push(prefix_end);
+      where_conditions.push(`"key" < $${params.length}`);
+    } else {
+      params.push(`${escapeLikePattern(prefix)}%`);
+      where_conditions.push(
+        `"key" ${case_sensitive ? "LIKE" : "ILIKE"} $${params.length} ESCAPE '\\'`,
+      );
+    }
 
     if (options?.contains) {
       params.push(`%${escapeLikePattern(options.contains)}%`);
       where_conditions.push(
-        `"key" ${like_operator} $${params.length} ESCAPE '\\'`,
+        `"key" ${case_sensitive ? "LIKE" : "ILIKE"} $${params.length} ESCAPE '\\'`,
       );
     }
 
     if (
-      typeof options?.created_at_after === 'number' &&
+      typeof options?.created_at_after === "number" &&
       !Number.isNaN(options.created_at_after)
     ) {
       params.push(new Date(options.created_at_after));
@@ -1287,7 +1361,7 @@ export class PGKVDatabase {
     }
 
     if (
-      typeof options?.created_at_before === 'number' &&
+      typeof options?.created_at_before === "number" &&
       !Number.isNaN(options.created_at_before)
     ) {
       params.push(new Date(options.created_at_before));
@@ -1297,16 +1371,16 @@ export class PGKVDatabase {
     let query = `
       SELECT ${this.buildSelectFields(include_timestamps)}
       FROM "${this.table_name}"
-      WHERE ${where_conditions.join(' AND ')}
+      WHERE ${where_conditions.join(" AND ")}
       ORDER BY "key" ${order_by}
     `;
 
-    if (typeof options?.limit === 'number' && options.limit > 0) {
+    if (typeof options?.limit === "number" && options.limit > 0) {
       params.push(Math.floor(options.limit));
       query += ` LIMIT $${params.length}`;
     }
 
-    if (typeof options?.offset === 'number' && options.offset > 0) {
+    if (typeof options?.offset === "number" && options.offset > 0) {
       params.push(Math.floor(options.offset));
       query += ` OFFSET $${params.length}`;
     }
@@ -1320,7 +1394,7 @@ export class PGKVDatabase {
     options?: {
       limit?: number;
       offset?: number;
-      order_by?: 'ASC' | 'DESC';
+      order_by?: "ASC" | "DESC";
     },
   ): Promise<
     Record<string, T | { value: T; created_at: Date; updated_at: Date }>
@@ -1328,32 +1402,10 @@ export class PGKVDatabase {
     await this.ensureInitialized();
 
     if (!suffix) {
-      throw new Error('Suffix cannot be empty');
+      throw new Error("Suffix cannot be empty");
     }
 
-    const reversed_suffix = Array.from(suffix).reverse().join('');
-    const reverse_prefix = `reverse:${reversed_suffix}`;
-    const reverse_results = await this.getWithPrefix<{
-      original_key: string;
-      value: T;
-    }>(reverse_prefix, options);
-
-    if (Object.keys(reverse_results).length === 0) {
-      return this.queryBySuffix<T>(suffix, options);
-    }
-
-    const reverse_values = Object.values(reverse_results).map((entry) => {
-      if (entry && typeof entry === 'object' && 'value' in (entry as any)) {
-        return (entry as any).value as { original_key: string; value: T };
-      }
-      return entry as { original_key: string; value: T };
-    });
-
-    if (reverse_values.length === 0) {
-      return {};
-    }
-
-    return this.getMany<T>(reverse_values.map((item) => item.original_key));
+    return this.queryBySuffix<T>(suffix, options);
   }
 
   async isValueExists(value: any): Promise<boolean> {
@@ -1415,7 +1467,7 @@ export class PGKVDatabase {
     const rows = await this.data_source.query(
       `
         INSERT INTO "${this.table_name}" ("key", "value", "created_at", "updated_at")
-        VALUES ($1, ${this.value_type === 'jsonb' ? '$2::jsonb' : '$2'}, NOW(), NOW())
+        VALUES ($1, ${this.value_type === "jsonb" ? "$2::jsonb" : "$2"}, NOW(), NOW())
         ON CONFLICT ("key") DO NOTHING
         RETURNING "key"
       `,
@@ -1431,7 +1483,7 @@ export class PGKVDatabase {
     const rows = await this.data_source.query(
       `
         INSERT INTO "${this.table_name}" ("key", "value", "created_at", "updated_at")
-        VALUES ($1, ${this.value_type === 'jsonb' ? '$2::jsonb' : '$2'}, NOW(), NOW())
+        VALUES ($1, ${this.value_type === "jsonb" ? "$2::jsonb" : "$2"}, NOW(), NOW())
         ON CONFLICT ("key") DO UPDATE SET
           "value" = EXCLUDED."value",
           "updated_at" = NOW()
@@ -1482,7 +1534,7 @@ export class PGKVDatabase {
       const rows = await query_runner.query(
         `
           INSERT INTO "${this.table_name}" ("key", "value", "created_at", "updated_at")
-          VALUES ($1, ${this.value_type === 'jsonb' ? '$2::jsonb' : '$2'}, NOW(), NOW())
+          VALUES ($1, ${this.value_type === "jsonb" ? "$2::jsonb" : "$2"}, NOW(), NOW())
           ON CONFLICT ("key") DO NOTHING
           RETURNING "key"
         `,
@@ -1558,12 +1610,12 @@ export class PGKVDatabase {
       ORDER BY "key" ASC
     `;
 
-    if (typeof options?.limit === 'number' && options.limit > 0) {
+    if (typeof options?.limit === "number" && options.limit > 0) {
       params.push(Math.floor(options.limit));
       query += ` LIMIT $${params.length}`;
     }
 
-    if (typeof options?.offset === 'number' && options.offset > 0) {
+    if (typeof options?.offset === "number" && options.offset > 0) {
       params.push(Math.floor(options.offset));
       query += ` OFFSET $${params.length}`;
     }
@@ -1597,15 +1649,23 @@ export class PGKVDatabase {
   ): Promise<{ data: string[]; next_cursor: string | null }> {
     await this.ensureInitialized();
 
-    const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
-    const cursor_operator = order_by === 'DESC' ? '<' : '>';
+    const order_by = options?.order_by === "DESC" ? "DESC" : "ASC";
+    const cursor_operator = order_by === "DESC" ? "<" : ">";
     const limit = normalizePositiveInteger(options?.limit, 100, 1000);
     const params: any[] = [];
     const where_conditions: string[] = [];
 
     if (options?.prefix) {
-      params.push(`${escapeLikePattern(options.prefix)}%`);
-      where_conditions.push(`"key" LIKE $${params.length} ESCAPE '\\'`);
+      const prefix_end = buildPrefixRangeExclusiveEnd(options.prefix);
+      if (prefix_end) {
+        params.push(options.prefix);
+        where_conditions.push(`"key" >= $${params.length}`);
+        params.push(prefix_end);
+        where_conditions.push(`"key" < $${params.length}`);
+      } else {
+        params.push(`${escapeLikePattern(options.prefix)}%`);
+        where_conditions.push(`"key" LIKE $${params.length} ESCAPE '\\'`);
+      }
     }
 
     if (options?.cursor) {
@@ -1615,7 +1675,7 @@ export class PGKVDatabase {
 
     let query = `SELECT "key" FROM "${this.table_name}"`;
     if (where_conditions.length > 0) {
-      query += ` WHERE ${where_conditions.join(' AND ')}`;
+      query += ` WHERE ${where_conditions.join(" AND ")}`;
     }
     params.push(limit + 1);
     query += ` ORDER BY "key" ${order_by} LIMIT $${params.length}`;
@@ -1641,15 +1701,23 @@ export class PGKVDatabase {
     await this.ensureInitialized();
 
     const include_timestamps = options?.include_timestamps === true;
-    const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
-    const cursor_operator = order_by === 'DESC' ? '<' : '>';
+    const order_by = options?.order_by === "DESC" ? "DESC" : "ASC";
+    const cursor_operator = order_by === "DESC" ? "<" : ">";
     const limit = normalizePositiveInteger(options?.limit, 100, 1000);
     const params: any[] = [];
     const where_conditions: string[] = [];
 
     if (options?.prefix) {
-      params.push(`${escapeLikePattern(options.prefix)}%`);
-      where_conditions.push(`"key" LIKE $${params.length} ESCAPE '\\'`);
+      const prefix_end = buildPrefixRangeExclusiveEnd(options.prefix);
+      if (prefix_end) {
+        params.push(options.prefix);
+        where_conditions.push(`"key" >= $${params.length}`);
+        params.push(prefix_end);
+        where_conditions.push(`"key" < $${params.length}`);
+      } else {
+        params.push(`${escapeLikePattern(options.prefix)}%`);
+        where_conditions.push(`"key" LIKE $${params.length} ESCAPE '\\'`);
+      }
     }
 
     if (options?.cursor) {
@@ -1659,7 +1727,7 @@ export class PGKVDatabase {
 
     let query = `SELECT ${this.buildSelectFields(include_timestamps)} FROM "${this.table_name}"`;
     if (where_conditions.length > 0) {
-      query += ` WHERE ${where_conditions.join(' AND ')}`;
+      query += ` WHERE ${where_conditions.join(" AND ")}`;
     }
     params.push(limit + 1);
     query += ` ORDER BY "key" ${order_by} LIMIT $${params.length}`;
@@ -1705,6 +1773,7 @@ export class PGKVDatabase {
         dedupeEntriesByKey(entries),
         query_runner,
         safe_batch_size,
+        false,
       );
       await query_runner.commitTransaction();
     } catch (error) {
@@ -1750,9 +1819,9 @@ export class PGKVDatabase {
   async findBoolValues(
     bool_value: boolean,
     first: boolean = true,
-    order_by: 'ASC' | 'DESC' = 'ASC',
+    order_by: "ASC" | "DESC" = "ASC",
   ): Promise<string[] | string | null> {
-    this.checkTypeSupport('findBoolValues', ['boolean', 'jsonb']);
+    this.checkTypeSupport("findBoolValues", ["boolean", "jsonb"]);
     await this.ensureInitialized();
 
     const params: any[] = [];
@@ -1763,7 +1832,7 @@ export class PGKVDatabase {
         FROM "${this.table_name}"
         WHERE ${where_sql}
         ORDER BY "created_at" ${order_by}
-        ${first ? 'LIMIT 1' : ''}
+        ${first ? "LIMIT 1" : ""}
       `,
       params,
     );
@@ -1781,7 +1850,7 @@ export class PGKVDatabase {
     cursor?: string;
     compare?: Array<{
       path: string;
-      operator: '>' | '<' | '>=' | '<=' | '=' | '!=';
+      operator: ">" | "<" | ">=" | "<=" | "=" | "!=";
       value: number | string | Date;
     }>;
     text_search?: Array<{
@@ -1790,31 +1859,31 @@ export class PGKVDatabase {
       case_sensitive?: boolean;
     }>;
     include_timestamps?: boolean;
-    order_by?: 'ASC' | 'DESC';
-    order_by_field?: 'key' | 'created_at' | 'updated_at';
+    order_by?: "ASC" | "DESC";
+    order_by_field?: "key" | "created_at" | "updated_at";
   }): Promise<{
     data: any[];
     next_cursor: string | null;
   }> {
-    this.checkTypeSupport('searchJson', ['jsonb']);
+    this.checkTypeSupport("searchJson", ["jsonb"]);
     await this.ensureInitialized();
 
     const limit = normalizePositiveInteger(search_options.limit, 100, 1000);
     const include_timestamps = search_options.include_timestamps === true;
-    const order_by = search_options.order_by === 'DESC' ? 'DESC' : 'ASC';
-    const order_by_field = search_options.order_by_field || 'key';
+    const order_by = search_options.order_by === "DESC" ? "DESC" : "ASC";
+    const order_by_field = search_options.order_by_field || "key";
     const order_column =
-      order_by_field === 'key'
+      order_by_field === "key"
         ? '"key"'
-        : order_by_field === 'created_at'
+        : order_by_field === "created_at"
           ? '"created_at"'
           : '"updated_at"';
     const select_fields =
-      !include_timestamps && order_by_field !== 'key'
+      !include_timestamps && order_by_field !== "key"
         ? `${this.buildSelectFields(false)}, ${order_column}`
         : this.buildSelectFields(include_timestamps);
     const order_by_clause =
-      order_by_field === 'key'
+      order_by_field === "key"
         ? `${order_column} ${order_by}`
         : `${order_column} ${order_by}, "key" ${order_by}`;
 
@@ -1833,7 +1902,7 @@ export class PGKVDatabase {
           condition.path,
           params,
         );
-        if (typeof condition.value === 'number') {
+        if (typeof condition.value === "number") {
           params.push(condition.value);
           where_conditions.push(
             this.buildSafeNumericCompareSql(
@@ -1873,15 +1942,15 @@ export class PGKVDatabase {
         );
         params.push(`%${escapeLikePattern(condition.text)}%`);
         where_conditions.push(
-          `${extract_sql} ${condition.case_sensitive ? 'LIKE' : 'ILIKE'} $${params.length} ESCAPE '\\'`,
+          `${extract_sql} ${condition.case_sensitive ? "LIKE" : "ILIKE"} $${params.length} ESCAPE '\\'`,
         );
       }
     }
 
     if (search_options.cursor) {
       const parsed_cursor = this.parseSearchCursor(search_options.cursor);
-      const operator = order_by === 'ASC' ? '>' : '<';
-      if (order_by_field === 'key') {
+      const operator = order_by === "ASC" ? ">" : "<";
+      if (order_by_field === "key") {
         params.push(parsed_cursor.value);
         where_conditions.push(`${order_column} ${operator} $${params.length}`);
       } else {
@@ -1908,7 +1977,7 @@ export class PGKVDatabase {
     `;
 
     if (where_conditions.length > 0) {
-      query += ` WHERE ${where_conditions.join(' AND ')}`;
+      query += ` WHERE ${where_conditions.join(" AND ")}`;
     }
 
     query += `
@@ -1928,10 +1997,10 @@ export class PGKVDatabase {
       data,
       next_cursor:
         has_more && last_record
-          ? order_by_field === 'key'
+          ? order_by_field === "key"
             ? this.formatSearchCursor(last_record.key)
             : this.formatSearchCursor(
-                order_by_field === 'created_at'
+                order_by_field === "created_at"
                   ? this.normalizeDate(last_record.created_at)
                   : this.normalizeDate(last_record.updated_at),
                 last_record.key,
@@ -1943,19 +2012,19 @@ export class PGKVDatabase {
   async findByUpdateTime(
     timestamp: number,
     first: boolean = true,
-    type: 'before' | 'after' = 'after',
-    order_by: 'ASC' | 'DESC' = 'ASC',
+    type: "before" | "after" = "after",
+    order_by: "ASC" | "DESC" = "ASC",
   ): Promise<string[] | string | null> {
     await this.ensureInitialized();
 
-    const operator = type === 'before' ? '<' : '>';
+    const operator = type === "before" ? "<" : ">";
     const rows = await this.data_source.query(
       `
         SELECT "key"
         FROM "${this.table_name}"
         WHERE "updated_at" ${operator} $1
         ORDER BY "updated_at" ${order_by}
-        ${first ? 'LIMIT 1' : ''}
+        ${first ? "LIMIT 1" : ""}
       `,
       [new Date(timestamp)],
     );
@@ -1970,9 +2039,9 @@ export class PGKVDatabase {
   async searchByTime(params: {
     timestamp: number;
     take?: number;
-    type?: 'before' | 'after';
-    order_by?: 'ASC' | 'DESC';
-    time_column?: 'updated_at' | 'created_at';
+    type?: "before" | "after";
+    order_by?: "ASC" | "DESC";
+    time_column?: "updated_at" | "created_at";
     include_timestamps?: boolean;
   }): Promise<
     Array<{
@@ -1985,8 +2054,8 @@ export class PGKVDatabase {
     await this.ensureInitialized();
 
     const include_timestamps = params.include_timestamps === true;
-    const time_column = params.time_column || 'updated_at';
-    const operator = (params.type || 'after') === 'before' ? '<' : '>';
+    const time_column = params.time_column || "updated_at";
+    const operator = (params.type || "after") === "before" ? "<" : ">";
     const take = normalizePositiveInteger(params.take, 1, 1000);
 
     const records = await this.data_source.query(
@@ -1994,7 +2063,7 @@ export class PGKVDatabase {
         SELECT ${this.buildSelectFields(include_timestamps)}
         FROM "${this.table_name}"
         WHERE "${time_column}" ${operator} $1
-        ORDER BY "${time_column}" ${params.order_by === 'DESC' ? 'DESC' : 'ASC'}
+        ORDER BY "${time_column}" ${params.order_by === "DESC" ? "DESC" : "ASC"}
         LIMIT $2
       `,
       [new Date(params.timestamp), take],
@@ -2015,9 +2084,9 @@ export class PGKVDatabase {
     time_options: {
       timestamp: number;
       take?: number;
-      type?: 'before' | 'after';
-      order_by?: 'ASC' | 'DESC';
-      time_column?: 'updated_at' | 'created_at';
+      type?: "before" | "after";
+      order_by?: "ASC" | "DESC";
+      time_column?: "updated_at" | "created_at";
       include_timestamps?: boolean;
     },
   ): Promise<
@@ -2028,12 +2097,12 @@ export class PGKVDatabase {
       updated_at?: Date;
     }>
   > {
-    this.checkTypeSupport('searchJsonByTime', ['jsonb']);
+    this.checkTypeSupport("searchJsonByTime", ["jsonb"]);
     await this.ensureInitialized();
 
     const include_timestamps = time_options.include_timestamps === true;
-    const time_column = time_options.time_column || 'updated_at';
-    const operator = (time_options.type || 'after') === 'before' ? '<' : '>';
+    const time_column = time_options.time_column || "updated_at";
+    const operator = (time_options.type || "after") === "before" ? "<" : ">";
     const take = normalizePositiveInteger(time_options.take, 1, 1000);
     const params: any[] = [new Date(time_options.timestamp)];
     const where_conditions = [`"${time_column}" ${operator} $1`];
@@ -2063,8 +2132,8 @@ export class PGKVDatabase {
       `
         SELECT ${this.buildSelectFields(include_timestamps)}
         FROM "${this.table_name}"
-        WHERE ${where_conditions.join(' AND ')}
-        ORDER BY "${time_column}" ${time_options.order_by === 'DESC' ? 'DESC' : 'ASC'}
+        WHERE ${where_conditions.join(" AND ")}
+        ORDER BY "${time_column}" ${time_options.order_by === "DESC" ? "DESC" : "ASC"}
         LIMIT $${params.length}
       `,
       params,
@@ -2085,12 +2154,12 @@ export class PGKVDatabase {
 
   isOperationSupported(operation: string): boolean {
     const operation_type_map: Record<string, ValueType[]> = {
-      merge: ['jsonb'],
-      searchJson: ['jsonb'],
-      searchJsonByTime: ['jsonb'],
-      findBoolValues: ['boolean', 'jsonb'],
-      ensureJsonFieldIndex: ['jsonb'],
-      ensureJsonNumberFieldIndex: ['jsonb'],
+      merge: ["jsonb"],
+      searchJson: ["jsonb"],
+      searchJsonByTime: ["jsonb"],
+      findBoolValues: ["boolean", "jsonb"],
+      ensureJsonFieldIndex: ["jsonb"],
+      ensureJsonNumberFieldIndex: ["jsonb"],
     };
 
     const supported_types = operation_type_map[operation];

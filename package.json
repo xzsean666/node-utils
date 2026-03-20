@@ -16,7 +16,8 @@
     "lint:eslint": "eslint .",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "pnpm build"
+    "prepublishOnly": "pnpm build",
+    "build:sdk-seantour": "pnpm tsx src/scripts/copyDependencies.ts --input ./src/sdks/sean-tour/index.ts --output ./dist/sdks/sean-tour"
   },
   "keywords": [],
   "author": "",

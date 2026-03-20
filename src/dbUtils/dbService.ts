@@ -1,128 +1,222 @@
-import 'reflect-metadata';
-import { PGKVDatabase } from './KVPostgresql';
-import { SqliteKVDatabase } from './KVSqlite';
-import path from 'path';
-import fs from 'fs';
+import type { PGKVDatabaseOptions, ValueType } from "./KVPostgresql";
+import { PGKVDatabase } from "./KVPostgresql";
+import type { SqliteKVDatabaseOptions } from "./KVSqlite";
+import { SqliteKVDatabase, SqliteValueType } from "./KVSqlite";
 
-/**
- * 通用数据库服务类 (Postgres)
- * 负责管理和复用不同表的 KVDatabase 实例
- */
-export class PGDBService {
-    private static instance: PGDBService | null = null;
-    private dbInstances: Map<string, PGKVDatabase> = new Map();
-    private readonly db_url: string;
-    private readonly prefix: string;
-
-    private constructor(db_url: string, prefix: string = '') {
-        this.db_url = db_url;
-        this.prefix = prefix;
-    }
-
-    public static getInstance(db_url: string, prefix: string = ''): PGDBService {
-        if (!PGDBService.instance) {
-            PGDBService.instance = new PGDBService(db_url, prefix);
-        }
-        return PGDBService.instance;
-    }
-
-    /**
-     * 获取指定表的数据库实例
-     * @param tableName 表名
-     * @returns KVDatabase 实例
-     */
-    public getDBInstance(tableName: string): PGKVDatabase {
-        if (!this.db_url) {
-            throw new Error('DATABASE_URL 未配置，无法获取数据库实例');
-        }
-
-        let finalTableName = tableName;
-
-        if (this.prefix) {
-            finalTableName = `${this.prefix}_${tableName}`;
-        }
-
-        if (!this.dbInstances.has(finalTableName)) {
-            this.dbInstances.set(finalTableName, new PGKVDatabase(this.db_url, finalTableName));
-        }
-        return this.dbInstances.get(finalTableName) as PGKVDatabase;
-    }
-
-    /**
-     * 关闭所有已打开的数据库连接
-     */
-    public async destroy() {
-        for (const db of this.dbInstances.values()) {
-            await db.close();
-        }
-        this.dbInstances.clear();
-    }
+interface CloseableDatabase {
+  close(): Promise<void>;
 }
 
-/**
- * Sqlite 数据库服务类
- * 负责管理和复用不同表的 SqliteKVDatabase 实例
- */
-export class SqliteDBService {
-    private static instance: SqliteDBService | null = null;
-    private dbInstances: Map<string, SqliteKVDatabase> = new Map();
-    private readonly dbPath: string;
-
-    private constructor(dbPath: string) {
-        this.dbPath = dbPath;
-    }
-
-    public static getInstance(): SqliteDBService {
-        if (!SqliteDBService.instance) {
-            // 确保数据目录存在
-            const DATA_DIR = path.resolve(process.cwd(), 'data');
-            if (!fs.existsSync(DATA_DIR)) {
-                fs.mkdirSync(DATA_DIR, { recursive: true });
-            }
-            const dbPath = path.join(DATA_DIR, 'trade_dashboard.sqlite');
-            SqliteDBService.instance = new SqliteDBService(dbPath);
-        }
-        return SqliteDBService.instance;
-    }
-
-    /**
-     * 获取指定表的数据库实例
-     * @param tableName 表名
-     * @returns KVDatabase 实例
-     */
-    public getDBInstance(tableName: string): SqliteKVDatabase {
-        if (!this.dbInstances.has(tableName)) {
-            this.dbInstances.set(tableName, new SqliteKVDatabase(this.dbPath, tableName));
-        }
-        return this.dbInstances.get(tableName) as SqliteKVDatabase;
-    }
-
-    /**
-     * 关闭所有已打开的数据库连接
-     */
-    public async destroy() {
-        for (const db of this.dbInstances.values()) {
-            await db.close();
-        }
-        this.dbInstances.clear();
-    }
+function assertNonEmptyString(value: string, label: string): void {
+  if (!value) {
+    throw new Error(`${label} is required`);
+  }
 }
 
-export const db_tables = {
-    invite_code: 'invite_code',
-    user_otp: 'user_otp',
-    user_password: 'user_password',
-    user_ex: 'user_ex',
-    user_history: 'user_history',
-    user_admin: 'user_admin',
-    klines: 'klines',
-    user_admin_privileges: 'user_admin_privileges',
-    backtest_reports: 'backtest_reports',
-};
+function createTableNameNormalizer(options?: {
+  prefix?: string;
+  normalizeTableName?: (tableName: string) => string;
+}): (tableName: string) => string {
+  const applyPrefix = (tableName: string) =>
+    options?.prefix ? `${options.prefix}_${tableName}` : tableName;
 
-// 导出便捷使用的 SqliteDBService 实例（仅用于缓存）
-export const sqliteDBService = SqliteDBService.getInstance();
+  if (!options?.normalizeTableName) {
+    return applyPrefix;
+  }
 
-// 导出便捷使用的 PGDBService 实例（用于持久化数据）
-import { config } from '@helpers/config';
-export const pgDBService = PGDBService.getInstance(config.database.url!, config.database.prefix);
+  return (tableName: string) =>
+    options.normalizeTableName!(applyPrefix(tableName));
+}
+
+export interface DatabaseManagerOptions<
+  TDatabase extends CloseableDatabase,
+  TKey extends string = string,
+> {
+  create: (resolvedKey: string) => TDatabase;
+  normalizeKey?: (key: TKey) => string;
+}
+
+export class DatabaseManager<
+  TDatabase extends CloseableDatabase,
+  TKey extends string = string,
+> {
+  private readonly instances = new Map<string, TDatabase>();
+  private readonly createDatabase: (resolvedKey: string) => TDatabase;
+  private readonly normalizeDatabaseKey: (key: TKey) => string;
+
+  constructor(options: DatabaseManagerOptions<TDatabase, TKey>) {
+    this.createDatabase = options.create;
+    this.normalizeDatabaseKey = options.normalizeKey || ((key) => key);
+  }
+
+  protected resolveKey(key: TKey): string {
+    const resolvedKey = this.normalizeDatabaseKey(key);
+    assertNonEmptyString(resolvedKey, "resolvedKey");
+    return resolvedKey;
+  }
+
+  get size(): number {
+    return this.instances.size;
+  }
+
+  public keys(): string[] {
+    return Array.from(this.instances.keys());
+  }
+
+  public has(key: TKey): boolean {
+    return this.instances.has(this.resolveKey(key));
+  }
+
+  public peek(key: TKey): TDatabase | undefined {
+    return this.instances.get(this.resolveKey(key));
+  }
+
+  public get(key: TKey): TDatabase {
+    const resolvedKey = this.resolveKey(key);
+    const existingInstance = this.instances.get(resolvedKey);
+    if (existingInstance) {
+      return existingInstance;
+    }
+
+    const nextInstance = this.createDatabase(resolvedKey);
+    this.instances.set(resolvedKey, nextInstance);
+    return nextInstance;
+  }
+
+  public async delete(key: TKey): Promise<boolean> {
+    const resolvedKey = this.resolveKey(key);
+    const instance = this.instances.get(resolvedKey);
+    if (!instance) {
+      return false;
+    }
+
+    await instance.close();
+    this.instances.delete(resolvedKey);
+    return true;
+  }
+
+  public async destroy(): Promise<void> {
+    const entries = Array.from(this.instances.entries());
+    const results = await Promise.allSettled(
+      entries.map(async ([resolvedKey, instance]) => {
+        await instance.close();
+        return resolvedKey;
+      }),
+    );
+
+    const errors: string[] = [];
+
+    results.forEach((result, index) => {
+      const [resolvedKey] = entries[index]!;
+      if (result.status === "fulfilled") {
+        this.instances.delete(resolvedKey);
+        return;
+      }
+
+      errors.push(
+        `${resolvedKey}: ${
+          result.reason instanceof Error
+            ? result.reason.message
+            : String(result.reason)
+        }`,
+      );
+    });
+
+    if (errors.length > 0) {
+      throw new Error(errors.join("; "));
+    }
+  }
+}
+
+export interface TableDatabaseManagerOptions<
+  TDatabase extends CloseableDatabase,
+> extends DatabaseManagerOptions<TDatabase, string> {}
+
+export class TableDatabaseManager<
+  TDatabase extends CloseableDatabase,
+> extends DatabaseManager<TDatabase, string> {
+  constructor(options: TableDatabaseManagerOptions<TDatabase>) {
+    super(options);
+  }
+
+  public hasTable(tableName: string): boolean {
+    return this.has(tableName);
+  }
+
+  public peekTable(tableName: string): TDatabase | undefined {
+    return this.peek(tableName);
+  }
+
+  public getTable(tableName: string): TDatabase {
+    return this.get(tableName);
+  }
+
+  public async deleteTable(tableName: string): Promise<boolean> {
+    return this.delete(tableName);
+  }
+}
+
+export interface PGKVDatabaseManagerOptions {
+  prefix?: string;
+  normalizeTableName?: (tableName: string) => string;
+  valueType?: ValueType;
+  dbOptions?: PGKVDatabaseOptions;
+}
+
+export class PGKVDatabaseManager extends TableDatabaseManager<PGKVDatabase> {
+  readonly dbUrl: string;
+  readonly valueType: ValueType;
+  readonly dbOptions?: PGKVDatabaseOptions;
+
+  constructor(dbUrl: string, options: PGKVDatabaseManagerOptions = {}) {
+    assertNonEmptyString(dbUrl, "dbUrl");
+
+    const normalizeKey = createTableNameNormalizer({
+      prefix: options.prefix,
+      normalizeTableName: options.normalizeTableName,
+    });
+    const valueType = options.valueType || "jsonb";
+    const dbOptions = options.dbOptions;
+
+    super({
+      normalizeKey,
+      create: (tableName) =>
+        new PGKVDatabase(dbUrl, tableName, valueType, dbOptions),
+    });
+
+    this.dbUrl = dbUrl;
+    this.valueType = valueType;
+    this.dbOptions = dbOptions;
+  }
+}
+
+export interface SqliteKVDatabaseManagerOptions {
+  normalizeTableName?: (tableName: string) => string;
+  valueType?: SqliteValueType;
+  dbOptions?: SqliteKVDatabaseOptions;
+}
+
+export class SqliteKVDatabaseManager extends TableDatabaseManager<SqliteKVDatabase> {
+  readonly dbPath: string;
+  readonly valueType: SqliteValueType;
+  readonly dbOptions?: SqliteKVDatabaseOptions;
+
+  constructor(dbPath: string, options: SqliteKVDatabaseManagerOptions = {}) {
+    assertNonEmptyString(dbPath, "dbPath");
+
+    const normalizeKey =
+      options.normalizeTableName || ((tableName: string) => tableName);
+    const valueType = options.valueType || SqliteValueType.JSON;
+    const dbOptions = options.dbOptions;
+
+    super({
+      normalizeKey,
+      create: (tableName) =>
+        new SqliteKVDatabase(dbPath, tableName, valueType, dbOptions),
+    });
+
+    this.dbPath = dbPath;
+    this.valueType = valueType;
+    this.dbOptions = dbOptions;
+  }
+}

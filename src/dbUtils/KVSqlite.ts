@@ -1,6 +1,6 @@
-import 'reflect-metadata';
-import { DataSource, EntitySchema, Repository, Table } from 'typeorm';
-import type { QueryRunner } from 'typeorm';
+import "reflect-metadata";
+import { DataSource, EntitySchema, Repository, Table } from "typeorm";
+import type { QueryRunner } from "typeorm";
 
 const SQLITE_SAFE_WRITE_BATCH_SIZE = 400;
 const SQLITE_SAFE_IN_BATCH_SIZE = 800;
@@ -11,12 +11,12 @@ const SQLITE_CURRENT_TIMESTAMP_SQL = `STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')`;
 
 // 支持的数据类型枚举
 export enum SqliteValueType {
-  JSON = 'json',
-  TEXT = 'text',
-  BLOB = 'blob',
-  INTEGER = 'integer',
-  REAL = 'real',
-  BOOLEAN = 'boolean',
+  JSON = "json",
+  TEXT = "text",
+  BLOB = "blob",
+  INTEGER = "integer",
+  REAL = "real",
+  BOOLEAN = "boolean",
 }
 
 interface TypeHandler {
@@ -43,7 +43,7 @@ interface SqliteRawRecord {
 interface KeyScanOptions {
   cursor?: string;
   limit?: number;
-  order_by?: 'ASC' | 'DESC';
+  order_by?: "ASC" | "DESC";
   prefix?: string;
 }
 
@@ -62,53 +62,118 @@ interface ResolvedSqliteKVDatabaseOptions {
   create_updated_at_index: boolean;
 }
 
+function bigintHandler(_key: string, value: any) {
+  return typeof value === "bigint" ? value.toString() : value;
+}
+
+function normalizeJsonValueForIdentity(value: any): any {
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+
+  if (value == null || typeof value !== "object") {
+    return value;
+  }
+
+  if (value instanceof Date) {
+    return value.toJSON();
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return value.toJSON();
+  }
+
+  if (value instanceof Uint8Array) {
+    return Array.from(value);
+  }
+
+  if (typeof value.toJSON === "function") {
+    return normalizeJsonValueForIdentity(value.toJSON());
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeJsonValueForIdentity(item));
+  }
+
+  const normalized: Record<string, any> = {};
+  for (const key of Object.keys(value).sort()) {
+    normalized[key] = normalizeJsonValueForIdentity(value[key]);
+  }
+  return normalized;
+}
+
+function stableJsonStringify(value: any): string | undefined {
+  return JSON.stringify(normalizeJsonValueForIdentity(value), bigintHandler);
+}
+
+function buildPrefixRangeExclusiveEnd(prefix: string): string | null {
+  if (!/^[\x00-\x7F]+$/.test(prefix)) {
+    return null;
+  }
+
+  const characters = Array.from(prefix);
+  for (let i = characters.length - 1; i >= 0; i--) {
+    const character = characters[i];
+    if (!character) {
+      continue;
+    }
+
+    const code_point = character.codePointAt(0);
+    if (code_point == null || code_point >= 0x7f) {
+      continue;
+    }
+
+    return (
+      characters.slice(0, i).join("") + String.fromCodePoint(code_point + 1)
+    );
+  }
+
+  return null;
+}
+
 const TYPE_HANDLERS: Record<SqliteValueType, TypeHandler> = {
   [SqliteValueType.JSON]: {
-    serialize: (value: any) => JSON.stringify(value, bigintHandler),
+    serialize: (value: any) => stableJsonStringify(value),
     deserialize: (value: any) => (value == null ? null : JSON.parse(value)),
-    column_type: 'text',
+    column_type: "text",
   },
   [SqliteValueType.TEXT]: {
     serialize: (value: any) => String(value),
     deserialize: (value: any) => value,
-    column_type: 'text',
+    column_type: "text",
   },
   [SqliteValueType.BLOB]: {
     serialize: (value: any) => {
       if (value instanceof Buffer) return value;
       if (value instanceof Uint8Array) return Buffer.from(value);
-      if (typeof value === 'string') return Buffer.from(value, 'utf8');
-      throw new Error('BLOB type requires Buffer, Uint8Array, or string');
+      if (typeof value === "string") return Buffer.from(value, "utf8");
+      throw new Error("BLOB type requires Buffer, Uint8Array, or string");
     },
     deserialize: (value: any) => value,
-    column_type: 'blob',
+    column_type: "blob",
   },
   [SqliteValueType.INTEGER]: {
     serialize: (value: any) => {
       const num = Number(value);
       if (!Number.isInteger(num)) {
-        throw new Error('INTEGER type requires integer value');
+        throw new Error("INTEGER type requires integer value");
       }
       return num;
     },
     deserialize: (value: any) => (value == null ? null : Number(value)),
-    column_type: 'integer',
+    column_type: "integer",
   },
   [SqliteValueType.REAL]: {
     serialize: (value: any) => Number(value),
     deserialize: (value: any) => (value == null ? null : Number(value)),
-    column_type: 'real',
+    column_type: "real",
   },
   [SqliteValueType.BOOLEAN]: {
     serialize: (value: any) => (value ? 1 : 0),
     deserialize: (value: any) => Boolean(value),
-    column_type: 'integer',
+    column_type: "integer",
   },
 };
-
-function bigintHandler(_key: string, value: any) {
-  return typeof value === 'bigint' ? value.toString() : value;
-}
 
 function normalizePositiveInteger(
   value: number | undefined,
@@ -121,7 +186,9 @@ function normalizePositiveInteger(
   return Math.min(Math.floor(value), max);
 }
 
-function dedupeEntriesByKey(entries: Array<[string, any]>): Array<[string, any]> {
+function dedupeEntriesByKey(
+  entries: Array<[string, any]>,
+): Array<[string, any]> {
   const deduped = new Map<string, any>();
   for (const [key, value] of entries) {
     deduped.set(key, value);
@@ -136,13 +203,13 @@ function assertSafeIdentifier(name: string, label: string): void {
 }
 
 function escapeLikePattern(value: string): string {
-  return value.replace(/[\\%_]/g, '\\$&');
+  return value.replace(/[\\%_]/g, "\\$&");
 }
 
 function isMergeableJsonObject(value: unknown): value is Record<string, any> {
   return (
     value !== null &&
-    typeof value === 'object' &&
+    typeof value === "object" &&
     !Array.isArray(value) &&
     (Object.getPrototypeOf(value) === Object.prototype ||
       Object.getPrototypeOf(value) === null)
@@ -150,7 +217,10 @@ function isMergeableJsonObject(value: unknown): value is Record<string, any> {
 }
 
 function deepMergeJsonValues(existing_value: any, incoming_value: any): any {
-  if (!isMergeableJsonObject(existing_value) || !isMergeableJsonObject(incoming_value)) {
+  if (
+    !isMergeableJsonObject(existing_value) ||
+    !isMergeableJsonObject(incoming_value)
+  ) {
     return incoming_value;
   }
 
@@ -174,18 +244,18 @@ function appendSqliteLimitOffset(
     offset?: number;
   },
 ): string {
-  const has_limit = typeof options?.limit === 'number' && options.limit > 0;
-  const has_offset = typeof options?.offset === 'number' && options.offset > 0;
+  const has_limit = typeof options?.limit === "number" && options.limit > 0;
+  const has_offset = typeof options?.offset === "number" && options.offset > 0;
 
   if (has_limit) {
-    query += ' LIMIT ?';
+    query += " LIMIT ?";
     params.push(Math.floor(options!.limit!));
   } else if (has_offset) {
-    query += ' LIMIT -1';
+    query += " LIMIT -1";
   }
 
   if (has_offset) {
-    query += ' OFFSET ?';
+    query += " OFFSET ?";
     params.push(Math.floor(options!.offset!));
   }
 
@@ -206,11 +276,11 @@ export class SqliteKVDatabase {
 
   constructor(
     datasource_or_url?: string,
-    table_name: string = 'kv_store',
+    table_name: string = "kv_store",
     value_type: SqliteValueType = SqliteValueType.JSON,
     options?: SqliteKVDatabaseOptions,
   ) {
-    assertSafeIdentifier(table_name, 'table_name');
+    assertSafeIdentifier(table_name, "table_name");
     this.table_name = table_name;
     this.value_type = value_type;
     this.type_handler = TYPE_HANDLERS[value_type];
@@ -223,7 +293,7 @@ export class SqliteKVDatabase {
       name: table_name,
       columns: {
         key: {
-          type: 'varchar',
+          type: "varchar",
           length: 255,
           primary: true,
         },
@@ -232,19 +302,19 @@ export class SqliteKVDatabase {
           nullable: true,
         },
         created_at: {
-          type: 'datetime',
+          type: "datetime",
           createDate: true,
         },
         updated_at: {
-          type: 'datetime',
+          type: "datetime",
           updateDate: true,
         },
       },
     });
 
     this.data_source = new DataSource({
-      type: 'sqlite',
-      database: datasource_or_url || ':memory:',
+      type: "sqlite",
+      database: datasource_or_url || ":memory:",
       entities: [this.custom_kv_store],
       synchronize: false,
     });
@@ -260,7 +330,7 @@ export class SqliteKVDatabase {
         return await operation();
       } catch (error: any) {
         const message = error instanceof Error ? error.message : String(error);
-        if (message.includes('SQLITE_BUSY') && i < retries - 1) {
+        if (message.includes("SQLITE_BUSY") && i < retries - 1) {
           await new Promise((resolve) => setTimeout(resolve, delay_ms));
           continue;
         }
@@ -268,7 +338,9 @@ export class SqliteKVDatabase {
       }
     }
 
-    throw new Error('Operation failed after multiple retries due to SQLITE_BUSY');
+    throw new Error(
+      "Operation failed after multiple retries due to SQLITE_BUSY",
+    );
   }
 
   private buildSelectFields(include_timestamps: boolean): string {
@@ -276,7 +348,7 @@ export class SqliteKVDatabase {
     if (include_timestamps) {
       fields.push('"created_at"', '"updated_at"');
     }
-    return fields.join(', ');
+    return fields.join(", ");
   }
 
   private normalizeDate(value: string | Date | undefined): Date {
@@ -286,14 +358,14 @@ export class SqliteKVDatabase {
     if (!value) {
       return new Date(0);
     }
-    const normalized_value = value.includes('T')
+    const normalized_value = value.includes("T")
       ? value
-      : `${value.replace(' ', 'T')}Z`;
+      : `${value.replace(" ", "T")}Z`;
     return new Date(normalized_value);
   }
 
   private formatDateForSqlite(date: Date): string {
-    return date.toISOString().replace('T', ' ').replace('Z', '');
+    return date.toISOString().replace("T", " ").replace("Z", "");
   }
 
   private formatRecordValue<T = any>(
@@ -377,7 +449,7 @@ export class SqliteKVDatabase {
 
     for (let i = 0; i < unique_keys.length; i += chunk_size) {
       const chunk = unique_keys.slice(i, i + chunk_size);
-      const placeholders = chunk.map(() => '?').join(', ');
+      const placeholders = chunk.map(() => "?").join(", ");
       const rows = await this.executeQuery<SqliteRawRecord[]>(
         `SELECT ${select_fields} FROM "${this.table_name}" WHERE "key" IN (${placeholders})`,
         chunk,
@@ -427,20 +499,23 @@ export class SqliteKVDatabase {
   private async upsertEntries(
     entries: Array<[string, any]>,
     query_runner?: QueryRunner,
+    dedupe_entries: boolean = true,
   ): Promise<void> {
-    const deduped_entries = dedupeEntriesByKey(entries);
-    if (deduped_entries.length === 0) {
+    const entries_to_write = dedupe_entries
+      ? dedupeEntriesByKey(entries)
+      : entries;
+    if (entries_to_write.length === 0) {
       return;
     }
 
     const safe_batch_size = normalizePositiveInteger(
-      deduped_entries.length,
+      entries_to_write.length,
       SQLITE_SAFE_WRITE_BATCH_SIZE,
       SQLITE_SAFE_WRITE_BATCH_SIZE,
     );
 
-    for (let i = 0; i < deduped_entries.length; i += safe_batch_size) {
-      const batch = deduped_entries.slice(i, i + safe_batch_size);
+    for (let i = 0; i < entries_to_write.length; i += safe_batch_size) {
+      const batch = entries_to_write.slice(i, i + safe_batch_size);
       const values_sql: string[] = [];
       const params: any[] = [];
 
@@ -454,7 +529,7 @@ export class SqliteKVDatabase {
       await this.executeQuery(
         `
           INSERT INTO "${this.table_name}" ("key", "value", "created_at", "updated_at")
-          VALUES ${values_sql.join(', ')}
+          VALUES ${values_sql.join(", ")}
           ON CONFLICT("key") DO UPDATE SET
             "value" = excluded."value",
             "updated_at" = ${SQLITE_CURRENT_TIMESTAMP_SQL}
@@ -478,7 +553,7 @@ export class SqliteKVDatabase {
 
     for (let i = 0; i < unique_keys.length; i += SQLITE_SAFE_IN_BATCH_SIZE) {
       const chunk = unique_keys.slice(i, i + SQLITE_SAFE_IN_BATCH_SIZE);
-      const placeholders = chunk.map(() => '?').join(', ');
+      const placeholders = chunk.map(() => "?").join(", ");
       await this.executeQuery(
         `DELETE FROM "${this.table_name}" WHERE "key" IN (${placeholders})`,
         chunk,
@@ -489,7 +564,9 @@ export class SqliteKVDatabase {
         [],
         query_runner,
       );
-      deleted_count += Number((rows[0] as { count?: number | string })?.count || 0);
+      deleted_count += Number(
+        (rows[0] as { count?: number | string })?.count || 0,
+      );
     }
 
     return deleted_count;
@@ -497,8 +574,9 @@ export class SqliteKVDatabase {
 
   private resolveGetOptions(
     options_or_expire?: number | GetOptions,
-  ): Required<Pick<GetOptions, 'include_timestamps'>> & Pick<GetOptions, 'expire'> {
-    if (typeof options_or_expire === 'number') {
+  ): Required<Pick<GetOptions, "include_timestamps">> &
+    Pick<GetOptions, "expire"> {
+    if (typeof options_or_expire === "number") {
       return {
         expire: options_or_expire,
         include_timestamps: false,
@@ -566,7 +644,8 @@ export class SqliteKVDatabase {
       return null;
     }
 
-    const { expire, include_timestamps } = this.resolveGetOptions(options_or_expire);
+    const { expire, include_timestamps } =
+      this.resolveGetOptions(options_or_expire);
     const created_at = this.normalizeDate(record.created_at);
 
     if (this.isExpired(created_at, expire)) {
@@ -602,8 +681,8 @@ export class SqliteKVDatabase {
     this.initializing_promise = (async () => {
       if (!this.data_source.isInitialized) {
         await this.data_source.initialize();
-        await this.data_source.query('PRAGMA journal_mode=WAL;');
-        await this.data_source.query('PRAGMA busy_timeout=5000;');
+        await this.data_source.query("PRAGMA journal_mode=WAL;");
+        await this.data_source.query("PRAGMA busy_timeout=5000;");
       }
 
       this.db = this.data_source.getRepository(this.custom_kv_store);
@@ -620,24 +699,24 @@ export class SqliteKVDatabase {
                 name: this.table_name,
                 columns: [
                   {
-                    name: 'key',
-                    type: 'varchar',
-                    length: '255',
+                    name: "key",
+                    type: "varchar",
+                    length: "255",
                     isPrimary: true,
                   },
                   {
-                    name: 'value',
+                    name: "value",
                     type: this.type_handler.column_type,
                     isNullable: true,
                   },
                   {
-                    name: 'created_at',
-                    type: 'datetime',
+                    name: "created_at",
+                    type: "datetime",
                     default: SQLITE_CURRENT_TIMESTAMP_SQL,
                   },
                   {
-                    name: 'updated_at',
-                    type: 'datetime',
+                    name: "updated_at",
+                    type: "datetime",
                     default: SQLITE_CURRENT_TIMESTAMP_SQL,
                   },
                 ],
@@ -733,9 +812,12 @@ export class SqliteKVDatabase {
             query_runner,
           );
           const existing_value =
-            rows.length > 0 ? this.type_handler.deserialize(rows[0]!.value) : null;
+            rows.length > 0
+              ? this.type_handler.deserialize(rows[0]!.value)
+              : null;
           const merged_value = deepMergeJsonValues(existing_value, value);
-          const serialized_merged_value = this.type_handler.serialize(merged_value);
+          const serialized_merged_value =
+            this.type_handler.serialize(merged_value);
 
           if (
             rows.length > 0 &&
@@ -873,7 +955,7 @@ export class SqliteKVDatabase {
 
     let query = `SELECT ${select_fields} FROM "${this.table_name}"`;
     if (where_conditions.length > 0) {
-      query += ` WHERE ${where_conditions.join(' AND ')}`;
+      query += ` WHERE ${where_conditions.join(" AND ")}`;
     }
     query += ' ORDER BY "key" ASC';
 
@@ -907,7 +989,10 @@ export class SqliteKVDatabase {
       return {};
     }
 
-    const records = await this.getRawRecordsByKeys(unique_keys, include_timestamps);
+    const records = await this.getRawRecordsByKeys(
+      unique_keys,
+      include_timestamps,
+    );
     const record_map = new Map(records.map((record) => [record.key, record]));
     const result: Record<
       string,
@@ -947,10 +1032,10 @@ export class SqliteKVDatabase {
 
     let query = `SELECT ${select_fields} FROM "${this.table_name}"`;
     if (where_conditions.length > 0) {
-      query += ` WHERE ${where_conditions.join(' AND ')}`;
+      query += ` WHERE ${where_conditions.join(" AND ")}`;
     }
     query += ' ORDER BY "created_at" DESC';
-    query += ' LIMIT ?';
+    query += " LIMIT ?";
     params.push(normalizePositiveInteger(limit, 100, Number.MAX_SAFE_INTEGER));
 
     const records = (await this._withRetry(() =>
@@ -1005,15 +1090,23 @@ export class SqliteKVDatabase {
   ): Promise<{ data: string[]; next_cursor: string | null }> {
     await this.ensureInitialized();
 
-    const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
-    const cursor_operator = order_by === 'DESC' ? '<' : '>';
+    const order_by = options?.order_by === "DESC" ? "DESC" : "ASC";
+    const cursor_operator = order_by === "DESC" ? "<" : ">";
     const limit = normalizePositiveInteger(options?.limit, 100, 1000);
     const params: any[] = [];
     const where_conditions: string[] = [];
 
     if (options?.prefix) {
-      params.push(`${escapeLikePattern(options.prefix)}%`);
-      where_conditions.push(`"key" LIKE ? ESCAPE '\\'`);
+      const prefix_end = buildPrefixRangeExclusiveEnd(options.prefix);
+      if (prefix_end) {
+        params.push(options.prefix);
+        where_conditions.push(`"key" >= ?`);
+        params.push(prefix_end);
+        where_conditions.push(`"key" < ?`);
+      } else {
+        params.push(`${escapeLikePattern(options.prefix)}%`);
+        where_conditions.push(`"key" LIKE ? ESCAPE '\\'`);
+      }
     }
 
     if (options?.cursor) {
@@ -1023,7 +1116,7 @@ export class SqliteKVDatabase {
 
     let query = `SELECT "key" FROM "${this.table_name}"`;
     if (where_conditions.length > 0) {
-      query += ` WHERE ${where_conditions.join(' AND ')}`;
+      query += ` WHERE ${where_conditions.join(" AND ")}`;
     }
     query += ` ORDER BY "key" ${order_by} LIMIT ?`;
     params.push(limit + 1);
@@ -1037,7 +1130,9 @@ export class SqliteKVDatabase {
 
     return {
       data: page_rows.map((row) => row.key),
-      next_cursor: has_more ? page_rows[page_rows.length - 1]?.key || null : null,
+      next_cursor: has_more
+        ? page_rows[page_rows.length - 1]?.key || null
+        : null,
     };
   }
 
@@ -1050,15 +1145,23 @@ export class SqliteKVDatabase {
     await this.ensureInitialized();
 
     const include_timestamps = options?.include_timestamps === true;
-    const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
-    const cursor_operator = order_by === 'DESC' ? '<' : '>';
+    const order_by = options?.order_by === "DESC" ? "DESC" : "ASC";
+    const cursor_operator = order_by === "DESC" ? "<" : ">";
     const limit = normalizePositiveInteger(options?.limit, 100, 1000);
     const params: any[] = [];
     const where_conditions: string[] = [];
 
     if (options?.prefix) {
-      params.push(`${escapeLikePattern(options.prefix)}%`);
-      where_conditions.push(`"key" LIKE ? ESCAPE '\\'`);
+      const prefix_end = buildPrefixRangeExclusiveEnd(options.prefix);
+      if (prefix_end) {
+        params.push(options.prefix);
+        where_conditions.push(`"key" >= ?`);
+        params.push(prefix_end);
+        where_conditions.push(`"key" < ?`);
+      } else {
+        params.push(`${escapeLikePattern(options.prefix)}%`);
+        where_conditions.push(`"key" LIKE ? ESCAPE '\\'`);
+      }
     }
 
     if (options?.cursor) {
@@ -1068,7 +1171,7 @@ export class SqliteKVDatabase {
 
     let query = `SELECT ${this.buildSelectFields(include_timestamps)} FROM "${this.table_name}"`;
     if (where_conditions.length > 0) {
-      query += ` WHERE ${where_conditions.join(' AND ')}`;
+      query += ` WHERE ${where_conditions.join(" AND ")}`;
     }
     query += ` ORDER BY "key" ${order_by} LIMIT ?`;
     params.push(limit + 1);
@@ -1080,7 +1183,10 @@ export class SqliteKVDatabase {
     return {
       data: page_rows.reduce(
         (acc, record) => {
-          acc[record.key] = this.formatRecordValue<T>(record, include_timestamps);
+          acc[record.key] = this.formatRecordValue<T>(
+            record,
+            include_timestamps,
+          );
           return acc;
         },
         {} as Record<
@@ -1113,6 +1219,7 @@ export class SqliteKVDatabase {
             await this.upsertEntries(
               deduped_entries.slice(i, i + safe_batch_size),
               query_runner,
+              false,
             );
           }
         }),
@@ -1124,7 +1231,9 @@ export class SqliteKVDatabase {
     await this.ensureInitialized();
     return this.withWriteLock(() =>
       this._withRetry(() =>
-        this.withTransaction((query_runner) => this.deleteKeys(keys, query_runner)),
+        this.withTransaction((query_runner) =>
+          this.deleteKeys(keys, query_runner),
+        ),
       ),
     );
   }
@@ -1132,7 +1241,9 @@ export class SqliteKVDatabase {
   async clear(): Promise<void> {
     await this.ensureInitialized();
     await this.withWriteLock(() =>
-      this._withRetry(() => this.data_source.query(`DELETE FROM "${this.table_name}"`)),
+      this._withRetry(() =>
+        this.data_source.query(`DELETE FROM "${this.table_name}"`),
+      ),
     );
   }
 
@@ -1154,13 +1265,17 @@ export class SqliteKVDatabase {
         this.value_type !== SqliteValueType.TEXT &&
         this.value_type !== SqliteValueType.JSON
       ) {
-        throw new Error(`Fuzzy search not supported for ${this.value_type} type`);
+        throw new Error(
+          `Fuzzy search not supported for ${this.value_type} type`,
+        );
       }
 
       const rows = await this._withRetry(() =>
         this.data_source.query(
           `SELECT "key" FROM "${this.table_name}" WHERE "value" LIKE ? ESCAPE '\\' ORDER BY "key" ASC`,
-          [`%${escapeLikePattern(String(this.type_handler.serialize(value)))}%`],
+          [
+            `%${escapeLikePattern(String(this.type_handler.serialize(value)))}%`,
+          ],
         ),
       );
       return (rows as Array<{ key: string }>).map((record) => record.key);
@@ -1191,7 +1306,7 @@ export class SqliteKVDatabase {
     options?: {
       limit?: number;
       offset?: number;
-      order_by?: 'ASC' | 'DESC';
+      order_by?: "ASC" | "DESC";
       include_timestamps?: boolean;
     },
   ): Promise<
@@ -1200,19 +1315,28 @@ export class SqliteKVDatabase {
     await this.ensureInitialized();
 
     if (!prefix) {
-      throw new Error('Prefix cannot be empty');
+      throw new Error("Prefix cannot be empty");
     }
 
     const include_timestamps = options?.include_timestamps === true;
-    const order_by = options?.order_by === 'DESC' ? 'DESC' : 'ASC';
-    const params: any[] = [`${escapeLikePattern(prefix)}%`];
+    const order_by = options?.order_by === "DESC" ? "DESC" : "ASC";
+    const params: any[] = [];
     const select_fields = this.buildSelectFields(include_timestamps);
+    const prefix_end = buildPrefixRangeExclusiveEnd(prefix);
     let query = `
       SELECT ${select_fields}
       FROM "${this.table_name}"
-      WHERE "key" LIKE ? ESCAPE '\\'
+      WHERE ${
+        prefix_end ? `"key" >= ? AND "key" < ?` : `"key" LIKE ? ESCAPE '\\'`
+      }
       ORDER BY "key" ${order_by}
     `;
+
+    if (prefix_end) {
+      params.push(prefix, prefix_end);
+    } else {
+      params.push(`${escapeLikePattern(prefix)}%`);
+    }
 
     query = appendSqliteLimitOffset(query, params, options);
 
